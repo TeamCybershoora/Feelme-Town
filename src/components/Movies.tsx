@@ -1,0 +1,385 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import Image from 'next/image';
+import MoviePopup from './MoviePopup';
+
+type Industry =
+  | 'ALL'
+  | 'BOLLYWOOD'
+  | 'TOLLYWOOD'
+  | 'KOLLYWOOD'
+  | 'MOLLYWOOD'
+  | 'SANDALWOOD'
+  | 'MARATHI'
+  | 'PUNJABI'
+  | 'BENGALI';
+
+interface Movie {
+  id: number;
+  title: string;
+  year: number;
+  rating: number;
+  image: string;
+  description: string;
+  isSubscription: boolean;
+  isFollowing: boolean;
+  genre?: string;
+}
+
+interface MoviesProps {
+  searchTerm?: string;
+  selectedYear?: string;     // "2024"
+  selectedGenre?: string;    // TMDB genre id like "28"
+  itemsPerPage?: number;     // client-side slice size
+  currentPage?: number;      // server pagination page
+  language?: string;         // e.g., 'en-US' or 'hi-IN'
+  industry?: Industry;       // new filter
+  selectedRows?: number;     // number of rows to display
+}
+
+function mapIndustry(industry: Industry) {
+  switch (industry) {
+    case 'BOLLYWOOD':   return { region: 'IN', language: 'hi-IN', wol: 'hi' };
+    case 'TOLLYWOOD':   return { region: 'IN', language: 'te-IN', wol: 'te' };
+    case 'KOLLYWOOD':   return { region: 'IN', language: 'ta-IN', wol: 'ta' };
+    case 'MOLLYWOOD':   return { region: 'IN', language: 'ml-IN', wol: 'ml' };
+    case 'SANDALWOOD':  return { region: 'IN', language: 'kn-IN', wol: 'kn' };
+    case 'MARATHI':     return { region: 'IN', language: 'mr-IN', wol: 'mr' };
+    case 'PUNJABI':     return { region: 'IN', language: 'pa-IN', wol: 'pa' };
+    case 'BENGALI':     return { region: 'IN', language: 'bn-IN', wol: 'bn' };
+    case 'ALL':
+    default:            return { region: '', language: 'en-US', wol: '' };
+  }
+}
+
+// Card
+function MovieCard({ movie, onCardClick }: { movie: Movie; onCardClick: (movie: Movie) => void }) {
+  const [isHovered, setIsHovered] = useState(false);
+
+  const handleCardClick = () => {
+    onCardClick(movie);
+  };
+
+  return (
+    <div
+      className={`movie-card ${isHovered ? 'hovered' : ''}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onClick={handleCardClick}
+    >
+      <div className="card-image-container">
+        <Image
+          src={movie.image}
+          alt={movie.title}
+          fill
+          className="card-image"
+          style={{ objectFit: 'cover' }}
+          onError={(e) => { (e.target as HTMLImageElement).src = '/bg.png'; }}
+        />
+        <div className="gradient-overlay"></div>
+        <div className="rating-corner">
+          <div className="rating">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+            </svg>
+            <span>{movie.rating}</span>
+          </div>
+        </div>
+         <div className="movie-title-overlay">
+           <h3 className="movie-title" title={movie.title}>{movie.title}</h3>
+           <p className="movie-year">({movie.year})</p>
+         </div>
+        <button className="play-button">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5V19L19 12L8 5Z" />
+          </svg>
+        </button>
+        {movie.isFollowing && <div className="following-badge">Following Now</div>}
+        {movie.isSubscription && <div className="subscription-badge">Subscription</div>}
+      </div>
+
+      <style jsx>{`
+        .movie-card{background:#000;border-radius:16px;overflow:hidden;transition:.4s;border:1px solid rgba(139,69,255,.1);position:relative;cursor:pointer;height:350px}
+        .movie-card:hover{transform:translateY(-8px) scale(1.02);border-color:rgba(139,69,255,.3);box-shadow:0 20px 40px rgba(139,69,255,.2)}
+        .card-image-container{position:relative;width:100%;height:100%}
+        .card-image{transition:transform .4s ease}
+        .movie-card:hover .card-image{transform:scale(1.1)}
+        .gradient-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.3) 50%,rgba(0,0,0,.8));z-index:1}
+        .rating-corner{position:absolute;top:16px;right:16px;z-index:3}
+        .rating{display:flex;align-items:center;gap:4px;background:rgba(0,0,0,.7);padding:6px 10px;border-radius:20px;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.2)}
+        .rating svg{color:#FFD700}
+        .rating span{color:#fff;font-size:.9rem;font-weight:600;font-family:'Paralucent-Medium',Arial,sans-serif}
+        .movie-title-overlay{position:absolute;bottom:60px;left:16px;right:16px;z-index:3}
+        .movie-title{color:#fff;font-size:1.1rem;font-weight:600;font-family:'Paralucent-DemiBold',Arial,sans-serif;line-height:1.3;text-shadow:2px 2px 4px rgba(0,0,0,.8);margin:0 0 4px}
+        .movie-year{color:rgba(255,255,255,.8);font-size:.9rem;font-weight:400;margin:0;text-shadow:1px 1px 2px rgba(0,0,0,.8)}
+        .play-button{position:absolute;bottom:16px;right:16px;background:rgba(255,255,255,.9);border:none;border-radius:50%;width:50px;height:50px;display:flex;align-items:center;justify-content:center;color:#000;cursor:pointer;transition:.3s;box-shadow:0 4px 15px rgba(0,0,0,.3);z-index:3}
+        .play-button:hover{background:#fff;transform:scale(1.1);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+        .following-badge{position:absolute;top:16px;left:16px;background:linear-gradient(135deg,#8b45ff,#6b2cff);color:#fff;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:600;font-family:'Paralucent-Medium',Arial,sans-serif;z-index:3;animation:pulse 2s infinite}
+        .subscription-badge{position:absolute;top:50px;left:16px;background:linear-gradient(135deg,#ff6b35,#ff8c42);color:#fff;padding:4px 8px;border-radius:12px;font-size:.7rem;font-weight:600;font-family:'Paralucent-Medium',Arial,sans-serif;z-index:3}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.8}}
+         @media (max-width:768px){
+           .movie-card{height:10rem}
+           .card-image-container{height:10rem}
+           .movie-title{font-size:0.75rem;bottom:2.5rem;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+           .movie-year{font-size:0.6rem}
+           .rating{font-size:0.6rem;padding:3px 6px}
+           .rating span{font-size:0.6rem}
+           .play-button{width:28px;height:28px;bottom:0.8rem;right:0.8rem}
+           .following-badge{display:none}
+           .subscription-badge{display:none}
+           .rating-corner{top:0.6rem;right:0.6rem}
+           .movie-title-overlay{bottom:2.5rem;left:0.8rem;right:0.8rem}
+         }
+      `}</style>
+    </div>
+  );
+}
+
+export default function Movies({
+  searchTerm = '',
+  selectedYear = '',
+  selectedGenre = '',
+  itemsPerPage = 20,
+  currentPage = 1,
+  language,                 // optional override
+  industry = 'ALL',
+  selectedRows = 3,
+}: MoviesProps) {
+  const [movies, setMovies] = useState<Movie[]>([]);
+  const [filteredMovies, setFilteredMovies] = useState<Movie[]>([]);
+  const [visibleMovies, setVisibleMovies] = useState<Movie[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
+
+  const handleCardClick = (movie: Movie) => {
+    setSelectedMovie(movie);
+    setIsPopupOpen(true);
+  };
+
+  const handleClosePopup = () => {
+    setIsPopupOpen(false);
+    setSelectedMovie(null);
+  };
+
+  const fetchMovies = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const map = mapIndustry(industry);
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        language: language || map.language || 'en-US',
+      });
+
+      // Industry-only filters when not searching
+      if (!searchTerm && map.region) params.set('region', map.region);
+      if (!searchTerm && map.wol) params.set('wol', map.wol); // server maps to with_original_language
+
+      // Search or Discover filters
+      if (searchTerm) params.set('query', searchTerm);
+      if (!searchTerm && selectedYear) params.set('year', selectedYear);
+      if (!searchTerm && selectedGenre) params.set('genre', selectedGenre);
+
+      const response = await fetch(`/api/tmdb?${params.toString()}`);
+      if (!response.ok) throw new Error('Failed to fetch movies');
+
+      const data = await response.json();
+
+      const transformed: Movie[] = (data.results ?? []).map((m: unknown, index: number) => {
+        const movie = m as {
+          id: number;
+          title?: string;
+          name?: string;
+          release_date?: string;
+          first_air_date?: string;
+          vote_average?: number;
+          poster_path?: string;
+          overview?: string;
+          genre_ids?: number[];
+        };
+        return {
+          id: movie.id,
+          title: movie.title ?? movie.name ?? 'Untitled',
+          year: movie.release_date
+            ? new Date(movie.release_date).getFullYear()
+            : (movie.first_air_date ? new Date(movie.first_air_date).getFullYear() : 2023),
+          rating: parseFloat(((movie.vote_average ?? 0) / 2).toFixed(1)), // 10 -> 5 scale
+          image: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '/bg.png',
+          description: movie.overview || 'No description available',
+          isSubscription: Math.random() > 0.6,
+          isFollowing: index < 3,
+          genre: Array.isArray(movie.genre_ids) && movie.genre_ids.length ? String(movie.genre_ids) : 'Action',
+        };
+      });
+
+      setMovies(transformed);
+    } catch (err) {
+      setError('Failed to load movies. Please try again later.');
+      setMovies((prev) =>
+        prev.length
+          ? prev
+          : [{
+              id: 1, title: 'Fallback Movie', year: 2023, rating: 4.2,
+              image: '/bg.png', description: 'Fallback description.',
+              isSubscription: true, isFollowing: true,
+            }]
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMovies();
+  }, [currentPage, searchTerm, selectedYear, selectedGenre, industry, language]);
+
+  // Client-side filter (optional redundancy)
+  useEffect(() => {
+    const filtered = movies.filter((movie) => {
+      const matchesSearch = movie.title.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesYear = !selectedYear || movie.year.toString() === selectedYear;
+      const matchesGenre = !selectedGenre || movie.genre === selectedGenre;
+      return matchesSearch && matchesYear && matchesGenre;
+    });
+    setFilteredMovies(filtered);
+  }, [movies, searchTerm, selectedYear, selectedGenre]);
+
+  useEffect(() => {
+    const startIndex = 0;
+    const endIndex = itemsPerPage;
+    const currentMovies = filteredMovies.slice(startIndex, endIndex);
+    setVisibleMovies([]);
+    const timer = setTimeout(() => setVisibleMovies(currentMovies), 300);
+    return () => clearTimeout(timer);
+  }, [filteredMovies, currentPage, itemsPerPage]);
+
+  if (error) {
+    return (
+       <div className="error-container">
+         <div className="error-message">
+           <h3>Oops! Something went wrong</h3>
+           <p>{error}</p>
+           <button onClick={() => fetchMovies()} className="retry-button">Try Again</button>
+         </div>
+         <style jsx>{`
+           .error-container { display: flex; justify-content: center; align-items: center; min-height: 400px; padding: 2rem; }
+           .error-message { text-align: center; color: #ffffff; background: rgba(255, 69, 69, 0.1); padding: 2rem; border-radius: 16px; border: 1px solid rgba(255, 69, 69, 0.2); }
+           .error-message h3 { margin: 0 0 1rem 0; color: #ff4545; }
+           .retry-button { background: linear-gradient(135deg, #8b45ff 0%, #6b2cff 100%); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; margin-top: 1rem; transition: all 0.3s ease; }
+           .retry-button:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(139, 69, 255, 0.3); }
+         `}</style>
+       </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+       <div className="loading-grid">
+         {Array.from({ length: itemsPerPage }).map((_, index) => (
+           <div key={index} className="loading-card">
+             <div className="loading-shimmer"></div>
+           </div>
+         ))}
+         <style jsx>{`
+           .loading-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; max-width: 1400px; margin: 0 auto; padding: 0 1rem; }
+           .loading-card { background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 16px; height: 350px; overflow: hidden; position: relative; }
+           .loading-shimmer { position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(139,69,255,0.1), transparent); animation: shimmer 2s infinite; }
+           @keyframes shimmer { 0% { left: -100%; } 100% { left: 100%; } }
+           @media (max-width: 1200px) { .loading-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; } }
+           @media (max-width: 768px) { .loading-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 0 0.5rem; } }
+           @media (max-width: 480px) { .loading-grid { grid-template-columns: 1fr; gap: 12px; } }
+         `}</style>
+       </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="movie-grid">
+        {visibleMovies.length === 0 ? (
+          <div className="no-results">
+            <h3>No movies found</h3>
+            <p>Try adjusting your search criteria</p>
+          </div>
+        ) : (
+          visibleMovies.map((movie, index) => (
+            <div
+              key={movie.id}
+              className="movie-item"
+              style={{ animationDelay: `${index * 0.1}s`, animation: 'fadeInUp 0.6s ease-out forwards' }}
+            >
+              <MovieCard movie={movie} onCardClick={handleCardClick} />
+            </div>
+           ))
+         )}
+      </div>
+
+      <MoviePopup 
+        movie={selectedMovie} 
+        isOpen={isPopupOpen} 
+        onClose={handleClosePopup} 
+      />
+
+      <style jsx>{`
+        .movie-grid { 
+          display: grid; 
+          grid-template-columns: repeat(3, 1fr); 
+          gap: 24px; 
+          max-width: 1400px; 
+          margin: 0 auto; 
+          padding: 0 1rem; 
+          grid-template-rows: repeat(${selectedRows}, auto);
+        }
+        .movie-item { opacity: 0; transform: translateY(30px); }
+        @keyframes fadeInUp { to { opacity: 1; transform: translateY(0); } }
+        .no-results { grid-column: 1 / -1; text-align: center; color: rgba(255,255,255,0.7); padding: 3rem; }
+        .no-results h3 { margin: 0 0 1rem 0; font-size: 1.5rem; }
+        
+        @media (min-width: 1200px) { 
+          .movie-grid { 
+            grid-template-columns: repeat(4, 1fr); 
+            gap: 24px; 
+          } 
+        }
+        @media (max-width: 1200px) and (min-width: 769px) { 
+          .movie-grid { 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 20px; 
+          } 
+        }
+        @media (max-width: 768px) { 
+          .movie-grid { 
+            grid-template-columns: repeat(3, 1fr) !important; 
+            gap: 8px; 
+            padding: 0 0.5rem; 
+            max-width: 100%;
+            margin: 0 auto;
+            display: grid;
+          } 
+          
+          .movie-item {
+            min-width: 0;
+          }
+        }
+        @media (max-width: 480px) { 
+          .movie-grid { 
+            grid-template-columns: repeat(3, 1fr) !important; 
+            gap: 6px; 
+            padding: 0 0.5rem;
+            max-width: 100%;
+            margin: 0 auto;
+            display: grid;
+          } 
+          
+          .movie-item {
+            min-width: 0;
+          }
+        }
+      `}</style>
+    </>
+  );
+}

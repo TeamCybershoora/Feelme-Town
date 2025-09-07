@@ -1,13 +1,6 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #000000;
+  --foreground: #ffffff;
 }
 
 html,
@@ -19,7 +12,7 @@ body {
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Paralucent-Medium', 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -35,8 +28,38 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+html {
+  color-scheme: dark;
+}
+
+
+@font-face {
+  font-family: 'Paralucent-DemiBold';
+  src: url('/fonts/Paralucent-DemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: bold;
+  font-display: swap;
+  font-preload: true;
+}
+@font-face {
+  font-family: 'Paralucent-Medium';
+  src: url('/fonts/Paralucent-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  font-preload: true;
+}
+@font-face {
+  font-family: 'ParalucentCond-DemiBold';
+  src: url('/fonts/ParalucentCond-DemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: bold;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'ParalucentCond-Medium';
+  src: url('/fonts/ParalucentCond-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
 }
