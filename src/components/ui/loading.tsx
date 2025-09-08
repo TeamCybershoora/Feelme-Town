@@ -65,10 +65,7 @@ const Loading = () => {
     return (
       <div style={{
         minHeight: '100vh',
-        backgroundImage: 'url(/load-bg.jpeg)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
+        backgroundColor: '#000000',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -88,21 +85,33 @@ const Loading = () => {
               style={{
                 height: '150px',
                 width: 'auto',
-                filter: 'drop-shadow(0 0 30px rgba(255, 255, 255, 0.4))',
+                filter: 'drop-shadow(0 0 30px rgba(255, 69, 69, 0.4))',
                 maxWidth: '90vw'
               }}
               className="logo-image"
             />
           </div>
           
-          <p style={{ color: '#ffffff', fontSize: '1.5rem', fontWeight: '300' }}>
-            Welcome to your cinematic universe
+          <h1 style={{ 
+            color: '#ffffff', 
+            fontSize: '3.5rem', 
+            fontWeight: '600',
+            fontFamily: 'Paralucent-DemiBold, Arial, sans-serif',
+            textShadow: '0 0 20px rgba(255, 69, 69, 0.3)',
+            animation: 'titleGlow 3s ease-in-out infinite alternate',
+            marginBottom: '1rem'
+          }}>
+            Welcome
+          </h1>
+          
+          <p style={{ color: '#ffffff', fontSize: '1.5rem', fontWeight: '300', marginBottom: '2rem' }}>
+            to your cinematic universe
           </p>
           <div style={{
             marginTop: '2rem',
             width: '8rem',
             height: '0.25rem',
-            background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+            background: 'linear-gradient(135deg, #ff4545, #ff2c2c)',
             margin: '2rem auto 0',
             borderRadius: '0.125rem'
           }}></div>
@@ -118,26 +127,14 @@ const Loading = () => {
       left: 0,
       right: 0,
       bottom: 0,
-      backgroundImage: 'url(/load-bg.jpeg)',
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat',
+      backgroundColor: '#000000',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
       color: '#ffffff',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
+      fontFamily: 'Paralucent-Medium, Arial, sans-serif'
     }}>
-      {/* Dark overlay for better text visibility */}
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.6)'
-      }}></div>
 
       {/* Main content */}
       <div style={{ 
@@ -165,6 +162,18 @@ const Loading = () => {
           />
         </div>
         
+        <h1 style={{ 
+          fontSize: '3.5rem', 
+          marginBottom: '2rem',
+          color: '#ffffff',
+          fontFamily: 'Paralucent-DemiBold, Arial, sans-serif',
+          fontWeight: '600',
+          textShadow: '0 0 20px rgba(255, 69, 69, 0.3)',
+          animation: 'titleGlow 3s ease-in-out infinite alternate'
+        }}>
+          Loading...
+        </h1>
+
         <p style={{ 
           fontSize: '1.25rem', 
           marginBottom: '3rem',
@@ -185,7 +194,7 @@ const Loading = () => {
           <div style={{
             width: `${progress}%`,
             height: '100%',
-            background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+            background: 'linear-gradient(135deg, #ff4545, #ff2c2c)',
             transition: 'width 0.3s ease',
             borderRadius: '2px'
           }}></div>
@@ -207,16 +216,13 @@ const Loading = () => {
           left: 0;
           right: 0;
           bottom: 0;
-          background-image: url(/load-bg.jpeg);
-          background-size: cover;
-          background-position: center;
-          background-repeat: no-repeat;
+          background-color: #000000;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
           color: #ffffff;
-          font-family: system-ui, -apple-system, sans-serif;
+          font-family: 'Paralucent-Medium', Arial, sans-serif;
         }
         
         .loading-overlay {
@@ -265,9 +271,18 @@ const Loading = () => {
         
         .loading-progress-bar {
           height: 100%;
-          background: linear-gradient(135deg, #dc2626, #ef4444);
+          background: linear-gradient(135deg, #ff4545, #ff2c2c);
           transition: width 0.3s ease;
           border-radius: 2px;
+        }
+        
+        @keyframes titleGlow {
+          0% {
+            text-shadow: 0 0 20px rgba(255, 69, 69, 0.3);
+          }
+          100% {
+            text-shadow: 0 0 30px rgba(255, 69, 69, 0.6), 0 0 40px rgba(255, 69, 69, 0.3);
+          }
         }
         
         .loading-percentage {

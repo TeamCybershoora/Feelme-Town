@@ -1,7 +1,7 @@
  
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import MoviePopup from './MoviePopup';
 
@@ -102,7 +102,7 @@ function MovieCard({ movie, onCardClick }: { movie: Movie; onCardClick: (movie: 
 
       <style jsx>{`
         .movie-card{background:#000;border-radius:16px;overflow:hidden;transition:.4s;border:1px solid rgba(139,69,255,.1);position:relative;cursor:pointer;height:350px}
-        .movie-card:hover{transform:translateY(-8px) scale(1.02);border-color:rgba(139,69,255,.3);box-shadow:0 20px 40px rgba(139,69,255,.2)}
+        .movie-card:hover{transform:translateY(-8px) scale(1.02);border-color:rgba(139,69,255,.3);box-shadow:0 20px 40px rgba(0,0,0,.3)}
         .card-image-container{position:relative;width:100%;height:100%}
         .card-image{transition:transform .4s ease}
         .movie-card:hover .card-image{transform:scale(1.1)}
@@ -165,7 +165,7 @@ export default function Movies({
     setSelectedMovie(null);
   };
 
-  const fetchMovies = async () => {
+  const fetchMovies = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
@@ -218,7 +218,7 @@ export default function Movies({
       });
 
       setMovies(transformed);
-    } catch (err) {
+    } catch {
       setError('Failed to load movies. Please try again later.');
       setMovies((prev) =>
         prev.length
@@ -232,11 +232,11 @@ export default function Movies({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentPage, searchTerm, selectedYear, selectedGenre, industry, language]);
 
   useEffect(() => {
     fetchMovies();
-  }, [currentPage, searchTerm, selectedYear, selectedGenre, industry, language]);
+  }, [currentPage, searchTerm, selectedYear, selectedGenre, industry, language, fetchMovies]);
 
   // Client-side filter (optional redundancy)
   useEffect(() => {
@@ -288,7 +288,7 @@ export default function Movies({
          <style jsx>{`
            .loading-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; max-width: 1400px; margin: 0 auto; padding: 0 1rem; }
            .loading-card { background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 16px; height: 350px; overflow: hidden; position: relative; }
-           .loading-shimmer { position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(139,69,255,0.1), transparent); animation: shimmer 2s infinite; }
+           .loading-shimmer { position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,69,69,0.1), transparent); animation: shimmer 2s infinite; }
            @keyframes shimmer { 0% { left: -100%; } 100% { left: 100%; } }
            @media (max-width: 1200px) { .loading-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; } }
            @media (max-width: 768px) { .loading-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 0 0.5rem; } }

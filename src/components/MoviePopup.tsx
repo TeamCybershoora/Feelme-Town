@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 
 interface Movie {
@@ -27,29 +27,14 @@ export default function MoviePopup({ movie, isOpen, onClose }: MoviePopupProps) 
   useEffect(() => {
     if (isOpen) {
       setIsVisible(true);
-      // Disable web app completely
       document.body.style.overflow = 'hidden';
-      document.body.style.pointerEvents = 'none';
-      document.body.style.userSelect = 'none';
-      
-      // Re-enable pointer events only for popup
-      const popupElement = document.querySelector('.popup-overlay');
-      if (popupElement) {
-        (popupElement as HTMLElement).style.pointerEvents = 'auto';
-      }
     } else {
       setIsVisible(false);
-      // Re-enable web app
       document.body.style.overflow = 'unset';
-      document.body.style.pointerEvents = 'auto';
-      document.body.style.userSelect = 'auto';
     }
 
     return () => {
-      // Cleanup - re-enable web app
       document.body.style.overflow = 'unset';
-      document.body.style.pointerEvents = 'auto';
-      document.body.style.userSelect = 'auto';
     };
   }, [isOpen]);
 
@@ -59,27 +44,27 @@ export default function MoviePopup({ movie, isOpen, onClose }: MoviePopupProps) 
     }
   };
 
-  const handleKeyDown = (e: KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       onClose();
     }
-  };
+  }, [onClose]);
 
   useEffect(() => {
     if (isOpen) {
       document.addEventListener('keydown', handleKeyDown);
       return () => document.removeEventListener('keydown', handleKeyDown);
     }
-  }, [isOpen]);
+  }, [isOpen, handleKeyDown]);
 
   if (!isOpen || !movie) return null;
 
+
   return (
-    <div 
-      className={`popup-overlay ${isVisible ? 'visible' : ''}`}
-      onClick={handleOverlayClick}
-    >
-      <div className="popup-container">
+    <>
+    <div className="overlay" onClick={handleOverlayClick}>
+      <div className="container">
+        {/* Close Button */}
         <button className="close-button" onClick={onClose}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
             <path
@@ -92,53 +77,80 @@ export default function MoviePopup({ movie, isOpen, onClose }: MoviePopupProps) 
           </svg>
         </button>
 
-        <div className="popup-content">
-          <div className="movie-image-section">
+        {/* Content */}
+        <div className="content-grid">
+          {/* Image Section */}
+          <div className="image-section">
             <div className="image-container">
               <Image
                 src={movie.image}
                 alt={movie.title}
                 fill
-                className="popup-image"
+                className="movie-image"
                 style={{ objectFit: 'cover' }}
                 onError={(e) => { (e.target as HTMLImageElement).src = '/bg.png'; }}
               />
+              
+              {/* Image Overlay */}
               <div className="image-overlay">
-                <div className="rating-badge">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-                  </svg>
-                  <span>{movie.rating}</span>
+                <div className="badges-container">
+                  {/* Rating Badge */}
+                  <div className="rating-badge">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="star-icon">
+                      <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                    </svg>
+                    <span>{movie.rating}</span>
+                  </div>
+                  
+                  {/* Following Badge */}
+                  {movie.isFollowing && (
+                    <div className="following-badge">
+                      Following Now
+                    </div>
+                  )}
+                  
+                  {/* Subscription Badge */}
+                  {movie.isSubscription && (
+                    <div className="subscription-badge">
+                      Subscription
+                    </div>
+                  )}
                 </div>
-                {movie.isFollowing && (
-                  <div className="following-badge">Following Now</div>
-                )}
-                {movie.isSubscription && (
-                  <div className="subscription-badge">Subscription</div>
-                )}
               </div>
             </div>
           </div>
 
-          <div className="movie-details-section">
-            <div className="movie-header">
-              <h1 className="movie-title">{movie.title}</h1>
-              <div className="movie-year">({movie.year})</div>
+          {/* Details Section */}
+          <div className="details-section">
+            {/* Header */}
+            <div className="header">
+              <h1 className="movie-title">
+                {movie.title}
+              </h1>
+              <div className="movie-year">
+                ({movie.year})
+              </div>
+              {movie.genre && (
+                <div className="genre-badge">
+                  {movie.genre}
+                </div>
+              )}
             </div>
 
-            <div className="movie-description">
-              <h3>Description</h3>
-              <p>{movie.description}</p>
+            {/* Description */}
+            <div className="description-section">
+              <h3 className="description-title">
+                Description
+              </h3>
+              <p className="description-text">
+                {movie.description}
+              </p>
             </div>
 
-            <div className="movie-actions">
-              <button className="play-button">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5V19L19 12L8 5Z" />
-                </svg>
-                <span>Play Now</span>
-              </button>
-              <button className="add-to-list-button">
+            {/* Action Buttons */}
+            <div className="buttons-container">
+              {/* Add to List Button */}
+              <button className="add-button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                   <path
                     d="M12 5V19M5 12H19"
@@ -150,356 +162,423 @@ export default function MoviePopup({ movie, isOpen, onClose }: MoviePopupProps) 
                 </svg>
                 <span>Add to List</span>
               </button>
+
+              {/* Play Button */}
+              <button className="play-button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5V19L19 12L8 5Z" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
-
-        <style jsx>{`
-          .popup-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.95);
-            backdrop-filter: blur(15px);
-            z-index: 9999;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 2rem;
-            opacity: 0;
-            visibility: hidden;
-            transition: all 0.3s ease;
-            overflow-y: auto;
-            pointer-events: auto;
-          }
-
-          .popup-overlay.visible {
-            opacity: 1;
-            visibility: visible;
-          }
-
-          .popup-container {
-            background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 100%);
-            border-radius: 20px;
-            border: 1px solid rgba(139, 69, 255, 0.3);
-            max-width: 900px;
-            width: 100%;
-            max-height: 90vh;
-            overflow-y: auto;
-            position: relative;
-            transform: scale(0.9) translateY(20px);
-            transition: all 0.3s ease;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.8);
-            pointer-events: auto;
-          }
-
-          .popup-overlay.visible .popup-container {
-            transform: scale(1) translateY(0);
-          }
-
-          .close-button {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #ffffff;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            z-index: 10;
-            backdrop-filter: blur(10px);
-          }
-
-          .close-button:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.1);
-          }
-
-          .popup-content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-            padding: 2rem;
-          }
-
-          .movie-image-section {
-            position: relative;
-          }
-
-          .image-container {
-            position: relative;
-            width: 100%;
-            height: 400px;
-            border-radius: 16px;
-            overflow: hidden;
-            border: 1px solid rgba(139, 69, 255, 0.2);
-          }
-
-          .popup-image {
-            transition: transform 0.3s ease;
-          }
-
-          .image-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(
-              180deg,
-              rgba(0, 0, 0, 0.1) 0%,
-              rgba(0, 0, 0, 0.3) 50%,
-              rgba(0, 0, 0, 0.7) 100%
-            );
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            padding: 1rem;
-          }
-
-          .rating-badge {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 8px 12px;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            align-self: flex-start;
-          }
-
-          .rating-badge svg {
-            color: #FFD700;
-          }
-
-          .rating-badge span {
-            color: #fff;
-            font-size: 1rem;
-            font-weight: 600;
-            font-family: 'Paralucent-Medium', Arial, sans-serif;
-          }
-
-          .following-badge {
-            background: linear-gradient(135deg, #8b45ff, #6b2cff);
-            color: #fff;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            font-family: 'Paralucent-Medium', Arial, sans-serif;
-            align-self: flex-start;
-            animation: pulse 2s infinite;
-          }
-
-          .subscription-badge {
-            background: linear-gradient(135deg, #ff6b35, #ff8c42);
-            color: #fff;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            font-family: 'Paralucent-Medium', Arial, sans-serif;
-            align-self: flex-start;
-            margin-top: 8px;
-          }
-
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.8; }
-          }
-
-          .movie-details-section {
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
-          }
-
-          .movie-header {
-            text-align: left;
-          }
-
-          .movie-title {
-            color: #ffffff;
-            font-size: 2.5rem;
-            font-weight: 700;
-            font-family: 'Paralucent-DemiBold', Arial, sans-serif;
-            margin: 0 0 0.5rem 0;
-            line-height: 1.2;
-            text-shadow: 0 0 20px rgba(139, 69, 255, 0.3);
-          }
-
-          .movie-year {
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 1.2rem;
-            font-weight: 400;
-            font-family: 'Paralucent-Medium', Arial, sans-serif;
-          }
-
-          .movie-description h3 {
-            color: #ffffff;
-            font-size: 1.3rem;
-            font-weight: 600;
-            font-family: 'Paralucent-DemiBold', Arial, sans-serif;
-            margin: 0 0 1rem 0;
-          }
-
-          .movie-description p {
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 1rem;
-            line-height: 1.6;
-            font-family: 'Paralucent-Medium', Arial, sans-serif;
-            margin: 0;
-          }
-
-          .movie-actions {
-            display: flex;
-            gap: 1rem;
-            margin-top: auto;
-          }
-
-          .play-button {
-            background: linear-gradient(135deg, #8b45ff 0%, #6b2cff 100%);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 12px;
-            font-size: 1rem;
-            font-weight: 600;
-            font-family: 'Paralucent-Medium', Arial, sans-serif;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.3s ease;
-            flex: 1;
-            justify-content: center;
-          }
-
-          .play-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(139, 69, 255, 0.4);
-          }
-
-          .add-to-list-button {
-            background: rgba(255, 255, 255, 0.1);
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 12px 24px;
-            border-radius: 12px;
-            font-size: 1rem;
-            font-weight: 600;
-            font-family: 'Paralucent-Medium', Arial, sans-serif;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-          }
-
-          .add-to-list-button:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: translateY(-2px);
-          }
-
-          /* Mobile Styles */
-          @media (max-width: 768px) {
-            .popup-overlay {
-              padding: 1rem;
-              align-items: center;
-            }
-
-            .popup-container {
-              max-height: 95vh;
-              border-radius: 16px;
-            }
-
-            .popup-content {
-              grid-template-columns: 1fr;
-              gap: 1.5rem;
-              padding: 1.5rem;
-            }
-
-            .image-container {
-              height: 250px;
-            }
-
-            .movie-title {
-              font-size: 1.8rem;
-            }
-
-            .movie-year {
-              font-size: 1rem;
-            }
-
-            .movie-description h3 {
-              font-size: 1.1rem;
-            }
-
-            .movie-description p {
-              font-size: 0.9rem;
-            }
-
-            .movie-actions {
-              flex-direction: column;
-            }
-
-            .play-button,
-            .add-to-list-button {
-              padding: 14px 20px;
-              font-size: 0.9rem;
-            }
-
-            .close-button {
-              top: 15px;
-              right: 15px;
-              width: 35px;
-              height: 35px;
-            }
-          }
-
-          @media (max-width: 480px) {
-            .popup-overlay {
-              padding: 0.5rem;
-              align-items: center;
-            }
-
-            .popup-content {
-              padding: 1rem;
-              gap: 1rem;
-            }
-
-            .image-container {
-              height: 200px;
-            }
-
-            .movie-title {
-              font-size: 1.5rem;
-            }
-
-            .movie-year {
-              font-size: 0.9rem;
-            }
-
-            .movie-description h3 {
-              font-size: 1rem;
-            }
-
-            .movie-description p {
-              font-size: 0.85rem;
-            }
-          }
-        `}</style>
       </div>
     </div>
+
+    <style jsx>{`
+      .overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.85);
+        backdrop-filter: blur(20px);
+        z-index: 999999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+        opacity: ${isVisible ? 1 : 0};
+        visibility: ${isVisible ? 'visible' : 'hidden'};
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow-y: auto;
+      }
+
+      @media (max-width: 768px) {
+        .overlay {
+          padding: 0.25rem;
+          align-items: center;
+          padding-top: 1rem;
+          padding-bottom: 1rem;
+        }
+      }
+
+      .container {
+        background: linear-gradient(145deg, #0f0f0f 0%, #1a1a1a 50%, #2d2d2d 100%);
+        border-radius: 24px;
+        border: 2px solid rgba(255, 69, 69, 0.4);
+        max-width: 950px;
+        width: 100%;
+        max-height: 85vh;
+        overflow-y: auto;
+        position: relative;
+        transform: ${isVisible ? 'scale(1) translateY(0)' : 'scale(0.8) translateY(30px)'};
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 
+          0 25px 50px rgba(0, 0, 0, 0.9),
+          0 0 100px rgba(255, 69, 69, 0.3),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      }
+
+      @media (max-width: 768px) {
+        .container {
+          max-width: 100%;
+          max-height: 95vh;
+          border-radius: 16px;
+          margin: 0 auto;
+          overflow: hidden;
+        }
+      }
+
+      .close-button {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        background: rgba(0, 0, 0, 0.6);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(15px);
+        z-index: 10;
+      }
+
+      .close-button:hover {
+        background: rgba(255, 0, 0, 0.2);
+        border-color: rgba(255, 0, 0, 0.5);
+        box-shadow: 0 0 20px rgba(255, 0, 0, 0.3);
+        transform: scale(1.1) rotate(90deg);
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        padding: 1rem;
+      }
+
+      @media (min-width: 768px) {
+        .content-grid {
+          gap: 1.5rem;
+          padding: 1.5rem;
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .content-grid {
+          grid-template-columns: 1fr 1fr;
+          gap: 2.5rem;
+          padding: 2.5rem;
+        }
+      }
+
+      .image-section {
+        position: relative;
+      }
+
+      .image-container {
+        position: relative;
+        width: 100%;
+        height: 250px;
+        border-radius: 16px;
+        overflow: hidden;
+        transition: all 0.3s ease;
+        border: 3px solid rgba(255, 69, 69, 0.3);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      }
+
+      @media (min-width: 768px) {
+        .image-container {
+          height: 300px;
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .image-container {
+          height: 450px;
+        }
+      }
+
+      .image-container:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 30px 60px rgba(255, 69, 69, 0.2);
+        border-color: rgba(255, 69, 69, 0.6);
+      }
+
+      .movie-image {
+        transition: transform 0.5s ease;
+      }
+
+      .movie-image:hover {
+        transform: scale(1.05);
+      }
+
+      .image-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 1.5rem;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.1) 0%, rgba(0, 0, 0, 0.4) 70%, rgba(0, 0, 0, 0.8) 100%);
+      }
+
+      .badges-container {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        align-items: flex-start;
+      }
+
+      .rating-badge {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        border-radius: 9999px;
+        color: white;
+        font-weight: bold;
+        font-size: 1.125rem;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(15px);
+        border: 2px solid rgba(255, 215, 0, 0.3);
+        box-shadow: 0 8px 20px rgba(255, 215, 0, 0.2);
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+      }
+
+      .star-icon {
+        color: #FFD700;
+        filter: drop-shadow(0 0 8px #FFD700);
+      }
+
+      .following-badge {
+        padding: 0.5rem 1rem;
+        border-radius: 9999px;
+        color: white;
+        font-weight: 600;
+        font-size: 0.875rem;
+        animation: pulse 2s infinite;
+        background: linear-gradient(135deg, #ff4545, #ff2c2c);
+        box-shadow: 0 0 20px rgba(255, 69, 69, 0.5);
+      }
+
+      .subscription-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        color: white;
+        font-weight: 600;
+        font-size: 0.75rem;
+        background: linear-gradient(135deg, #ff6b35, #ff8c42);
+        box-shadow: 0 0 15px rgba(255, 107, 53, 0.4);
+      }
+
+      .details-section {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      @media (min-width: 768px) {
+        .details-section {
+          gap: 1.5rem;
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .details-section {
+          gap: 2rem;
+        }
+      }
+
+      .header {
+        text-align: left;
+      }
+
+      .movie-title {
+        font-size: 1.5rem;
+        font-weight: 800;
+        line-height: 1.1;
+        margin-bottom: 0.25rem;
+        background: linear-gradient(135deg, #ffffff 0%, #e0e0e0 100%);
+        background-clip: text;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+       
+      }
+
+      @media (min-width: 768px) {
+        .movie-title {
+          font-size: 1.75rem;
+          margin-bottom: 0.5rem;
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .movie-title {
+          font-size: 2.25rem;
+        }
+      }
+
+      .movie-year {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 1rem;
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+      }
+
+      @media (min-width: 768px) {
+        .movie-year {
+          font-size: 1.25rem;
+          margin-bottom: 0.5rem;
+        }
+      }
+
+      .genre-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 16px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        background: rgba(255, 69, 69, 0.2);
+       
+        border: 1px solid rgba(255, 69, 69, 0.4);
+      }
+
+      .description-section {
+        margin-bottom: 0.5rem;
+      }
+
+      .description-title {
+        font-size: 1.25rem;
+        font-weight: bold;
+        color: white;
+        margin-bottom: 0.5rem;
+        text-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+      }
+
+      @media (min-width: 768px) {
+        .description-section {
+          margin-bottom: 1rem;
+        }
+
+        .description-title {
+          font-size: 1.5rem;
+          margin-bottom: 1rem;
+        }
+      }
+
+      .description-text {
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 0.875rem;
+        line-height: 1.5;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+
+      @media (min-width: 768px) {
+        .description-text {
+          font-size: 1rem;
+          line-height: 1.6;
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .description-text {
+          font-size: 1.125rem;
+        }
+      }
+
+      .buttons-container {
+        display: flex;
+        flex-direction: row;
+        gap: 0.75rem;
+        margin-top: auto;
+        align-items: center;
+        justify-content: flex-start;
+      }
+
+      @media (min-width: 768px) {
+        .buttons-container {
+          gap: 1rem;
+        }
+      }
+
+      .play-button {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+        background: linear-gradient(135deg, #ff4545 0%, #ff2c2c 100%);
+        box-shadow: 0 10px 30px rgba(255, 69, 69, 0.4);
+        border: none;
+      }
+
+      @media (min-width: 768px) {
+        .play-button {
+          width: 60px;
+          height: 60px;
+        }
+      }
+
+      .play-button:hover {
+        transform: translateY(-3px) scale(1.05);
+        box-shadow: 0 15px 40px rgba(255, 69, 69, 0.6);
+      }
+
+      .add-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        border-radius: 50px;
+        color: white;
+        font-weight: 600;
+        font-size: 0.875rem;
+        transition: all 0.3s ease;
+        width: 80%;
+        height: 50px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        backdrop-filter: blur(15px);
+      }
+
+      @media (min-width: 768px) {
+        .add-button {
+          padding: 1rem 1.5rem;
+          font-size: 1rem;
+          height: 60px;
+        }
+      }
+
+      .add-button:hover {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.5);
+        transform: translateY(-3px);
+        box-shadow: 0 10px 25px rgba(255, 255, 255, 0.1);
+      }
+
+      @keyframes pulse {
+        0%, 100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+    `}</style>
+    </>
   );
 }

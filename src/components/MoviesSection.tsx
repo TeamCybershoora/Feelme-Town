@@ -117,16 +117,16 @@ export default function MoviesSection() {
                     font-weight: 600;
                     color: #ffffff;
                     margin-bottom: 2rem;
-                    text-shadow: 0 0 20px rgba(139, 69, 255, 0.3);
+                    text-shadow: 0 0 20px rgba(255, 69, 69, 0.3);
                     animation: titleGlow 3s ease-in-out infinite alternate;
                 }
 
                 @keyframes titleGlow {
                     0% {
-                        text-shadow: 0 0 20px rgba(139, 69, 255, 0.3);
+                        text-shadow: 0 0 20px rgba(255, 69, 69, 0.3);
                     }
                     100% {
-                        text-shadow: 0 0 30px rgba(139, 69, 255, 0.6), 0 0 40px rgba(139, 69, 255, 0.3);
+                        text-shadow: 0 0 30px rgba(255, 69, 69, 0.6), 0 0 40px rgba(255, 69, 69, 0.3);
                     }
                 }
 

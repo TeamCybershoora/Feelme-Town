@@ -286,6 +286,7 @@ export default function SearchFilter({
           justify-content: center;
           gap: 2rem;
           flex-wrap: wrap;
+          align-items: center;
         }
 
         .dropdown-container {
@@ -372,19 +373,17 @@ export default function SearchFilter({
             width: 100%;
             max-width: 100%;
             margin: 0 auto;
-          }
-          
-          .filter-dropdowns .dropdown-container:nth-child(4),
-          .filter-dropdowns .dropdown-container:nth-child(5) {
-            grid-column: span 1;
+            justify-items: center;
           }
           
           .filter-dropdowns .dropdown-container:nth-child(4) {
             grid-column: 1;
+            justify-self: center;
           }
           
           .filter-dropdowns .dropdown-container:nth-child(5) {
             grid-column: 2;
+            justify-self: center;
           }
 
           .dropdown-container {
