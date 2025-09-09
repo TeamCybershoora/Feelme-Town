@@ -1,6 +1,47 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 const Portfolio = () => {
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  
+  // Array of images for slideshow
+  const images = [
+    {
+      src: "./images/theater1.webp", // You can replace with different images
+      alt: "FeelMe Town Couple",
+      title: "EROS (Couples) (FMT-Hall-1)",
+      description: "Premium amenities • Welcoming atmosphere • Memorable events"
+    },
+    {
+      src: "./images/theater2.webp",
+      alt: "FeelMe Town Friends",
+      title: "PHILIA (FRIENDS) (FMT-Hall-2)",
+      description: "Luxury seating • 4K Projection • Surround Sound"
+    },
+    {
+      src: "./images/theater3.webp", // You can replace with different images
+      alt: "FeelMe Town Relationsip & Love",
+      title: "PRAGMA (LOVE) (FMT-Hall-3)",
+      description: "Professional service • Creative solutions • Perfect execution"
+    },
+    {
+      src: "./images/theater4.webp", // You can replace with different images
+      alt: "FeelMe Town Event Planning",
+      title: "STORGE (FAMILY) (FMT-Hall-4)",
+      description: "Professional service • Creative solutions • Perfect execution"
+    }
+  ];
+
+  // Auto-advance slideshow
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentImageIndex((prevIndex) => 
+        prevIndex === images.length - 1 ? 0 : prevIndex + 1
+      );
+    }, 3000); // Change image every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [images.length]);
+
   return (
     <div className="portfolio-container">
       <div className="portfolio-content">
@@ -42,15 +83,25 @@ const Portfolio = () => {
         
         <div className="portfolio-image">
           <div className="image-frame">
-            <img 
-              src="/theatre-gallery-1.jpg" 
-              alt="FeelMe Town Private Theatre Experience"
-              className="theatre-image"
-            />
+            <div className="slideshow-container">
+              {images.map((image, index) => (
+                <img 
+                  key={index}
+                  src={image.src} 
+                  alt={image.alt}
+                  className={`theatre-image ${index === currentImageIndex ? 'active' : ''}`}
+                />
+              ))}
+              <div className="slideshow-gradient"></div>
+            </div>
             <div className="image-overlay">
               <div className="overlay-content">
-                <h4>Premium Private Theatre</h4>
-                <p>Luxury seating • 4K Projection • Surround Sound</p>
+                {images.map((image, index) => (
+                  <div key={index} className={`overlay-text ${index === currentImageIndex ? 'active' : ''}`}>
+                    <h4>{image.title}</h4>
+                    <p>{image.description}</p>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -155,11 +206,53 @@ const Portfolio = () => {
           border: 2px solid rgba(211, 187, 220, 0.3);
         }
         
-        .theatre-image {
+        .slideshow-container {
+          position: relative;
           width: 100%;
           height: 400px;
+          overflow: hidden;
+        }
+        
+        .slideshow-container::after {
+          content: '';
+          position: absolute;
+          bottom: -1px;
+          left: 0;
+          right: 0;
+          height: 120px;
+          background: linear-gradient(0deg, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.6) 50%, rgba(0, 0, 0, 0.5) 80%, transparent 100%);
+          backdrop-filter: blur(2px);
+          mask: linear-gradient(0deg, black 0%, black 50%, rgba(0, 0, 0, 0.8) 80%, transparent 100%);
+          -webkit-mask: linear-gradient(0deg, black 0%, black 50%, rgba(0, 0, 0, 0.8) 80%, transparent 100%);
+          border-radius: 0 0 16px 16px;
+          z-index: 1;
+          pointer-events: none;
+        }
+        
+        .theatre-image {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
           object-fit: cover;
-          display: block;
+          opacity: 0;
+          transition: opacity 1s ease-in-out;
+        }
+        
+        .theatre-image.active {
+          opacity: 1;
+        }
+        
+        .slideshow-gradient {
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 100px;
+          height: 100%;
+          background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.5));
+          z-index: 2;
+          pointer-events: none;
         }
         
         .image-overlay {
@@ -167,18 +260,41 @@ const Portfolio = () => {
           bottom: 0;
           left: 0;
           right: 0;
-          background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
-          padding: 2rem;
           color: white;
+          pointer-events: none;
         }
         
-        .overlay-content h4 {
+        .overlay-content {
+          position: relative;
+          z-index: 2;
+        }
+        
+        .overlay-text {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          opacity: 0;
+          transition: opacity 1s ease-in-out;
+          padding: 1rem 2rem 2rem 2rem;
+          border-radius: 0 0 16px 16px;
+          min-height: 120px;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+        }
+        
+        .overlay-text.active {
+          opacity: 1;
+        }
+        
+        .overlay-text h4 {
           font-size: 1.3rem;
           margin-bottom: 0.5rem;
           color: #EDBAFF;
         }
         
-        .overlay-content p {
+        .overlay-text p {
           font-size: 0.9rem;
           color: #d0d0d0;
           margin: 0;
@@ -206,7 +322,7 @@ const Portfolio = () => {
             padding: 1.5rem;
           }
           
-          .theatre-image {
+          .slideshow-container {
             height: 300px;
           }
         }
@@ -224,7 +340,7 @@ const Portfolio = () => {
             padding: 1rem;
           }
           
-          .theatre-image {
+          .slideshow-container {
             height: 250px;
           }
         }

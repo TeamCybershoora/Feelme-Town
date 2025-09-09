@@ -4,6 +4,7 @@ const WhyChooseUs: React.FC = () => {
     const [isArrowHovered, setIsArrowHovered] = useState(false);
     const [hoveredCard, setHoveredCard] = useState<number | null>(null);
     const [isMobile, setIsMobile] = useState(false);
+    const [clickedCard, setClickedCard] = useState<number | null>(null);
 
     // Check if mobile on component mount and window resize
     React.useEffect(() => {
@@ -16,6 +17,12 @@ const WhyChooseUs: React.FC = () => {
         
         return () => window.removeEventListener('resize', checkMobile);
     }, []);
+
+    const handleCardClick = (cardIndex: number) => {
+        if (isMobile) {
+            setClickedCard(clickedCard === cardIndex ? null : cardIndex);
+        }
+    };
 
     const styles = {
         container: {
@@ -37,7 +44,8 @@ const WhyChooseUs: React.FC = () => {
             height: '100%',
             background: 'transparent url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\' viewBox=\'0 0 100 100\'%3E%3Cg fill-opacity=\'0.4\'%3E%3Cpolygon fill=\'%23fff\' points=\'50 0 60 40 100 50 60 60 50 100 40 60 0 50 40 40\'/%3E%3C/g%3E%3C/svg%3E") repeat',
             backgroundSize: '100px 100px',
-            opacity: 0.1,
+            opacity: 0.2,
+            filter: 'blur(3px)',
         },
         topGradient: {
             position: 'absolute' as const,
@@ -194,10 +202,28 @@ const WhyChooseUs: React.FC = () => {
              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
              width: '100%',
              height: 'auto',
-             minHeight: '120px',
+             minHeight: '80px',
              overflow: 'visible',
              transition: 'all 0.3s ease',
-             cursor: 'default',
+             cursor: 'pointer',
+             position: 'relative' as const,
+         },
+         statCardMobileYellow: {
+             backgroundColor: '#ffff00',
+             borderRadius: '20px',
+             padding: '1.5rem',
+             display: 'flex',
+             flexDirection: 'column' as const,
+             justifyContent: 'flex-start',
+             alignItems: 'flex-start',
+             textAlign: 'left' as const,
+             boxShadow: '0 8px 32px rgba(255,255,0,0.3)',
+             width: '100%',
+             height: 'auto',
+             minHeight: '80px',
+             overflow: 'visible',
+             transition: 'all 0.3s ease',
+             cursor: 'pointer',
              position: 'relative' as const,
          },
         statCardHover: {
@@ -289,6 +315,34 @@ const WhyChooseUs: React.FC = () => {
              zIndex: 2,
              position: 'relative' as const,
          },
+         statHeadingWithArrow: {
+             fontSize: '1.2rem',
+             fontWeight: 700,
+             color: '#333',
+             textAlign: 'left' as const,
+             marginBottom: '0',
+             lineHeight: 1.3,
+             transition: 'all 0.4s ease',
+             zIndex: 2,
+             position: 'relative' as const,
+             display: 'flex',
+             alignItems: 'center',
+             justifyContent: 'space-between',
+             width: '100%',
+         },
+         downArrow: {
+             fontSize: '1.2rem',
+             color: '#666',
+             transition: 'transform 0.3s ease',
+             fontWeight: 'bold',
+         },
+         downArrowRotated: {
+             fontSize: '1.2rem',
+             color: '#666',
+             transform: 'rotate(180deg)',
+             transition: 'transform 0.3s ease',
+             fontWeight: 'bold',
+         },
         statHeadingHover: {
             color: '#007bff',
             transform: 'translateY(-2px)',
@@ -320,6 +374,34 @@ const WhyChooseUs: React.FC = () => {
              transition: 'none',
              overflow: 'visible',
              transform: 'none',
+         },
+         statDescriptionMobileCollapsed: {
+             fontSize: '0.85rem',
+             color: '#666',
+             textAlign: 'left' as const,
+             lineHeight: 1.5,
+             opacity: 0,
+             maxHeight: '0px',
+             marginTop: '0',
+             marginBottom: '0',
+             padding: '0',
+             transition: 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+             overflow: 'hidden',
+             transform: 'translateY(-10px)',
+         },
+         statDescriptionMobileExpanded: {
+             fontSize: '0.85rem',
+             color: '#666',
+             textAlign: 'left' as const,
+             lineHeight: 1.5,
+             opacity: 1,
+             maxHeight: '200px',
+             marginTop: '0.8rem',
+             marginBottom: '0',
+             padding: '0',
+             transition: 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+             overflow: 'hidden',
+             transform: 'translateY(0)',
          },
          statDescriptionExpanded: {
              fontSize: '0.85rem',
@@ -387,33 +469,61 @@ const WhyChooseUs: React.FC = () => {
                          {/* Mobile Cards */}
                          <div style={styles.statsGridMobile}>
                              {/* Best Faculty Card */}
-                             <div style={styles.statCardMobile}>
-                                 <div style={styles.statHeading}>Best Faculty</div>
-                                 <div style={styles.statDescriptionMobile}>
+                             <div style={styles.statCardMobile} onClick={() => handleCardClick(0)}>
+                                 <div style={styles.statHeadingWithArrow}>
+                                     Best Faculty
+                                     <span style={clickedCard === 0 ? styles.downArrowRotated : styles.downArrow}>
+                                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="7" viewBox="0 0 12 7" fill="none">
+                                             <path d="M1 1L6 6L11 1" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                         </svg>
+                                     </span>
+                                 </div>
+                                 <div style={clickedCard === 0 ? styles.statDescriptionMobileExpanded : styles.statDescriptionMobileCollapsed}>
                                      The staff facilities here are outstanding, with friendly and accommodating behavior that ensures a pleasant experience. Cleanliness is meticulously maintained, contributing to a comfortable and welcoming environment for all guests.
                                  </div>
                              </div>
 
                              {/* Easy To Reach Card */}
-                             <div style={styles.statCardMobile}>
-                                 <div style={styles.statHeading}>Easy To Reach Us</div>
-                                 <div style={styles.statDescriptionMobile}>
+                             <div style={styles.statCardMobile} onClick={() => handleCardClick(1)}>
+                                 <div style={styles.statHeadingWithArrow}>
+                                     Easy To Reach Us
+                                     <span style={clickedCard === 1 ? styles.downArrowRotated : styles.downArrow}>
+                                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="7" viewBox="0 0 12 7" fill="none">
+                                             <path d="M1 1L6 6L11 1" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                         </svg>
+                                     </span>
+                                 </div>
+                                 <div style={clickedCard === 1 ? styles.statDescriptionMobileExpanded : styles.statDescriptionMobileCollapsed}>
                                      The location is easily accessible, with the bus stand just 2-3 minutes away. The nearest metro stations are Dwarka Sector 9 and Palam, making it convenient for metro travelers. Additionally, cabs are readily available.
                                  </div>
                              </div>
 
                              {/* Theaters Card */}
-                             <div style={styles.statCardMobile}>
-                                 <div style={styles.statHeading}>Premium Theaters</div>
-                                 <div style={styles.statDescriptionMobile}>
+                             <div style={styles.statCardMobile} onClick={() => handleCardClick(2)}>
+                                 <div style={styles.statHeadingWithArrow}>
+                                     Premium Theaters
+                                     <span style={clickedCard === 2 ? styles.downArrowRotated : styles.downArrow}>
+                                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="7" viewBox="0 0 12 7" fill="none">
+                                             <path d="M1 1L6 6L11 1" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                         </svg>
+                                     </span>
+                                 </div>
+                                 <div style={clickedCard === 2 ? styles.statDescriptionMobileExpanded : styles.statDescriptionMobileCollapsed}>
                                      India&apos;s largest private theater boasts a 172-inch full HD screen and an impressive 5.1 surround sound system. The seats are luxurious recliners, ensuring maximum comfort. Food can be ordered directly to your seat.
                                  </div>
                              </div>
 
                              {/* Yellow Card */}
-                             <div style={styles.statCardMobile}>
-                                 <div style={styles.statHeading}>Ultimate Party Venue</div>
-                                 <div style={styles.statDescriptionMobile}>
+                             <div style={styles.statCardMobileYellow} onClick={() => handleCardClick(3)}>
+                                 <div style={styles.statHeadingWithArrow}>
+                                     Ultimate Party Venue
+                                     <span style={clickedCard === 3 ? styles.downArrowRotated : styles.downArrow}>
+                                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="7" viewBox="0 0 12 7" fill="none">
+                                             <path d="M1 1L6 6L11 1" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                         </svg>
+                                     </span>
+                                 </div>
+                                 <div style={clickedCard === 3 ? styles.statDescriptionMobileExpanded : styles.statDescriptionMobileCollapsed}>
                                      This is an excellent venue for celebrating parties, birthdays, and anniversaries. You and your guests will have a wonderful experience, with top-notch amenities and a welcoming atmosphere that ensures every event is memorable and enjoyable. It&apos;s a perfect choice for creating lasting memories.
                                  </div>
                              </div>

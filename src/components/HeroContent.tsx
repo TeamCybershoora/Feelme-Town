@@ -3,9 +3,10 @@ import React, { useState, useEffect } from 'react';
 const HeroContent = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const slides = [
-    { id: 1, src: "/bg.png", alt: "Theatre 1" },
-    { id: 2, src: "/bg.png", alt: "Theatre 2" },
-    { id: 3, src: "/bg.png", alt: "Theatre 3" }
+    { id: 1, src: "/images/theater1.webp", alt: "Theatre 1" },
+    { id: 2, src: "/images/theater2.webp", alt: "Theatre 2" },
+    { id: 3, src: "/images/theater3.webp", alt: "Theatre 3" },
+    { id: 4, src: "/images/theater4.webp", alt: "Theatre 4" }
   ];
 
   useEffect(() => {
@@ -953,6 +954,7 @@ const HeroContent = () => {
             display: block;
           }
         }
+
       `}</style>
     </div>
   );

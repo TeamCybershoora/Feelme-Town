@@ -1,4 +1,3 @@
- 
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -258,6 +257,22 @@ export default function Movies({
     return () => clearTimeout(timer);
   }, [filteredMovies, currentPage, itemsPerPage]);
 
+  // Calculate dynamic container height based on selected rows
+  const getContainerHeight = () => {
+    // Base heights for different screen sizes
+    const desktopCardHeight = 350; // px
+    const mobileCardHeight = 160; // 10rem = 160px
+    const desktopGap = 24; // px
+    const mobileGap = 8; // px
+    
+    return {
+      desktop: (desktopCardHeight * selectedRows) + (desktopGap * (selectedRows - 1)),
+      mobile: (mobileCardHeight * selectedRows) + (mobileGap * (selectedRows - 1))
+    };
+  };
+
+  const containerHeight = getContainerHeight();
+
   if (error) {
     return (
        <div className="error-container">
@@ -279,20 +294,48 @@ export default function Movies({
 
   if (isLoading) {
     return (
-       <div className="loading-grid">
+       <div className="loading-grid" style={{ height: `${containerHeight.desktop}px` }}>
          {Array.from({ length: itemsPerPage }).map((_, index) => (
            <div key={index} className="loading-card">
              <div className="loading-shimmer"></div>
            </div>
          ))}
          <style jsx>{`
-           .loading-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; max-width: 1400px; margin: 0 auto; padding: 0 1rem; }
+           .loading-grid { 
+             display: grid; 
+             grid-template-columns: repeat(3, 1fr); 
+             gap: 24px; 
+             max-width: 1400px; 
+             margin: 0 auto; 
+             padding: 0 1rem; 
+             grid-template-rows: repeat(${selectedRows}, 350px);
+             overflow: hidden;
+           }
            .loading-card { background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 16px; height: 350px; overflow: hidden; position: relative; }
            .loading-shimmer { position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,69,69,0.1), transparent); animation: shimmer 2s infinite; }
            @keyframes shimmer { 0% { left: -100%; } 100% { left: 100%; } }
-           @media (max-width: 1200px) { .loading-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; } }
-           @media (max-width: 768px) { .loading-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 0 0.5rem; } }
-           @media (max-width: 480px) { .loading-grid { grid-template-columns: 1fr; gap: 12px; } }
+           @media (min-width: 1200px) { 
+             .loading-grid { 
+               grid-template-columns: repeat(4, 1fr); 
+               height: ${containerHeight.desktop}px !important;
+             } 
+           }
+           @media (max-width: 1200px) and (min-width: 769px) { 
+             .loading-grid { 
+               grid-template-columns: repeat(3, 1fr); 
+               height: ${containerHeight.desktop}px !important;
+             } 
+           }
+           @media (max-width: 768px) { 
+             .loading-grid { 
+               grid-template-columns: repeat(3, 1fr) !important; 
+               gap: 8px; 
+               padding: 0 0.5rem; 
+               grid-template-rows: repeat(${selectedRows}, 10rem);
+               height: ${containerHeight.mobile}px !important;
+             }
+             .loading-card { height: 10rem; }
+           }
          `}</style>
        </div>
     );
@@ -300,23 +343,30 @@ export default function Movies({
 
   return (
     <>
-      <div className="movie-grid">
-        {visibleMovies.length === 0 ? (
-          <div className="no-results">
-            <h3>No movies found</h3>
-            <p>Try adjusting your search criteria</p>
-          </div>
-        ) : (
-          visibleMovies.map((movie, index) => (
-            <div
-              key={movie.id}
-              className="movie-item"
-              style={{ animationDelay: `${index * 0.1}s`, animation: 'fadeInUp 0.6s ease-out forwards' }}
-            >
-              <MovieCard movie={movie} onCardClick={handleCardClick} />
+      <div className="movie-grid-container" style={{ height: `${containerHeight.desktop}px` }}>
+        <div className="movie-grid">
+          {visibleMovies.length === 0 ? (
+            <div className="no-results">
+              <h3>No movies found</h3>
+              <p>Try adjusting your search criteria</p>
             </div>
-           ))
-         )}
+          ) : (
+            visibleMovies.map((movie, index) => (
+              <div
+                key={movie.id}
+                className="movie-item"
+                style={{ 
+                  animationDelay: `${index * 0.1}s`, 
+                  animation: 'fadeInUp 0.6s ease-out forwards',
+                  // Hide items beyond the selected rows
+                  display: index >= (selectedRows * 4) ? 'none' : 'block'
+                }}
+              >
+                <MovieCard movie={movie} onCardClick={handleCardClick} />
+              </div>
+             ))
+           )}
+        </div>
       </div>
 
       <MoviePopup 
@@ -326,58 +376,108 @@ export default function Movies({
       />
 
       <style jsx>{`
+        .movie-grid-container {
+          max-width: 1400px;
+          margin: 0 auto;
+          padding: 0 1rem;
+          overflow: hidden;
+          transition: height 0.3s ease;
+        }
+
         .movie-grid { 
           display: grid; 
           grid-template-columns: repeat(3, 1fr); 
           gap: 24px; 
-          max-width: 1400px; 
-          margin: 0 auto; 
-          padding: 0 1rem; 
-          grid-template-rows: repeat(${selectedRows}, auto);
+          grid-template-rows: repeat(${selectedRows}, 350px);
+          height: 100%;
         }
-        .movie-item { opacity: 0; transform: translateY(30px); }
-        @keyframes fadeInUp { to { opacity: 1; transform: translateY(0); } }
-        .no-results { grid-column: 1 / -1; text-align: center; color: rgba(255,255,255,0.7); padding: 3rem; }
-        .no-results h3 { margin: 0 0 1rem 0; font-size: 1.5rem; }
+        
+        .movie-item { 
+          opacity: 0; 
+          transform: translateY(30px); 
+        }
+        
+        @keyframes fadeInUp { 
+          to { 
+            opacity: 1; 
+            transform: translateY(0); 
+          } 
+        }
+        
+        .no-results { 
+          grid-column: 1 / -1; 
+          text-align: center; 
+          color: rgba(255,255,255,0.7); 
+          padding: 3rem; 
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          height: 100%;
+        }
+        
+        .no-results h3 { 
+          margin: 0 0 1rem 0; 
+          font-size: 1.5rem; 
+        }
         
         @media (min-width: 1200px) { 
           .movie-grid { 
             grid-template-columns: repeat(4, 1fr); 
-            gap: 24px; 
-          } 
+          }
+          .movie-grid-container {
+            height: ${containerHeight.desktop}px !important;
+          }
+          .movie-item {
+            display: ${`calc(var(--index, 0) >= ${selectedRows * 4}) ? 'none' : 'block'`} !important;
+          }
         }
+        
         @media (max-width: 1200px) and (min-width: 769px) { 
           .movie-grid { 
             grid-template-columns: repeat(3, 1fr); 
-            gap: 20px; 
-          } 
+          }
+          .movie-grid-container {
+            height: ${containerHeight.desktop}px !important;
+          }
+          .movie-item {
+            display: ${`calc(var(--index, 0) >= ${selectedRows * 3}) ? 'none' : 'block'`} !important;
+          }
         }
+        
         @media (max-width: 768px) { 
           .movie-grid { 
             grid-template-columns: repeat(3, 1fr) !important; 
             gap: 8px; 
-            padding: 0 0.5rem; 
-            max-width: 100%;
-            margin: 0 auto;
-            display: grid;
-          } 
+            grid-template-rows: repeat(${selectedRows}, 10rem);
+          }
+          
+          .movie-grid-container {
+            padding: 0 0.5rem;
+            height: ${containerHeight.mobile}px !important;
+          }
           
           .movie-item {
             min-width: 0;
+            display: ${`calc(var(--index, 0) >= ${selectedRows * 3}) ? 'none' : 'block'`} !important;
           }
         }
+        
         @media (max-width: 480px) { 
           .movie-grid { 
             grid-template-columns: repeat(3, 1fr) !important; 
             gap: 6px; 
+            grid-template-rows: repeat(${selectedRows}, 10rem);
+          }
+          
+          .movie-grid-container {
             padding: 0 0.5rem;
-            max-width: 100%;
-            margin: 0 auto;
-            display: grid;
-          } 
+            height: ${containerHeight.mobile}px !important;
+          }
           
           .movie-item {
             min-width: 0;
+            display: ${`calc(var(--index, 0) >= ${selectedRows * 3}) ? 'none' : 'block'`} !important;
           }
         }
       `}</style>
