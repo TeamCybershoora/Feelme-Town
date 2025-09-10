@@ -45,7 +45,14 @@ input, textarea, [contenteditable] {
 html {
   color-scheme: dark;
 }
-
+@font-face {
+  font-family: 'Hacker';
+  src: url('/fonts/Hacked-CRT.ttf') format('truetype');
+  font-weight: 400;
+  font-style: bold;
+  font-display: swap;
+  font-preload: true;
+}
 
 @font-face {
   font-family: 'Paralucent-DemiBold';
