@@ -3,8 +3,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { gsap } from 'gsap';
+import { useRouter, usePathname } from 'next/navigation';
 
 const Navbar = () => {
+  const router = useRouter();
+  const pathname = usePathname();
   const [activeButton, setActiveButton] = useState('Home');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const navbarRef = useRef<HTMLElement>(null);
@@ -15,6 +18,30 @@ const Navbar = () => {
   const handleButtonClick = (buttonName: string) => {
     setActiveButton(buttonName);
     setIsMobileMenuOpen(false);
+    
+    // Navigate to appropriate page
+    switch (buttonName) {
+      case 'Home':
+        router.push('/');
+        break;
+      case 'About Us':
+        router.push('/about');
+        break;
+      case 'Theatres':
+        router.push('/theater');
+        break;
+      case 'Services':
+        router.push('/services');
+        break;
+      case 'Gallery':
+        router.push('/gallery');
+        break;
+      case 'Contact Us':
+        router.push('/contact');
+        break;
+      default:
+        break;
+    }
   };
 
   const toggleMobileMenu = () => {
@@ -47,6 +74,41 @@ const Navbar = () => {
     setDragStart(null);
     setDragCurrent(null);
   };
+
+  // Update active button based on current pathname
+  useEffect(() => {
+    switch (pathname) {
+      case '/':
+        setActiveButton('Home');
+        break;
+      case '/about':
+        setActiveButton('About Us');
+        break;
+      case '/theater':
+        setActiveButton('Theatres');
+        break;
+      case '/services':
+        setActiveButton('Services');
+        break;
+      case '/gallery':
+        setActiveButton('Gallery');
+        break;
+      case '/contact':
+        setActiveButton('Contact Us');
+        break;
+      default:
+        if (pathname.includes('services')) {
+          setActiveButton('Services');
+        } else if (pathname.includes('gallery')) {
+          setActiveButton('Gallery');
+        } else if (pathname.includes('contact')) {
+          setActiveButton('Contact Us');
+        } else {
+          setActiveButton('Home');
+        }
+        break;
+    }
+  }, [pathname]);
 
   useEffect(() => {
     const handleScroll = () => {

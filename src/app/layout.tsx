@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import SmoothScroll from "@/components/SmoothScroll";
 import LoadingWrapper from "@/components/LoadingWrapper";
+import ClientLayout from "@/components/ClientLayout";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,10 +27,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <LoadingWrapper>
-          <SmoothScroll />
-          {children}
-        </LoadingWrapper>
+       
+          <LoadingWrapper>
+            <ClientLayout>
+              {children}
+            </ClientLayout>
+          </LoadingWrapper>
+        
       </body>
     </html>
   );

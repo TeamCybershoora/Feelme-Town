@@ -5,6 +5,7 @@ import Movies from '@/components/Movies';
 import SearchFilter from '@/components/SearchFilter';
 import Pagination from '@/components/Pagination';
 
+
 type Industry =
   | 'ALL'
   | 'BOLLYWOOD'
@@ -59,6 +60,10 @@ export default function MoviesPage() {
           selectedRows={selectedRows}
         />
 
+       
+         
+       
+
         <Pagination
           currentPage={currentPage}
           totalPages={50}
@@ -90,6 +95,35 @@ export default function MoviesPage() {
           background-clip: text;
         }
 
+        .ai-recommendations-section {
+          padding: 4rem 2rem;
+          text-align: center;
+          background: linear-gradient(135deg, rgba(255, 0, 5, 0.1) 0%, rgba(0, 0, 0, 0.8) 100%);
+          margin: 2rem 0;
+          border-radius: 1rem;
+        }
+
+        .ai-recommendations-header {
+          margin-bottom: 2rem;
+        }
+
+        .ai-recommendations-title {
+          color: #FF0005;
+          font-size: 2rem;
+          font-weight: 700;
+          font-family: 'Paralucent-Bold', Arial, sans-serif;
+          margin: 0 0 1rem 0;
+        }
+
+        .ai-recommendations-description {
+          color: #cccccc;
+          font-size: 1.1rem;
+          font-family: 'Paralucent-Medium', Arial, sans-serif;
+          margin: 0;
+          max-width: 600px;
+          margin: 0 auto;
+        }
+
         @media (max-width: 768px) {
           .movies-header {
             padding: 1rem 0.5rem;
@@ -99,12 +133,38 @@ export default function MoviesPage() {
             font-size: 2rem;
             margin-bottom: 1.5rem;
           }
+
+          .ai-recommendations-section {
+            padding: 2rem 1rem;
+            margin: 1rem 0;
+          }
+
+          .ai-recommendations-title {
+            font-size: 1.5rem;
+          }
+
+          .ai-recommendations-description {
+            font-size: 1rem;
+          }
         }
 
         @media (max-width: 480px) {
           .movies-title {
             font-size: 1.5rem;
             margin-bottom: 1rem;
+          }
+
+          .ai-recommendations-section {
+            padding: 1.5rem 0.5rem;
+            margin: 1rem 0;
+          }
+
+          .ai-recommendations-title {
+            font-size: 1.25rem;
+          }
+
+          .ai-recommendations-description {
+            font-size: 0.9rem;
           }
         }
       `}</style>
