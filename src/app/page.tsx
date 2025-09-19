@@ -1,6 +1,5 @@
 'use client';
 
-
 import HeroContent from "../components/HeroContent";
 import WhyChooseUs from '../components/WhyChooseUs';
 import TrustedBy from "../components/ui/TrustedBy";
@@ -13,7 +12,6 @@ import FloatingNavigation from "../components/FloatingNavigation";
 export default function Home() {
   return (
     <div>
-      
       <HeroContent />
       <MoviesSection />
       <Portfolio />

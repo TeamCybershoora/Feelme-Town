@@ -1,7 +1,21 @@
 :root {
+  /* Dark theme (default) */
   --background: #000000;
   --foreground: #ffffff;
+  --navbar-bg: transparent;
+  --navbar-border: rgba(255, 255, 255, 0.1);
+  --card-bg: rgba(255, 255, 255, 0.05);
+  --card-border: rgba(255, 255, 255, 0.1);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --accent-color: #ff0000;
+  --accent-hover: rgba(255, 0, 0, 0.8);
+  --input-bg: #010201;
+  --input-text: #ffffff;
+  --input-placeholder: #c0b9c0;
 }
+
+
 
 html,
 body {
@@ -44,6 +58,10 @@ input, textarea, [contenteditable] {
 
 html {
   color-scheme: dark;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
 }
 @font-face {
   font-family: 'Hacker';

@@ -4,10 +4,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { gsap } from 'gsap';
 import { useRouter, usePathname } from 'next/navigation';
+import { useBooking } from '@/contexts/BookingContext';
 
 const Navbar = () => {
+  const { openBookingPopup } = useBooking();
+  
+  const handleBookingClick = () => {
+    openBookingPopup();
+  };
   const router = useRouter();
   const pathname = usePathname();
+
   const [activeButton, setActiveButton] = useState('Home');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const navbarRef = useRef<HTMLElement>(null);
@@ -38,6 +45,9 @@ const Navbar = () => {
         break;
       case 'Contact Us':
         router.push('/contact');
+        break;
+      case 'Book Your Show':
+        router.push('/theater');
         break;
       default:
         break;
@@ -95,6 +105,9 @@ const Navbar = () => {
         break;
       case '/contact':
         setActiveButton('Contact Us');
+        break;
+      case '/theater':
+        setActiveButton('Book Your Show');
         break;
       default:
         if (pathname.includes('services')) {
@@ -206,7 +219,7 @@ const Navbar = () => {
             Contact Us
           </button>
         </div>
-        <div className="navbar-right">
+        <div className="navbar-right">        
           <div className="search-container">
             <div className="glow" aria-hidden="true"></div>
             <div className="darkBorderBg" aria-hidden="true"></div>
@@ -290,16 +303,16 @@ const Navbar = () => {
             <div className="book-darkBorderBg" aria-hidden="true"></div>
             <div className="book-white" aria-hidden="true"></div>
             <div className="book-border" aria-hidden="true"></div>
-            <button className="book-button">
-              <Image 
-                src="/ticket.png" 
-                alt="Ticket" 
-                width={20} 
-                height={20} 
-                className="ticket-icon"
-              />
-              Book Your Show
-            </button>
+              <button className="book-button" onClick={() => handleButtonClick('Book Your Show')}>
+                <Image
+                  src="/ticket.png"
+                  alt="Ticket"
+                  width={20}
+                  height={20}
+                  className="ticket-icon"
+                />
+                Book Your Show
+              </button>
           </div>
         </div>
       </div>
@@ -366,6 +379,8 @@ const Navbar = () => {
               Contact Us
             </button>
             
+            
+            
               <div className="mobile-menu-actions">
                 <div className="mobile-search-container">
                   <input
@@ -404,9 +419,9 @@ const Navbar = () => {
                   <div className="mobile-cta-darkBorderBg" aria-hidden="true"></div>
                   <div className="mobile-cta-white" aria-hidden="true"></div>
                   <div className="mobile-cta-border" aria-hidden="true"></div>
-                  <button className="mobile-cta-button">
-                    <span>Book Your Show</span>
-                  </button>
+              <button className="mobile-cta-button" onClick={handleBookingClick}>
+                <span>Book Your Show</span>
+              </button>
                 </div>
               </div>
           </div>
@@ -420,10 +435,7 @@ const Navbar = () => {
           left: 0;
           right: 0;
           z-index: 1000;
-          
           backdrop-filter: blur(2px);
-          
-          
           padding: 1.5% 0;
           min-height: 4rem;
           width: 100%;
@@ -603,11 +615,11 @@ const Navbar = () => {
         }
         
         .mobile-nav-button {
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
           border-radius: 12px;
           padding: 1rem 1.5rem;
-          color: white;
+          color: var(--text-primary);
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
           font-size: 1rem;
           font-weight: 500;
@@ -618,15 +630,49 @@ const Navbar = () => {
         }
         
         .mobile-nav-button:hover {
-          background: rgba(255, 255, 255, 0.15);
-          border-color: rgba(255, 255, 255, 0.3);
+          background: var(--card-bg);
+          border-color: var(--card-border);
           transform: translateX(5px);
         }
         
         .mobile-nav-button.active {
-          background: rgb(255, 0, 0);
-          border-color: rgb(255, 0, 0);
+          background: var(--accent-color);
+          border-color: var(--accent-color);
           color: white;
+        }
+        
+        .mobile-theme-toggle {
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 12px;
+          padding: 1rem 1.5rem;
+          color: var(--text-primary);
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 1rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          backdrop-filter: blur(20px);
+          text-align: left;
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          margin-top: 0.5rem;
+        }
+        
+        .mobile-theme-toggle:hover {
+          background: var(--card-bg);
+          border-color: var(--card-border);
+          transform: translateX(5px);
+        }
+        
+        .mobile-theme-toggle svg {
+          transition: all 0.3s ease;
+          flex-shrink: 0;
+        }
+        
+        .mobile-theme-toggle:hover svg {
+          transform: rotate(180deg);
         }
         
         .mobile-menu-actions {
@@ -646,10 +692,10 @@ const Navbar = () => {
         .mobile-search-input {
           width: 100%;
           height: 45px;
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          background: var(--input-bg);
+          border: 1px solid var(--card-border);
           border-radius: 12px;
-          color: white;
+          color: var(--input-text);
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
           padding: 0 1rem 0 3rem;
           font-size: 1rem;
@@ -657,7 +703,7 @@ const Navbar = () => {
         }
         
         .mobile-search-input::placeholder {
-          color: rgba(255, 255, 255, 0.6);
+          color: var(--input-placeholder);
         }
         
         .mobile-search-input:focus {
@@ -906,8 +952,44 @@ const Navbar = () => {
         .navbar-right {
           display: flex;
           align-items: center;
-          gap: 2rem;
+          gap: 1.5rem;
           flex: 0 0 auto;
+        }
+        
+        .theme-toggle {
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 0.5rem;
+          padding: 0.5rem;
+          color: var(--text-primary);
+          cursor: pointer;
+          transition: all 0.3s ease;
+          backdrop-filter: blur(20px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 2.5rem;
+          height: 2.5rem;
+          position: relative;
+          overflow: hidden;
+        }
+        
+        .theme-toggle:hover {
+          background: var(--card-bg);
+          border-color: var(--card-border);
+          transform: translateY(-2px) scale(1.05);
+        }
+        
+        .theme-toggle:active {
+          transform: translateY(0) scale(0.95);
+        }
+        
+        .theme-toggle svg {
+          transition: all 0.3s ease;
+        }
+        
+        .theme-toggle:hover svg {
+          transform: rotate(180deg);
         }
         
         .search-container {
@@ -924,12 +1006,12 @@ const Navbar = () => {
         }
         
         .search-input {
-          background-color: #010201;
+          background-color: var(--input-bg);
           border: none;
           width: 100%;
           height: 100%;
           border-radius: 0.4rem;
-          color: white;
+          color: var(--input-text);
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
           padding-inline: 1.8rem 1.5rem;
           font-size: 0.75rem;
@@ -939,7 +1021,7 @@ const Navbar = () => {
         }
         
         .search-input::placeholder {
-          color: #c0b9c0;
+          color: var(--input-placeholder);
         }
         
         .search-input:focus {
@@ -1414,11 +1496,11 @@ const Navbar = () => {
         }
         
         .nav-button {
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
           border-radius: 0.5rem;
           padding: 0.5rem 0.8rem;
-          color: white;
+          color: var(--text-primary);
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
           font-size: 0.8rem;
           font-weight: 500;
@@ -1429,7 +1511,7 @@ const Navbar = () => {
           overflow: hidden;
           box-shadow: 
             0 8px 32px rgba(0, 0, 0, 0.1),
-            inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            inset 0 1px 0 var(--card-border);
           min-height: 2.2rem;
           min-width: 2.2rem;
           touch-action: manipulation;
@@ -1459,13 +1541,13 @@ const Navbar = () => {
         }
         
         .nav-button:hover {
-          background: rgba(255, 255, 255, 0.15);
-          border-color: rgba(255, 255, 255, 0.3);
+          background: var(--card-bg);
+          border-color: var(--card-border);
           transform: translateY(-3px) scale(1.02);
           box-shadow: 
-            0 12px 40px rgba(255, 48, 48, 0.2),
-            0 4px 20px rgba(250, 63, 63, 0.3),
-            inset 0 1px 0 rgba(255, 72, 72, 0.3);
+            0 12px 40px var(--accent-hover),
+            0 4px 20px var(--accent-hover),
+            inset 0 1px 0 var(--card-border);
         }
         
         .nav-button:active {
@@ -1474,21 +1556,17 @@ const Navbar = () => {
         }
         
         .nav-button.active {
-          background: rgb(255, 0, 0);
-          border-color: rgb(255, 0, 0);
-          color:rgb(254, 254, 254);
+          background: var(--accent-color);
+          border-color: var(--accent-color);
+          color: white;
           box-shadow: 
-            0 8px 32px rgb(255, 0, 0),
-            inset 0 1px 0 rgb(255, 0, 0);
+            0 8px 32px var(--accent-color),
+            inset 0 1px 0 var(--accent-color);
         }
         
         .nav-button.active:hover {
-          background: rgba(255, 0, 0, 0.54);
-          border-color: rgba(255, 255, 255, 0.5);
-        //   box-shadow: 
-        //     0 12px 40px rgb(255, 252, 252),
-        //     0 4px 20px rgb(255, 255, 255),
-        //     inset 0 1px 0 rgb(255, 255, 255);
+          background: var(--accent-hover);
+          border-color: var(--card-border);
         }
         
         .book-button {
@@ -1561,6 +1639,7 @@ const Navbar = () => {
             font-size: 0.9rem;
             min-height: 2.5rem;
           }
+          
           
           .search-container {
             width: 12rem;
@@ -1645,6 +1724,7 @@ const Navbar = () => {
             min-height: 2.3rem;
           }
           
+          
           .search-container {
             width: 11rem;
             height: 2.3rem;
@@ -1727,6 +1807,7 @@ const Navbar = () => {
             font-size: 0.8rem;
             min-height: 2.2rem;
           }
+          
           
           .search-container {
             width: 10rem;
@@ -1811,6 +1892,7 @@ const Navbar = () => {
             min-height: 2rem;
           }
           
+          
           .search-container {
             width: 9rem;
             height: 2rem;
@@ -1839,6 +1921,7 @@ const Navbar = () => {
             font-size: 0.7rem;
             min-height: 1.8rem;
           }
+          
           
           .search-container {
             width: 8rem;

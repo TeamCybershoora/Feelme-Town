@@ -1,8 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useBooking } from '@/contexts/BookingContext';
 
 const FloatingNavigation = () => {
+  const { openBookingPopup } = useBooking();
+  
+  const handleBookingClick = () => {
+    openBookingPopup();
+  };
+
     const [isOpen, setIsOpen] = useState(false);
   const [showFeedbackPopup, setShowFeedbackPopup] = useState(false);
   const [showHelpPopup, setShowHelpPopup] = useState(false);
@@ -37,6 +44,9 @@ const FloatingNavigation = () => {
           { id: 1, text: "Hello! I'm your AI assistant. How can I help you today?", isBot: true }
         ]);
         setShowAIPopup(true);
+        break;
+      case 'Booking':
+        handleBookingClick();
         break;
     }
   };
@@ -186,6 +196,14 @@ const FloatingNavigation = () => {
                     <span className="nav-icon">🤖</span>
                     <span className="nav-label">AI Help</span>
                 </div>
+                <div
+                    className="nav-item booking"
+                    onClick={() => handleOptionClick('Booking')}
+                >
+                    <span className="nav-icon">🎫</span>
+                    <span className="nav-label">Book Show</span>
+                </div>
+                
             </div>
 
             {/* Main Button */}
@@ -203,6 +221,7 @@ const FloatingNavigation = () => {
             <div className="bubble feedback">Click to Feedback</div>
             <div className="bubble help">Click to Help & Support</div>
             <div className="bubble ai">Click to AI Chat</div>
+            <div className="bubble booking">Click to Book Show</div>
 
             {/* Feedback Popup */}
             {showFeedbackPopup && (
@@ -591,6 +610,11 @@ const FloatingNavigation = () => {
         .nav-item.ai:hover {
           border-color: #9C27B0;
           background: #faf0ff;
+        }
+
+        .nav-item.booking:hover {
+          border-color: #FF0005;
+          background: #fff5f5;
         }
 
         .nav-icon {

@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 const HeroContent = () => {
+  const router = useRouter();
+  
+  const handleBookingClick = () => {
+    router.push('/theater');
+  };
   const [currentSlide, setCurrentSlide] = useState(0);
   const slides = [
     { id: 1, src: "/images/theater1.webp", alt: "Theatre 1" },
@@ -35,7 +41,9 @@ const HeroContent = () => {
             <div className="cta-darkBorderBg" aria-hidden="true"></div>
             <div className="cta-white" aria-hidden="true"></div>
             <div className="cta-border" aria-hidden="true"></div>
-            <button className="cta-button"><span>Book Your Show</span></button>
+              <button className="cta-button" onClick={handleBookingClick}>
+                <span>Book Your Show</span>
+              </button>
           </div>
         </div>
       
@@ -113,7 +121,6 @@ const HeroContent = () => {
       <style jsx>{`
         .hero-container {
           min-height: 100vh;
-          background: #000000;
           background-image: url('/bg.png');
           background-size: cover;
           background-position: center;

@@ -3,8 +3,10 @@
 import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
 import { useDatePicker } from '@/contexts/DatePickerContext';
+import { useBooking } from '@/contexts/BookingContext';
 
 export default function Theater() {
+    const { openBookingPopup } = useBooking();
     const [selectedTheater, setSelectedTheater] = useState(0);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [searchTerm, setSearchTerm] = useState('');
@@ -13,7 +15,6 @@ export default function Theater() {
     const [isTypeDropdownOpen, setIsTypeDropdownOpen] = useState(false);
     const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
     const [selectedTimeSlot, setSelectedTimeSlot] = useState('');
-    const [showTestPopup, setShowTestPopup] = useState(false);
     const theaterDetailsRef = useRef<HTMLDivElement>(null);
     
     // Use global date picker
@@ -393,7 +394,7 @@ export default function Theater() {
                                     </div>
                                 </div>
                                 
-                                <button className="book-button" onClick={() => setShowTestPopup(true)}>
+                                <button className="book-button" onClick={() => openBookingPopup(theaters[selectedTheater], selectedDate, selectedTimeSlot)}>
                                     Book This Theater
                                 </button>
                             </div>
@@ -2257,35 +2258,6 @@ export default function Theater() {
                 }
             `}</style>
 
-            {/* Test Popup - Full Screen Overlay */}
-            {showTestPopup && (
-                <div className="test-popup-overlay" onClick={() => setShowTestPopup(false)}>
-                    <div className="test-popup-modal" onClick={(e) => e.stopPropagation()}>
-                        <div className="test-popup-header">
-                            <h2>Test Popup</h2>
-                            <button 
-                                className="test-popup-close-btn"
-                                onClick={() => setShowTestPopup(false)}
-                            >
-                                ✕
-                            </button>
-                        </div>
-                        <div className="test-popup-content">
-                            <p>This is a test popup that opens on top of everything!</p>
-                            <p>It covers the entire screen with a black overlay.</p>
-                            <p>Click outside or the X button to close.</p>
-                        </div>
-                        <div className="test-popup-footer">
-                            <button 
-                                className="test-popup-btn"
-                                onClick={() => setShowTestPopup(false)}
-                            >
-                                Close Popup
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

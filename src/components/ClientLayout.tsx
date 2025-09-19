@@ -1,19 +1,23 @@
 'use client';
 
-import Navbar from "./Navbar/Navbar";
+import Navbar from "../components/Navbar";
 import Footer from "./Footer";
 import FloatingNavigation from "./FloatingNavigation";
 import SmoothScroll from "./SmoothScroll";
+import BookingPopup from "./BookingPopup";
 import { DatePickerProvider } from "@/contexts/DatePickerContext";
+import { BookingProvider, useBooking } from "@/contexts/BookingContext";
 import LayoutContent from "./LayoutContent";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
 }
 
-export default function ClientLayout({ children }: ClientLayoutProps) {
+function ClientLayoutContent({ children }: ClientLayoutProps) {
+  const { isBookingPopupOpen, closeBookingPopup } = useBooking();
+
   return (
-    <DatePickerProvider>
+    <>
       <Navbar />
       <SmoothScroll />
       <LayoutContent>
@@ -21,6 +25,19 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
       </LayoutContent>
       <Footer />
       <FloatingNavigation />
+      <BookingPopup isOpen={isBookingPopupOpen} onClose={closeBookingPopup} />
+    </>
+  );
+}
+
+export default function ClientLayout({ children }: ClientLayoutProps) {
+  return (
+    <DatePickerProvider>
+      <BookingProvider>
+        <ClientLayoutContent>
+          {children}
+        </ClientLayoutContent>
+      </BookingProvider>
     </DatePickerProvider>
   );
 }
