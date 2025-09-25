@@ -102,3 +102,446 @@ html {
   font-style: normal;
   font-display: swap;
 }
+
+/* Admin Panel Styles */
+.admin-layout {
+  display: flex !important;
+  min-height: 100vh !important;
+  background: #000000 !important;
+  color: #ffffff !important;
+  font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 9999 !important;
+}
+
+.admin-main {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  transition: margin-left 0.3s ease !important;
+  margin-left: 280px !important;
+}
+
+.admin-main.sidebar-closed {
+  margin-left: 80px !important;
+}
+
+.admin-content {
+  flex: 1 !important;
+  padding: 2rem !important;
+  background: #f8f9fa !important;
+  overflow-y: auto !important;
+}
+
+@media (max-width: 768px) {
+  .admin-main {
+    margin-left: 0 !important;
+  }
+  
+  .admin-main.sidebar-open {
+    margin-left: 0 !important;
+  }
+  
+  .admin-content {
+    padding: 1rem !important;
+  }
+}
+
+/* Admin Login Styles */
+.admin-login {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: #141414 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 9999 !important;
+  font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif !important;
+  overflow: hidden !important;
+}
+
+.animated-bg {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  z-index: 0 !important;
+}
+
+.grid-container {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+.grid-overlay {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px) !important;
+  background-size: 80px 80px !important;
+}
+
+.colored-grid-line {
+  position: absolute !important;
+  background: linear-gradient(90deg, transparent, rgba(255, 0, 0, 0.3), transparent) !important;
+  z-index: 1 !important;
+}
+
+.horizontal-line-1 {
+  top: 20% !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 2px !important;
+  animation: growLeftToRight 3s ease-in-out infinite !important;
+  animation-delay: 0s !important;
+}
+
+.horizontal-line-2 {
+  top: 40% !important;
+  right: 0 !important;
+  width: 100% !important;
+  height: 2px !important;
+  animation: growRightToLeft 4s ease-in-out infinite !important;
+  animation-delay: 1s !important;
+}
+
+.horizontal-line-4 {
+  top: 80% !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 2px !important;
+  animation: growLeftToRight 5s ease-in-out infinite !important;
+  animation-delay: 2s !important;
+}
+
+.vertical-line-1 {
+  top: 0 !important;
+  left: 20% !important;
+  width: 2px !important;
+  height: 100% !important;
+  animation: growLeftToRight 3.5s ease-in-out infinite !important;
+  animation-delay: 0.5s !important;
+}
+
+.vertical-line-2 {
+  top: 0 !important;
+  right: 30% !important;
+  width: 2px !important;
+  height: 100% !important;
+  animation: growRightToLeft 4.5s ease-in-out infinite !important;
+  animation-delay: 1.5s !important;
+}
+
+.vertical-line-4 {
+  top: 0 !important;
+  left: 60% !important;
+  width: 2px !important;
+  height: 100% !important;
+  animation: growLeftToRight 3.8s ease-in-out infinite !important;
+  animation-delay: 2.5s !important;
+}
+
+.vertical-line-5 {
+  top: 0 !important;
+  right: 10% !important;
+  width: 2px !important;
+  height: 100% !important;
+  animation: growRightToLeft 4.2s ease-in-out infinite !important;
+  animation-delay: 3s !important;
+}
+
+@keyframes growLeftToRight {
+  0% { width: 0%; opacity: 0; }
+  50% { opacity: 1; }
+  100% { width: 100%; opacity: 0; }
+}
+
+@keyframes growRightToLeft {
+  0% { width: 0%; opacity: 0; }
+  50% { opacity: 1; }
+  100% { width: 100%; opacity: 0; }
+}
+
+.login-container {
+  background: transparent !important;
+  backdrop-filter: blur(50px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 20px !important;
+  padding: 3rem !important;
+  width: 100% !important;
+  max-width: 400px !important;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3) !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.login-header {
+  text-align: center !important;
+  margin-bottom: 2rem !important;
+}
+
+.logo-section {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.shield-icon {
+  color: #ff0000 !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.login-header h1 {
+  font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif !important;
+  font-size: 2.2rem !important;
+  margin: 0 !important;
+  color: white !important;
+}
+
+.logo-section p {
+  font-size: 1rem !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  margin: 0 !important;
+}
+
+.login-form {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1rem !important;
+}
+
+.form-group {
+  text-align: left !important;
+}
+
+.form-group label {
+  display: block !important;
+  margin-bottom: 0.5rem !important;
+  font-size: 0.9rem !important;
+  font-weight: 500 !important;
+  color: #ffffff !important;
+}
+
+.password-input-container {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.password-input {
+  width: 100% !important;
+  padding: 0.75rem 2.5rem 0.75rem 1rem !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 12px !important;
+  color: #ffffff !important;
+  font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif !important;
+  font-size: 0.85rem !important;
+  transition: all 0.3s ease !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.password-input:focus {
+  outline: none !important;
+  border-color: #ff0000 !important;
+  box-shadow: 0 0 0 3px rgba(255, 0, 0, 0.1) !important;
+}
+
+.password-input::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+  font-size: 0.85rem !important;
+}
+
+.toggle-password {
+  position: absolute !important;
+  right: 0.75rem !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  background: none !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  cursor: pointer !important;
+  padding: 0.25rem !important;
+  border-radius: 4px !important;
+  transition: all 0.3s ease !important;
+  z-index: 2 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.toggle-password:hover {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.error-message {
+  background: rgba(220, 53, 69, 0.1) !important;
+  border: 1px solid rgba(220, 53, 69, 0.3) !important;
+  border-radius: 8px !important;
+  color: #dc3545 !important;
+  padding: 0.75rem !important;
+  margin-top: 0.5rem !important;
+  font-size: 0.85rem !important;
+}
+
+.login-button {
+  background: #ff0000 !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 12px !important;
+  padding: 0.85rem 1.5rem !important;
+  font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  box-shadow: 0 4px 15px rgba(255, 0, 0, 0.2) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.5rem !important;
+}
+
+.login-button:hover {
+  background: #e60000 !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 25px rgba(255, 0, 0, 0.3) !important;
+}
+
+.login-button:disabled {
+  opacity: 0.6 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
+.loading-spinner {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.5rem !important;
+}
+
+.spinner {
+  width: 20px !important;
+  height: 20px !important;
+  border: 2px solid rgba(255, 255, 255, 0.3) !important;
+  border-top: 2px solid white !important;
+  border-radius: 50% !important;
+  animation: spin 1s linear infinite !important;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.additional-buttons {
+  display: flex !important;
+  gap: 0.75rem !important;
+  margin-top: 1rem !important;
+}
+
+.secondary-button {
+  flex: 1 !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  padding: 0.75rem !important;
+  font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+}
+
+.secondary-button:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) !important;
+}
+
+.login-footer {
+  text-align: center !important;
+  margin-top: 2rem !important;
+}
+
+.login-footer p {
+  font-size: 0.8rem !important;
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+@media (max-width: 480px) {
+  .login-container {
+    padding: 1.5rem !important;
+  }
+
+  .login-header h1 {
+    font-size: 1.8rem !important;
+  }
+
+  .logo-section p {
+    font-size: 0.9rem !important;
+  }
+
+  .form-group label {
+    font-size: 0.8rem !important;
+  }
+
+  .password-input {
+    padding: 0.6rem 2.2rem 0.6rem 0.8rem !important;
+    font-size: 0.8rem !important;
+  }
+
+  .password-input::placeholder {
+    font-size: 0.8rem !important;
+  }
+
+  .toggle-password {
+    right: 0.5rem !important;
+    padding: 0.15rem !important;
+  }
+
+  .login-button {
+    padding: 0.75rem 1rem !important;
+    font-size: 0.9rem !important;
+  }
+
+  .additional-buttons {
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+  }
+
+  .secondary-button {
+    padding: 0.6rem !important;
+    font-size: 0.8rem !important;
+  }
+
+  .login-footer {
+    margin-top: 1.5rem !important;
+  }
+
+  .login-footer p {
+    font-size: 0.7rem !important;
+  }
+}

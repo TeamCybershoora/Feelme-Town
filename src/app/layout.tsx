@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LoadingWrapper from "@/components/LoadingWrapper";
-import ClientLayout from "@/components/ClientLayout";
+import AdminLayoutWrapper from "@/components/AdminLayoutWrapper";
 
 
 const geistSans = Geist({
@@ -27,11 +27,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
           <LoadingWrapper>
-            <ClientLayout>
+            <AdminLayoutWrapper>
               {children}
-            </ClientLayout>
+            </AdminLayoutWrapper>
           </LoadingWrapper>
       </body>
     </html>

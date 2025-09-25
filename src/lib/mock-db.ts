@@ -31,10 +31,46 @@ export interface Booking {
   status: 'pending' | 'confirmed' | 'cancelled';
 }
 
+export interface IncompleteBooking {
+  id: string;
+  name?: string;
+  email: string;
+  phone?: string;
+  theaterName?: string;
+  date?: string;
+  time?: string;
+  occasion?: string;
+  selectedCakes?: Array<{
+    id: string;
+    name: string;
+    price: number;
+    quantity: number;
+  }>;
+  selectedDecorItems?: Array<{
+    id: string;
+    name: string;
+    price: number;
+    quantity: number;
+  }>;
+  selectedGifts?: Array<{
+    id: string;
+    name: string;
+    price: number;
+    quantity: number;
+  }>;
+  totalAmount?: number;
+  createdAt: string;
+  expiresAt: string; // 24 hours from creation
+  status: 'incomplete';
+}
+
 // FeelME Town Database Collections
 const feelmeTownDatabase = {
   // Collection: booking
   booking: [] as Booking[],
+  
+  // Collection: incompleteBooking
+  incompleteBooking: [] as IncompleteBooking[],
   
   // Collection: theaters (for future use)
   theaters: [] as object[],
@@ -44,6 +80,7 @@ const feelmeTownDatabase = {
 };
 
 let nextBookingId = 1;
+let nextIncompleteBookingId = 1;
 
 // Database functions
 export const db = {
@@ -114,16 +151,77 @@ export const db = {
     return allItems;
   },
 
+  // Create incomplete booking
+  createIncompleteBooking: (bookingData: Omit<IncompleteBooking, 'id' | 'createdAt' | 'expiresAt' | 'status'>): IncompleteBooking => {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + (24 * 60 * 60 * 1000)); // 24 hours from now
+    
+    const incompleteBooking: IncompleteBooking = {
+      ...bookingData,
+      id: `incomplete_${nextIncompleteBookingId++}`,
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      status: 'incomplete'
+    };
+    
+    // Save to 'incompleteBooking' collection
+    feelmeTownDatabase.incompleteBooking.push(incompleteBooking);
+    
+    console.log('📝 Incomplete booking saved to FeelME Town database:', {
+      database: 'FeelME Town',
+      collection: 'incompleteBooking',
+      bookingId: incompleteBooking.id,
+      customerEmail: incompleteBooking.email,
+      expiresAt: incompleteBooking.expiresAt,
+      status: incompleteBooking.status
+    });
+    
+    return incompleteBooking;
+  },
+
+  // Get all incomplete bookings
+  getIncompleteBookings: (): IncompleteBooking[] => {
+    return [...feelmeTownDatabase.incompleteBooking];
+  },
+
+  // Delete expired incomplete bookings (24+ hours old)
+  deleteExpiredIncompleteBookings: (): number => {
+    const now = new Date();
+    const initialLength = feelmeTownDatabase.incompleteBooking.length;
+    
+    // Filter out expired bookings
+    feelmeTownDatabase.incompleteBooking = feelmeTownDatabase.incompleteBooking.filter(booking => {
+      const expiresAt = new Date(booking.expiresAt);
+      return expiresAt > now; // Keep only non-expired bookings
+    });
+    
+    const deletedCount = initialLength - feelmeTownDatabase.incompleteBooking.length;
+    
+    if (deletedCount > 0) {
+      console.log(`🗑️ Deleted ${deletedCount} expired incomplete bookings from FeelME Town database`);
+    }
+    
+    return deletedCount;
+  },
+
+  // Clean up expired bookings (called automatically)
+  cleanupExpiredBookings: () => {
+    const deletedCount = db.deleteExpiredIncompleteBookings();
+    return deletedCount;
+  },
+
   // Get database info
   getDatabaseInfo: () => {
     return {
       databaseName: 'FeelME Town',
       collections: {
         booking: feelmeTownDatabase.booking.length,
+        incompleteBooking: feelmeTownDatabase.incompleteBooking.length,
         theaters: feelmeTownDatabase.theaters.length,
         items: feelmeTownDatabase.items.length
       },
-      totalBookings: feelmeTownDatabase.booking.length
+      totalBookings: feelmeTownDatabase.booking.length,
+      totalIncompleteBookings: feelmeTownDatabase.incompleteBooking.length
     };
   }
 };

@@ -1,12 +1,14 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useDatePicker } from '@/contexts/DatePickerContext';
 import { useBooking } from '@/contexts/BookingContext';
 
 export default function Theater() {
-    const { openBookingPopup } = useBooking();
+    const { openBookingPopup, setIncompleteBookingData, openCancelBookingPopup } = useBooking();
+    const searchParams = useSearchParams();
     const [selectedTheater, setSelectedTheater] = useState(0);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [searchTerm, setSearchTerm] = useState('');
@@ -16,9 +18,12 @@ export default function Theater() {
     const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
     const [selectedTimeSlot, setSelectedTimeSlot] = useState('');
     const theaterDetailsRef = useRef<HTMLDivElement>(null);
+    const [isFetchingIncompleteBooking, setIsFetchingIncompleteBooking] = useState(false);
+    const [fetchedBookingIds, setFetchedBookingIds] = useState<Set<string>>(new Set());
+    const [fetchedCancelBookingIds, setFetchedCancelBookingIds] = useState<Set<string>>(new Set());
     
     // Use global date picker
-    const { selectedDate, openDatePicker } = useDatePicker();
+    const { selectedDate, openDatePicker, setSelectedDate } = useDatePicker();
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -27,6 +32,191 @@ export default function Theater() {
 
         return () => clearInterval(timer);
     }, []);
+
+    const fetchIncompleteBooking = useCallback(async (bookingId: string, email: string) => {
+        // Prevent multiple simultaneous fetches for the same booking
+        if (isFetchingIncompleteBooking || fetchedBookingIds.has(bookingId)) {
+            console.log('⏸️ Fetch already in progress or already fetched for booking:', bookingId);
+            return;
+        }
+        
+        setIsFetchingIncompleteBooking(true);
+        setFetchedBookingIds(prev => new Set(prev).add(bookingId));
+        
+        const maxRetries = 3;
+        let lastError: Error | null = null;
+        
+        try {
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    console.log(`📞 Fetching incomplete booking data (attempt ${attempt}/${maxRetries}):`, { bookingId, email });
+                
+                // Get all incomplete bookings with retry mechanism
+                const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+                const response = await fetch(`${baseUrl}/api/incomplete-booking`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    cache: 'no-cache',
+                    signal: AbortSignal.timeout(10000) // 10 second timeout
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                console.log('📋 API Response:', result);
+                
+                if (result.success) {
+                    console.log('📝 Available incomplete bookings:', result.incompleteBookings);
+                    
+                    // Find the specific incomplete booking
+                    const incompleteBooking = result.incompleteBookings.find((booking: { bookingId: string; email: string }) => 
+                        booking.bookingId === bookingId && booking.email === email
+                    );
+                    
+                    if (incompleteBooking) {
+                        console.log('✅ Found incomplete booking:', incompleteBooking);
+                        
+                        // Set incomplete booking data in context
+                        setIncompleteBookingData(incompleteBooking);
+                        
+                        // Pre-fill the form data
+                        preFillBookingData(incompleteBooking);
+                        
+                        // Open booking popup automatically with incomplete data
+                        setTimeout(() => {
+                            console.log('🎯 Opening booking popup with incomplete data...');
+                            openBookingPopup(undefined, undefined, undefined, incompleteBooking);
+                        }, 1000);
+                        
+                        return; // Success, exit retry loop
+                    } else {
+                        console.log('❌ Incomplete booking not found or expired');
+                        console.log('🔍 Searched for:', { bookingId, email });
+                        console.log('📋 Available bookings:', result.incompleteBookings.map((b: { bookingId: string; email: string }) => ({ 
+                            id: b.bookingId, 
+                            email: b.email 
+                        })));
+                        return; // Not found, but no need to retry
+                    }
+                } else {
+                    console.log('❌ API request failed:', result.error);
+                    return; // API error, no need to retry
+                }
+                
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error('Unknown error');
+                console.error(`❌ Attempt ${attempt} failed:`, lastError.message);
+                
+                if (attempt < maxRetries) {
+                    console.log(`⏳ Retrying in ${attempt * 1000}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+                }
+            }
+        }
+        
+            // All retries failed
+            console.error('❌ All retry attempts failed for incomplete booking fetch');
+            if (lastError) {
+                if (lastError.message.includes('Failed to fetch')) {
+                    console.log('🌐 Network error - server might be down or unreachable');
+                } else if (lastError.message.includes('HTTP error')) {
+                    console.log('🔧 Server error - API endpoint issue');
+                } else {
+                    console.log('⚠️ Unexpected error:', lastError.message);
+                }
+            }
+        } finally {
+            // Always cleanup loading state
+            setIsFetchingIncompleteBooking(false);
+        }
+    }, [setIncompleteBookingData, openBookingPopup, isFetchingIncompleteBooking, fetchedBookingIds]);
+
+    // Handle incomplete booking from email link
+    useEffect(() => {
+        const bookingId = searchParams.get('bookingId');
+        const email = searchParams.get('email');
+        const newBooking = searchParams.get('newBooking');
+        const cancelBookingId = searchParams.get('cancelBookingId');
+        const reopenBooking = searchParams.get('reopenBooking');
+        
+        console.log('🔍 URL Parameters check:', { 
+            bookingId, 
+            email, 
+            newBooking,
+            cancelBookingId,
+            reopenBooking,
+            currentUrl: typeof window !== 'undefined' ? window.location.href : 'server-side',
+            allParams: Object.fromEntries(searchParams.entries()),
+            isFetching: isFetchingIncompleteBooking,
+            alreadyFetched: fetchedBookingIds.has(bookingId || '')
+        });
+        
+        if (reopenBooking === 'true') {
+            console.log('🎬 Reopening booking popup after movie selection');
+            // Get selected movie from sessionStorage (don't clear it yet)
+            const selectedMovie = sessionStorage.getItem('selectedMovie');
+            if (selectedMovie) {
+                console.log('🎬 Selected movie found:', selectedMovie);
+                // Don't clear sessionStorage here - let the booking popup handle it
+            }
+            
+            // Open booking popup with the selected theater, date, and time
+            setTimeout(() => {
+                openBookingPopup(theaters[selectedTheater], selectedDate, selectedTimeSlot);
+            }, 500);
+        } else if (bookingId && email && !isFetchingIncompleteBooking && !fetchedBookingIds.has(bookingId)) {
+            console.log('🔗 Incomplete booking link detected:', { bookingId, email });
+            // Add small delay to ensure page is fully loaded
+            setTimeout(() => {
+                fetchIncompleteBooking(bookingId, email);
+            }, 100);
+        } else if (newBooking === 'true') {
+            console.log('🆕 Fresh booking request detected - opening booking popup');
+            // Open fresh booking popup without any pre-filled data
+            setTimeout(() => {
+                openBookingPopup();
+            }, 500);
+        } else if (cancelBookingId && email && !fetchedCancelBookingIds.has(cancelBookingId)) {
+            console.log('❌ Cancel booking link detected:', { cancelBookingId, email });
+            // Mark as fetched to prevent duplicate requests
+            setFetchedCancelBookingIds(prev => new Set(prev).add(cancelBookingId));
+            // Fetch booking data and open cancel popup
+            setTimeout(async () => {
+                try {
+                    console.log('📞 Fetching cancel booking data:', { bookingId: cancelBookingId, email });
+                    
+                    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+                    const response = await fetch(`${baseUrl}/api/booking/${cancelBookingId}?email=${encodeURIComponent(email)}`);
+                    const result = await response.json();
+
+                    if (result.success && result.booking) {
+                        console.log('✅ Cancel booking data fetched successfully:', result.booking);
+                        // Open cancel booking popup with the fetched data
+                        openCancelBookingPopup(result.booking);
+                    } else {
+                        console.log('ℹ️ Booking not found - may have been already cancelled:', result.error);
+                        // Open cancel booking popup with null data to show "booking not found" message
+                        openCancelBookingPopup(null);
+                    }
+                } catch (error) {
+                    console.error('❌ Error fetching cancel booking data:', error);
+                    // Open cancel booking popup with null data to show "booking not found" message
+                    openCancelBookingPopup(null);
+                }
+            }, 100);
+        } else if (cancelBookingId && email) {
+            console.log('⏸️ Skipping cancel booking fetch - already processed for booking:', cancelBookingId);
+        } else if (bookingId && email) {
+            console.log('⏸️ Skipping fetch - already in progress or completed for booking:', bookingId);
+        } else {
+            console.log('❌ No special parameters detected');
+        }
+    }, [searchParams, fetchIncompleteBooking, openBookingPopup, openCancelBookingPopup, isFetchingIncompleteBooking, fetchedBookingIds, fetchedCancelBookingIds, selectedTheater, selectedDate, selectedTimeSlot]);
 
     const handleTheaterSelection = (index: number) => {
         setSelectedTheater(index);
@@ -42,16 +232,9 @@ export default function Theater() {
         }, 100);
     };
 
-    const formatDate = (date: Date) => {
-        return date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-    };
 
     
-    const theaters = [
+    const theaters = useMemo(() => [
         {
             id: 1,
             name: "EROS (Couples ) (FMT-Hall-1)",
@@ -128,7 +311,41 @@ export default function Theater() {
                 "Free cancellation up to 72 hrs before slot"
             ]
         }
-    ];
+    ], []);
+
+    const preFillBookingData = useCallback((bookingData: { date?: string; numberOfPeople?: number; time?: string; theaterName?: string }) => {
+        // Set date if available
+        if (bookingData.date) {
+            setSelectedDate(bookingData.date);
+        }
+        
+        // Set member count if available
+        if (bookingData.numberOfPeople) {
+            setMemberCount(bookingData.numberOfPeople);
+        }
+        
+        // Set time slot if available
+        if (bookingData.time) {
+            setSelectedTimeSlot(bookingData.time);
+        }
+        
+        // Set theater if available
+        if (bookingData.theaterName) {
+            const theaterIndex = theaters.findIndex(theater => 
+                theater.name === bookingData.theaterName
+            );
+            if (theaterIndex !== -1) {
+                setSelectedTheater(theaterIndex);
+            }
+        }
+        
+        console.log('📝 Pre-filled booking data:', {
+            date: bookingData.date,
+            memberCount: bookingData.numberOfPeople,
+            timeSlot: bookingData.time,
+            theaterName: bookingData.theaterName
+        });
+    }, [setSelectedDate, setMemberCount, setSelectedTimeSlot, setSelectedTheater, theaters]);
 
     // Filter theaters based on search term, type, and member count
     const filteredTheaters = theaters.filter(theater => {
@@ -2029,7 +2246,7 @@ export default function Theater() {
 
                 .book-button {
                     background: linear-gradient(45deg, #FF0005, #FF0005);
-                    color: #000000;
+                    color:rgb(255, 255, 255);
                     border: none;
                     padding: 0.75rem 1.5rem;
                     border-radius: 0.5rem;

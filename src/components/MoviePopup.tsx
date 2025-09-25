@@ -19,9 +19,11 @@ interface MoviePopupProps {
   movie: Movie | null;
   isOpen: boolean;
   onClose: () => void;
+  onMovieSelect?: (movieTitle: string) => void;
+  isFromBooking?: boolean;
 }
 
-export default function MoviePopup({ movie, isOpen, onClose }: MoviePopupProps) {
+export default function MoviePopup({ movie, isOpen, onClose, onMovieSelect, isFromBooking = false }: MoviePopupProps) {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
@@ -49,6 +51,15 @@ export default function MoviePopup({ movie, isOpen, onClose }: MoviePopupProps) 
       onClose();
     }
   }, [onClose]);
+
+  const handleMovieSelect = () => {
+    if (movie && onMovieSelect) {
+      // Store selected movie in sessionStorage
+      sessionStorage.setItem('selectedMovie', movie.title);
+      onMovieSelect(movie.title);
+      onClose();
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -149,19 +160,34 @@ export default function MoviePopup({ movie, isOpen, onClose }: MoviePopupProps) 
 
             {/* Action Buttons */}
             <div className="buttons-container">
-              {/* Add to List Button */}
-              <button className="add-button">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M12 5V19M5 12H19"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                <span>Add to List</span>
-              </button>
+              {/* Select Button (for booking) or Add to List Button */}
+              {isFromBooking ? (
+                <button className="select-button" onClick={handleMovieSelect}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M9 12L11 14L15 10"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span>Select Movie</span>
+                </button>
+              ) : (
+                <button className="add-button">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M12 5V19M5 12H19"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span>Add to List</span>
+                </button>
+              )}
 
               {/* Play Button */}
               <button className="play-button">
@@ -568,6 +594,39 @@ export default function MoviePopup({ movie, isOpen, onClose }: MoviePopupProps) 
         border-color: rgba(255, 255, 255, 0.5);
         transform: translateY(-3px);
         box-shadow: 0 10px 25px rgba(255, 255, 255, 0.1);
+      }
+
+      .select-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        border-radius: 50px;
+        color: white;
+        font-weight: 600;
+        font-size: 0.875rem;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        background: linear-gradient(135deg, #ff3366 0%, #ff1744 100%);
+        border: 2px solid rgba(255, 51, 102, 0.3);
+        backdrop-filter: blur(15px);
+        box-shadow: 0 8px 25px rgba(255, 51, 102, 0.3);
+      }
+
+      @media (min-width: 768px) {
+        .select-button {
+          padding: 1rem 1.5rem;
+          font-size: 1rem;
+          height: 60px;
+        }
+      }
+
+      .select-button:hover {
+        background: linear-gradient(135deg, #ff1744 0%, #e91e63 100%);
+        border-color: rgba(255, 51, 102, 0.6);
+        transform: translateY(-3px);
+        box-shadow: 0 12px 35px rgba(255, 51, 102, 0.5);
       }
 
       @keyframes pulse {

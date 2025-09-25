@@ -36,6 +36,7 @@ interface MoviesProps {
   language?: string;         // e.g., 'en-US' or 'hi-IN'
   industry?: Industry;       // new filter
   selectedRows?: number;     // number of rows to display
+  onMovieSelect?: (movieTitle: string) => void;
 }
 
 function mapIndustry(industry: Industry) {
@@ -145,6 +146,7 @@ export default function Movies({
   language,                 // optional override
   industry = 'ALL',
   selectedRows = 3,
+  onMovieSelect,
 }: MoviesProps) {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [filteredMovies, setFilteredMovies] = useState<Movie[]>([]);
@@ -235,7 +237,7 @@ export default function Movies({
 
   useEffect(() => {
     fetchMovies();
-  }, [currentPage, searchTerm, selectedYear, selectedGenre, industry, language, fetchMovies]);
+  }, [fetchMovies]);
 
   // Client-side filter (optional redundancy)
   useEffect(() => {
@@ -372,7 +374,9 @@ export default function Movies({
       <MoviePopup 
         movie={selectedMovie} 
         isOpen={isPopupOpen} 
-        onClose={handleClosePopup} 
+        onClose={handleClosePopup}
+        onMovieSelect={onMovieSelect}
+        isFromBooking={!!onMovieSelect}
       />
 
       <style jsx>{`

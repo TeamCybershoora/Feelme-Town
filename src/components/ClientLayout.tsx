@@ -5,6 +5,7 @@ import Footer from "./Footer";
 import FloatingNavigation from "./FloatingNavigation";
 import SmoothScroll from "./SmoothScroll";
 import BookingPopup from "./BookingPopup";
+import CancelBookingPopup from "./CancelBookingPopup";
 import { DatePickerProvider } from "@/contexts/DatePickerContext";
 import { BookingProvider, useBooking } from "@/contexts/BookingContext";
 import LayoutContent from "./LayoutContent";
@@ -14,7 +15,7 @@ interface ClientLayoutProps {
 }
 
 function ClientLayoutContent({ children }: ClientLayoutProps) {
-  const { isBookingPopupOpen, closeBookingPopup } = useBooking();
+  const { isBookingPopupOpen, closeBookingPopup, isCancelBookingPopupOpen, closeCancelBookingPopup, cancelBookingData } = useBooking();
 
   return (
     <>
@@ -26,6 +27,7 @@ function ClientLayoutContent({ children }: ClientLayoutProps) {
       <Footer />
       <FloatingNavigation />
       <BookingPopup isOpen={isBookingPopupOpen} onClose={closeBookingPopup} />
+      <CancelBookingPopup isOpen={isCancelBookingPopupOpen} onClose={closeCancelBookingPopup} bookingData={cancelBookingData} />
     </>
   );
 }

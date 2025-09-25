@@ -2,11 +2,123 @@ import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
 
-// POST /api/booking - Save booking data to database
-export async function POST(request: NextRequest) {
+// GET /api/booking/[id] - Get booking by ID with email verification
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
+    const { id: bookingId } = await params;
+    const email = request.nextUrl.searchParams.get('email');
+
+    if (!bookingId) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing booking ID' 
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!email) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing email parameter' 
+        },
+        { status: 400 }
+      );
+    }
+
+    // Get booking from database
+    const result = await database.getBookingById(bookingId);
+
+    if (!result.success || !result.booking) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Booking not found' 
+        },
+        { status: 404 }
+      );
+    }
+
+    const booking = result.booking;
+
+    // Verify email matches
+    if (booking.email.toLowerCase() !== email.toLowerCase()) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Email does not match booking' 
+        },
+        { status: 403 }
+      );
+    }
+
+    // Check if booking is already cancelled
+    if (booking.status === 'cancelled') {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Booking is already cancelled' 
+        },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      booking: {
+        id: booking.bookingId || booking._id,
+        name: booking.name,
+        email: booking.email,
+        phone: booking.phone,
+        theaterName: booking.theaterName,
+        date: booking.date,
+        time: booking.time,
+        occasion: booking.occasion,
+        numberOfPeople: booking.numberOfPeople,
+        totalAmount: booking.totalAmount,
+        advancePayment: booking.advancePayment,
+        venuePayment: booking.venuePayment,
+        status: booking.status || 'completed',
+        createdAt: booking.createdAt
+      }
+    }, { status: 200 });
+
+  } catch (error) {
+    console.error('❌ Error getting booking:', error);
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Failed to get booking. Please try again.' 
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT /api/booking/[id] - Update existing booking
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: bookingId } = await params;
     const body = await request.json();
     
+    if (!bookingId) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing booking ID' 
+        },
+        { status: 400 }
+      );
+    }
+
     // Validate required fields
     const requiredFields = ['name', 'email', 'phone', 'theaterName', 'date', 'time', 'occasion'];
     const missingFields = requiredFields.filter(field => !body[field]);
@@ -66,7 +178,7 @@ export async function POST(request: NextRequest) {
     const advancePayment = Math.round(totalAmount * 0.25); // 25% advance payment
     const venuePayment = totalAmount - advancePayment; // Remaining amount to be paid at venue
 
-    // Create booking data
+    // Create updated booking data
     const bookingData = {
       name: body.name.trim(),
       email: body.email.trim().toLowerCase(),
@@ -86,15 +198,11 @@ export async function POST(request: NextRequest) {
       status: 'completed' // Booking status
     };
 
-    // Check if this is completing an incomplete booking
-    const incompleteBookingId = body.incompleteBookingId;
-    let deletedIncompleteBooking = null;
-
-    // Save to database using db-connect (optimized for speed)
-    const result = await database.saveBooking(bookingData);
+    // Update booking in database
+    const result = await database.updateBooking(bookingId, bookingData);
 
     if (result.success && result.booking) {
-      console.log('✅ Booking data saved to FeelME Town database:', {
+      console.log('✅ Booking updated in FeelME Town database:', {
         id: result.booking.id,
         name: result.booking.name,
         theater: result.booking.theaterName,
@@ -103,22 +211,6 @@ export async function POST(request: NextRequest) {
         total: result.booking.totalAmount
       });
 
-      // If this was completing an incomplete booking, delete the incomplete one
-      if (incompleteBookingId) {
-        console.log('🔄 Completing incomplete booking:', incompleteBookingId);
-        
-        const deleteResult = await database.deleteIncompleteBooking(incompleteBookingId);
-        if (deleteResult.success) {
-          console.log('🗑️ Deleted incomplete booking:', incompleteBookingId);
-          deletedIncompleteBooking = {
-            id: incompleteBookingId,
-            deleted: true
-          };
-        } else {
-          console.log('⚠️ Failed to delete incomplete booking:', deleteResult.message);
-        }
-      }
-
       // Send email in background (non-blocking for faster response)
       emailService.sendBookingComplete(result.booking).catch(error => {
         console.log('⚠️ Email service error (background):', error);
@@ -126,23 +218,22 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: 'Booking completed successfully!',
+        message: 'Booking updated successfully!',
         bookingId: result.booking.id,
         booking: result.booking,
         database: 'FeelME Town',
-        collection: 'booking',
-        incompleteBookingDeleted: deletedIncompleteBooking
-      }, { status: 201 });
+        collection: 'booking'
+      }, { status: 200 });
     } else {
       throw new Error(result.error);
     }
 
   } catch (error) {
-    console.error('❌ Error saving booking data:', error);
+    console.error('❌ Error updating booking data:', error);
     return NextResponse.json(
       { 
         success: false, 
-        error: 'Failed to save booking data. Please try again.' 
+        error: 'Failed to update booking data. Please try again.' 
       },
       { status: 500 }
     );

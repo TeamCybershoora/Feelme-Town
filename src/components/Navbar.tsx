@@ -10,7 +10,7 @@ const Navbar = () => {
   const { openBookingPopup } = useBooking();
   
   const handleBookingClick = () => {
-    openBookingPopup();
+    router.push('/theater');
   };
   const router = useRouter();
   const pathname = usePathname();
@@ -21,6 +21,10 @@ const Navbar = () => {
   const lastScrollY = useRef(0);
   const [dragStart, setDragStart] = useState<number | null>(null);
   const [dragCurrent, setDragCurrent] = useState<number | null>(null);
+  
+  // Hidden admin access - click logo 5 times
+  const [logoClickCount, setLogoClickCount] = useState(0);
+  const [lastLogoClickTime, setLastLogoClickTime] = useState(0);
 
   const handleButtonClick = (buttonName: string) => {
     setActiveButton(buttonName);
@@ -51,6 +55,27 @@ const Navbar = () => {
         break;
       default:
         break;
+    }
+  };
+
+  // Handle logo click for hidden admin access
+  const handleLogoClick = () => {
+    const currentTime = Date.now();
+    
+    // Reset counter if more than 3 seconds have passed since last click
+    if (currentTime - lastLogoClickTime > 3000) {
+      setLogoClickCount(1);
+    } else {
+      setLogoClickCount(prev => prev + 1);
+    }
+    
+    setLastLogoClickTime(currentTime);
+    
+    // If 5 clicks within 3 seconds, redirect to admin
+    if (logoClickCount >= 4) { // 4 because we just incremented
+      console.log('🔐 Admin access granted!');
+      router.push('/Administrator');
+      setLogoClickCount(0); // Reset counter
     }
   };
 
@@ -167,6 +192,8 @@ const Navbar = () => {
               width={50} 
               height={50}
               className="logo"
+              onClick={handleLogoClick}
+              style={{ cursor: 'pointer' }}
             />
           </div>
           <button 
@@ -303,7 +330,7 @@ const Navbar = () => {
             <div className="book-darkBorderBg" aria-hidden="true"></div>
             <div className="book-white" aria-hidden="true"></div>
             <div className="book-border" aria-hidden="true"></div>
-              <button className="book-button" onClick={() => handleButtonClick('Book Your Show')}>
+              <button className="book-button"  onClick={handleBookingClick}>
                 <Image
                   src="/ticket.png"
                   alt="Ticket"
@@ -1489,10 +1516,16 @@ const Navbar = () => {
         .logo {
           filter: brightness(0) invert(1);
           transition: all 0.3s ease;
+          user-select: none;
         }
         
         .logo:hover {
           filter: brightness(0) invert(1) drop-shadow(0 0 8px rgba(128, 0, 255, 0.6));
+        }
+        
+        .logo:active {
+          transform: scale(0.95);
+          filter: brightness(0) invert(1) drop-shadow(0 0 12px rgba(255, 0, 5, 0.8));
         }
         
         .nav-button {

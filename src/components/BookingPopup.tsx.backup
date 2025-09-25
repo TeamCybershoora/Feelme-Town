@@ -2,10 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Minus, X, Check, Star, Calendar, Clock, Users, MapPin, Gift, Cake, Sparkles, Play } from 'lucide-react';
 import { useBooking } from '@/contexts/BookingContext';
-import TimeSelectionPopup from './TimeSelectionPopup';
 
 
 interface BookingForm {
@@ -17,14 +15,11 @@ interface BookingForm {
   selectedCakes: string[];
   selectedDecorItems: string[];
   selectedGifts: string[];
-  selectedMovies: string[];
   // Overview section options
   wantCakes: 'Yes' | 'No';
   wantDecorItems: 'Yes' | 'No';
   wantGifts: 'Yes' | 'No';
-  wantMovies: 'Yes' | 'No';
   promoCode: string;
-  agreeToTerms: boolean;
 }
 
 interface BookingPopupProps {
@@ -32,22 +27,12 @@ interface BookingPopupProps {
   onClose: () => void;
 }
 
-
 export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
-  const { selectedTheater, selectedDate, selectedTimeSlot, setSelectedTimeSlot, openBookingPopup, closeBookingPopup } = useBooking();
-  const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions'>('Overview');
+  const { selectedTheater, selectedDate, selectedTimeSlot, incompleteBookingData, setIncompleteBookingData } = useBooking();
+  const [activeTab, setActiveTab] = useState<'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items'>('Overview');
   const [isLoaded, setIsLoaded] = useState(false);
-  const [isBookingSuccessful, setIsBookingSuccessful] = useState(false);
-  const [bookingResult, setBookingResult] = useState<{ success: boolean; message: string; bookingId?: string } | null>(null);
-  const [isEditingBooking, setIsEditingBooking] = useState(false);
-  const [originalFormData, setOriginalFormData] = useState<BookingForm | null>(null);
-  const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
-  const [showValidationPopup, setShowValidationPopup] = useState(false);
-  const [validationMessage, setValidationMessage] = useState('');
-  const [validationErrorName, setValidationErrorName] = useState('');
-  const [isTimeSelectionOpen, setIsTimeSelectionOpen] = useState(false);
-  
+  const [showTermsPopup, setShowTermsPopup] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [formData, setFormData] = useState<BookingForm>({
     bookingName: '',
     numberOfPeople: 2,
@@ -57,102 +42,268 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     selectedCakes: [],
     selectedDecorItems: [],
     selectedGifts: [],
-    selectedMovies: [],
     wantCakes: 'No',
     wantDecorItems: 'No',
     wantGifts: 'No',
-    wantMovies: 'No',
-    promoCode: '',
-    agreeToTerms: false
+    promoCode: ''
   });
 
+  // Sample data for items
+  const cakes = [
+    { id: 'cake1', name: 'Chocolate Cake', price: 1500 },
+    { id: 'cake2', name: 'Vanilla Cake', price: 1200 },
+  ];
+  
+  const decorItems = [
+    { id: 'decor1', name: 'Balloons', price: 800 },
+    { id: 'decor2', name: 'Lights', price: 1200 },
+  ];
+  
+  const gifts = [
+    { id: 'gift1', name: 'Teddy Bear', price: 500 },
+    { id: 'gift2', name: 'Photo Frame', price: 300 },
+  ];
 
-  // Validation function to check form completeness
-  const validateForm = () => {
-    // Check basic required fields
-    if (!formData.bookingName.trim()) {
-      setValidationErrorName('Missing Name');
-      setValidationMessage('Please enter your name to continue.');
-      setShowValidationPopup(true);
-      return false;
+  // Handle payment with Razorpay
+  const handlePayment = async () => {
+    try {
+      // Calculate total amount
+      const theaterCost = formData.numberOfPeople * 2500;
+      const cakesCost = formData.selectedCakes.reduce((sum, cakeId) => {
+        const cake = cakes.find(c => c.id === cakeId);
+        return sum + (cake ? cake.price : 0);
+      }, 0);
+      const decorCost = formData.selectedDecorItems.reduce((sum, itemId) => {
+        const item = decorItems.find(d => d.id === itemId);
+        return sum + (item ? item.price : 0);
+      }, 0);
+      const giftsCost = formData.selectedGifts.reduce((sum, giftId) => {
+        const gift = gifts.find(g => g.id === giftId);
+        return sum + (gift ? gift.price : 0);
+      }, 0);
+      
+      const totalAmount = theaterCost + cakesCost + decorCost + giftsCost;
+      const advanceAmount = 600; // RS. 600 advance as per terms
+      
+      // Create Razorpay order
+      const orderResponse = await fetch('/api/create-razorpay-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: advanceAmount * 100, // Convert to paise
+          currency: 'INR',
+          receipt: `feelme_${Date.now()}`,
+        }),
+      });
+
+      const orderData = await orderResponse.json();
+
+      if (!orderData.success) {
+        throw new Error(orderData.error || 'Failed to create payment order');
+      }
+
+      // Initialize Razorpay
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: orderData.order.amount,
+        currency: orderData.order.currency,
+        name: 'FeelME Town',
+        description: 'Theater Booking Advance Payment',
+        order_id: orderData.order.id,
+        handler: async function (response: any) {
+          try {
+            // Verify payment
+            const verifyResponse = await fetch('/api/verify-payment', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                bookingData: {
+                  ...formData,
+                  theaterName: selectedTheater?.name || 'Premium Theater',
+                  date: selectedDate,
+                  time: selectedTimeSlot,
+                  totalAmount,
+                  advanceAmount,
+                  paymentId: response.razorpay_payment_id,
+                },
+                incompleteBookingId: incompleteBookingData?.bookingId || null,
+              }),
+            });
+
+            const verifyData = await verifyResponse.json();
+
+            if (verifyData.success) {
+              // Show success message
+              alert(`Payment successful! Booking confirmed. Payment ID: ${response.razorpay_payment_id}`);
+              
+              // Reset form and close popup
+              resetForm();
+              onClose();
+            } else {
+              throw new Error(verifyData.error || 'Payment verification failed');
+            }
+          } catch (error) {
+            console.error('Payment verification error:', error);
+            alert('Payment verification failed. Please contact support.');
+          }
+        },
+        prefill: {
+          name: formData.bookingName,
+          email: formData.emailAddress,
+          contact: formData.whatsappNumber,
+        },
+        theme: {
+          color: '#f59e0b',
+        },
+      };
+
+      const razorpay = new (window as any).Razorpay(options);
+      razorpay.open();
+    } catch (error) {
+      console.error('Payment error:', error);
+      alert('Payment failed. Please try again.');
     }
-    
-    if (!formData.whatsappNumber.trim()) {
-      setValidationErrorName('Missing WhatsApp Number');
-      setValidationMessage('Please enter your WhatsApp number to continue.');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    if (!formData.emailAddress.trim()) {
-      setValidationErrorName('Missing Email Address');
-      setValidationMessage('Please enter your email address to continue.');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    if (!selectedTimeSlot) {
-      setValidationErrorName('Missing Time Slot');
-      setValidationMessage('Please select a time slot by clicking on the time area in the header to continue.');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    if (!formData.occasion) {
-      setValidationErrorName('Missing Occasion');
-      setValidationMessage('Please select an occasion to continue.');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    // Check if user selected "Yes" for items but didn&apos;t select any
-    if (formData.wantCakes === 'Yes' && formData.selectedCakes.length === 0) {
-      setValidationErrorName('Cake Selection Required');
-      setValidationMessage('You selected "Yes" for cakes but didn&apos;t choose any cake items. Please select cakes or change to "No".');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    if (formData.wantDecorItems === 'Yes' && formData.selectedDecorItems.length === 0) {
-      setValidationErrorName('Decor Items Selection Required');
-      setValidationMessage('You selected "Yes" for decor items but didn&apos;t choose any decor items. Please select decor items or change to "No".');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    if (formData.wantGifts === 'Yes' && formData.selectedGifts.length === 0) {
-      setValidationErrorName('Gift Items Selection Required');
-      setValidationMessage('You selected "Yes" for gift items but didn&apos;t choose any gift items. Please select gift items or change to "No".');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    if (formData.wantMovies === 'Yes' && formData.selectedMovies.length === 0) {
-      setValidationErrorName('Movie Selection Required');
-      setValidationMessage('You selected "Yes" for movies but didn&apos;t choose any movies. Please select movies or change to "No".');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    // Check terms agreement
-    if (!formData.agreeToTerms) {
-      setValidationErrorName('Terms & Conditions Required');
-      setValidationMessage('Please agree to the terms & conditions to continue.');
-      setShowValidationPopup(true);
-      return false;
-    }
-    
-    return true;
   };
 
-  // Check if form data has changed during editing
-  const hasFormDataChanged = () => {
-    if (!isEditingBooking || !originalFormData) return false;
-    
-    // Compare current form data with original
-    return JSON.stringify(formData) !== JSON.stringify(originalFormData);
+  // Tab configuration
+  const tabs = ['Overview', 'Occasion', 'Cakes', 'Decor Items', 'Gifts Items'];
+
+  // Handle input changes
+  const handleInputChange = (field: keyof BookingForm, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
 
+  // Handle number changes
+  const handleNumberChange = (field: keyof BookingForm, value: number) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  // Handle item selection
+  const handleItemSelection = (field: 'selectedCakes' | 'selectedDecorItems' | 'selectedGifts', itemId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: prev[field].includes(itemId)
+        ? prev[field].filter(id => id !== itemId)
+        : [...prev[field], itemId]
+    }));
+  };
+
+  // Calculate total amount
+  const calculateTotal = () => {
+    const theaterCost = formData.numberOfPeople * 2500;
+    const cakesCost = formData.selectedCakes.reduce((sum, cakeId) => {
+      const cake = cakes.find(c => c.id === cakeId);
+      return sum + (cake ? cake.price : 0);
+    }, 0);
+    const decorCost = formData.selectedDecorItems.reduce((sum, itemId) => {
+      const item = decorItems.find(d => d.id === itemId);
+      return sum + (item ? item.price : 0);
+    }, 0);
+    const giftsCost = formData.selectedGifts.reduce((sum, giftId) => {
+      const gift = gifts.find(g => g.id === giftId);
+      return sum + (gift ? gift.price : 0);
+    }, 0);
+    
+    return theaterCost + cakesCost + decorCost + giftsCost;
+  };
+
+  // Get payable amount (advance)
+  const getPayableAmount = () => {
+    return 600; // RS. 600 advance as per terms
+  };
+
+  // Get balance amount
+  const getBalanceAmount = () => {
+    return calculateTotal() - getPayableAmount();
+  };
+
+  // Reset form
+  const resetForm = () => {
+    setFormData({
+      bookingName: '',
+      numberOfPeople: 2,
+      whatsappNumber: '',
+      emailAddress: '',
+      occasion: '',
+      selectedCakes: [],
+      selectedDecorItems: [],
+      selectedGifts: [],
+      wantCakes: 'No',
+      wantDecorItems: 'No',
+      wantGifts: 'No',
+      promoCode: ''
+    });
+    setTermsAccepted(false);
+  };
+
+  // Handle skip
+  const handleSkip = () => {
+    const currentIndex = tabs.indexOf(activeTab);
+    if (currentIndex < tabs.length - 1) {
+      setActiveTab(tabs[currentIndex + 1] as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items');
+    }
+  };
+
+  // Handle next step
+  const handleNextStep = () => {
+    // Validation logic can be added here
+    
+    const currentIndex = tabs.indexOf(activeTab);
+    if (currentIndex < tabs.length - 1) {
+      setActiveTab(tabs[currentIndex + 1] as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items');
+    } else {
+      // Check if this is the last tab (Complete Booking)
+      const isLastTab = activeTab === tabs[tabs.length - 1];
+      if (isLastTab) {
+        // Open terms and conditions popup
+        setShowTermsPopup(true);
+        return;
+      }
+    }
+  };
+
+  // Sample data for options
+  const occasionOptions = ['Birthday', 'Anniversary', 'Date Night', 'Party', 'Other'];
+  const cakeOptions = cakes;
+  const decorOptions = decorItems;
+  const giftOptions = gifts;
+
+  // Pre-fill form with incomplete booking data
+  useEffect(() => {
+    if (incompleteBookingData && isOpen) {
+      console.log('📝 Pre-filling form with incomplete booking data:', incompleteBookingData);
+      
+      setFormData(prev => ({
+        ...prev,
+        bookingName: incompleteBookingData.name || '',
+        numberOfPeople: incompleteBookingData.numberOfPeople || 2,
+        whatsappNumber: incompleteBookingData.phone || '',
+        emailAddress: incompleteBookingData.email || '',
+        occasion: incompleteBookingData.occasion || '',
+        selectedCakes: incompleteBookingData.selectedCakes?.map((cake: { id: string }) => cake.id) || [],
+        selectedDecorItems: incompleteBookingData.selectedDecorItems?.map((item: { id: string }) => item.id) || [],
+        selectedGifts: incompleteBookingData.selectedGifts?.map((gift: { id: string }) => gift.id) || [],
+        wantCakes: (incompleteBookingData.selectedCakes?.length || 0) > 0 ? 'Yes' : 'No',
+        wantDecorItems: (incompleteBookingData.selectedDecorItems?.length || 0) > 0 ? 'Yes' : 'No',
+        wantGifts: (incompleteBookingData.selectedGifts?.length || 0) > 0 ? 'Yes' : 'No'
+      }));
+      
+      console.log('✅ Form pre-filled with incomplete booking data');
+    }
+  }, [incompleteBookingData, isOpen]);
 
   // Reset form to initial state
   const resetForm = () => {
@@ -165,86 +316,20 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
       selectedCakes: [],
       selectedDecorItems: [],
       selectedGifts: [],
-      selectedMovies: [],
       wantCakes: 'No',
       wantDecorItems: 'No',
       wantGifts: 'No',
-      wantMovies: 'No',
-      promoCode: '',
-      agreeToTerms: false
+      promoCode: ''
     });
     setActiveTab('Overview');
     setIsLoaded(false);
-    setIsEditingBooking(false); // Reset editing state
-    setOriginalFormData(null); // Reset original form data
-    setEditingBookingId(null); // Reset editing booking ID
   };
 
   useEffect(() => {
     if (isOpen) {
-      // Check if returning from movies page and restore form data
-      const bookingFromPopup = sessionStorage.getItem('bookingFromPopup');
-      const storedFormData = sessionStorage.getItem('bookingFormData');
-      
-      if (bookingFromPopup === 'true' && storedFormData) {
-        try {
-          const parsedFormData = JSON.parse(storedFormData);
-          
-          // Check if there's a new selected movie to add
-          const selectedMovie = sessionStorage.getItem('selectedMovie');
-          if (selectedMovie) {
-            console.log('🎬 Found selected movie in sessionStorage:', selectedMovie);
-            // Replace existing movie with new selection (only one movie allowed)
-            parsedFormData.selectedMovies = [selectedMovie];
-            parsedFormData.wantMovies = 'Yes';
-            // Clear the selected movie from sessionStorage
-            sessionStorage.removeItem('selectedMovie');
-          }
-          
-          setFormData(parsedFormData);
-          
-          // Restore selected time slot if it was stored
-          const storedTimeSlot = sessionStorage.getItem('selectedTimeSlot');
-          if (storedTimeSlot) {
-            console.log('⏰ Restoring selected time slot:', storedTimeSlot);
-            setSelectedTimeSlot(storedTimeSlot);
-            // Clear the stored time slot
-            sessionStorage.removeItem('selectedTimeSlot');
-          }
-          
-          // Clear the stored data
-          sessionStorage.removeItem('bookingFromPopup');
-          sessionStorage.removeItem('bookingFormData');
-        } catch (error) {
-          console.error('Error parsing stored form data:', error);
-          // If error, reset form
-          resetForm();
-        }
-      } else {
-        // Check if returning from movies page with selected movies (legacy support)
-        const selectedMovies = sessionStorage.getItem('selectedMovies');
-        if (selectedMovies) {
-          try {
-            const parsedMovies = JSON.parse(selectedMovies);
-            setFormData(prev => ({
-              ...prev,
-              selectedMovies: parsedMovies
-            }));
-            // Clear the stored movies
-            sessionStorage.removeItem('selectedMovies');
-          } catch (error) {
-            console.error('Error parsing selected movies:', error);
-          }
-        }
-        // Reset form when popup opens to ensure fresh start
-        resetForm();
-      }
-      
+      // Reset form when popup opens to ensure fresh start
+      resetForm();
       setIsLoaded(true);
-      setIsBookingSuccessful(false);
-      setBookingResult(null);
-      setShowValidationPopup(false);
-      setValidationMessage('');
       
       // Store original styles
       const originalOverflow = document.body.style.overflow;
@@ -289,10 +374,9 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     }
   }, [isOpen]);
 
-
   // Dynamic tabs based on selections
   const getAvailableTabs = () => {
-    const availableTabs: ('Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions')[] = ['Overview', 'Occasion'];
+    const availableTabs: ('Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items')[] = ['Overview', 'Occasion'];
     
     if (formData.wantCakes === 'Yes') {
       availableTabs.push('Cakes');
@@ -303,9 +387,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     if (formData.wantGifts === 'Yes') {
       availableTabs.push('Gifts Items');
     }
-    
-    // Always add Terms & Conditions as the last tab
-    availableTabs.push('Terms & Conditions');
     
     return availableTabs;
   };
@@ -348,11 +429,11 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     { name: 'Jewelry', price: 899, rating: 4.9, image: '💎', category: 'Luxury' }
   ];
 
-  const handleInputChange = (field: keyof BookingForm, value: string | number | boolean) => {
+  const handleInputChange = (field: keyof BookingForm, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     
-    // If changing wantCakes, wantDecorItems, wantGifts, or wantMovies, reset to Overview if current tab is no longer available
-    if (field === 'wantCakes' || field === 'wantDecorItems' || field === 'wantGifts' || field === 'wantMovies') {
+    // If changing wantCakes, wantDecorItems, or wantGifts, reset to Overview if current tab is no longer available
+    if (field === 'wantCakes' || field === 'wantDecorItems' || field === 'wantGifts') {
       const newTabs = getAvailableTabs();
       if (!newTabs.includes(activeTab)) {
         setActiveTab('Overview');
@@ -367,40 +448,13 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     }));
   };
 
-  const handleItemSelection = (field: 'selectedCakes' | 'selectedDecorItems' | 'selectedGifts' | 'selectedMovies', itemName: string) => {
+  const handleItemSelection = (field: 'selectedCakes' | 'selectedDecorItems' | 'selectedGifts', itemName: string) => {
     setFormData(prev => ({
       ...prev,
       [field]: prev[field].includes(itemName)
         ? prev[field].filter(item => item !== itemName)
         : [...prev[field], itemName]
     }));
-  };
-
-  // Handle movie selection - navigate to movies page and close popup
-  const handleSelectMovies = () => {
-    // Store current form data in sessionStorage before navigating
-    sessionStorage.setItem('bookingFormData', JSON.stringify(formData));
-    sessionStorage.setItem('bookingFromPopup', 'true');
-    
-    // Store selected time slot to preserve it during navigation
-    if (selectedTimeSlot) {
-      sessionStorage.setItem('selectedTimeSlot', selectedTimeSlot);
-    }
-    
-    // Navigate to movies page immediately
-    router.push('/movies?from=booking');
-    
-    // Close popup after navigation starts
-    setTimeout(() => {
-      closeBookingPopup();
-      // Restore body scroll
-      document.body.style.overflow = 'unset';
-      document.body.style.position = '';
-      document.body.style.top = '';
-      document.body.style.width = '';
-      document.body.style.height = '';
-      document.body.classList.remove('popup-open');
-    }, 50);
   };
 
   const calculateTotal = () => {
@@ -410,11 +464,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
       : 1399.00;
     
     let total = basePrice;
-    
-    // Add extra guest charges (₹400 per guest beyond 2)
-    const extraGuests = Math.max(0, formData.numberOfPeople - 2);
-    const extraGuestCharges = extraGuests * 400;
-    total += extraGuestCharges;
     
     formData.selectedCakes.forEach(cakeName => {
       const cake = cakeOptions.find(c => c.name === cakeName);
@@ -431,17 +480,12 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
       if (gift) total += gift.price;
     });
     
-    // Add movie costs (₹100 per movie)
-    formData.selectedMovies.forEach(movieName => {
-      total += 100;
-    });
-    
     return total;
   };
 
   const getPayableAmount = () => {
     const total = calculateTotal();
-    return Math.round(total * 0.25);
+    return Math.round(total * 0.28);
   };
 
   const getBalanceAmount = () => {
@@ -451,147 +495,22 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
   };
 
   const handleNextStep = async () => {
-    // Check if this is the last tab (Complete Booking)
-    const isLastTab = activeTab === tabs[tabs.length - 1];
-    
-    if (isLastTab) {
-      // Final step - validate entire form before saving
-      if (!validateForm()) {
-        return; // Validation failed, popup is already shown
-      }
-    } else {
-      // For intermediate steps, do basic validation
-      if (activeTab === 'Overview') {
-        // Validate Overview section fields
-        if (!formData.bookingName.trim()) {
-          setValidationMessage('Please enter your name to continue.');
-          setShowValidationPopup(true);
-          return;
-        }
-        
-        if (!formData.whatsappNumber.trim()) {
-          setValidationMessage('Please enter your WhatsApp number to continue.');
-          setShowValidationPopup(true);
-          return;
-        }
-        
-        if (!formData.emailAddress.trim()) {
-          setValidationMessage('Please enter your email address to continue.');
-          setShowValidationPopup(true);
-          return;
-        }
-        
-        if (!selectedTimeSlot) {
-          setValidationMessage('Please select a time slot by clicking on the time area in the header to continue.');
-          setShowValidationPopup(true);
-          return;
-        }
-      }
-
-      if (activeTab === 'Occasion' && !formData.occasion.trim()) {
-        setValidationMessage('Please select an occasion to continue.');
-        setShowValidationPopup(true);
-        return;
-      }
-
-      if (activeTab === 'Terms & Conditions' && !formData.agreeToTerms) {
-        setValidationMessage('Please agree to terms and conditions to continue.');
-        setShowValidationPopup(true);
-        return;
-      }
+    // Validation for occasion
+    if (activeTab === 'Occasion' && !formData.occasion.trim()) {
+      console.log('Please select an occasion to continue');
+      return;
     }
 
     const currentIndex = tabs.indexOf(activeTab);
     if (currentIndex < tabs.length - 1) {
-      setActiveTab(tabs[currentIndex + 1] as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions');
+      setActiveTab(tabs[currentIndex + 1] as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items');
     } else {
-      // Final step - save booking to database
-      try {
-        // Calculate payment amounts
-        const totalAmount = calculateTotal();
-        const advancePayment = Math.round(totalAmount * 0.25); // 25% advance payment
-        const venuePayment = totalAmount - advancePayment; // Remaining amount to be paid at venue
-
-        // Map form data to API format
-        const bookingData = {
-          name: formData.bookingName,
-          email: formData.emailAddress,
-          phone: formData.whatsappNumber,
-          theaterName: selectedTheater?.name || 'FeelME Town Theater',
-          date: selectedDate || new Date().toISOString().split('T')[0],
-          time: selectedTimeSlot || '6:00 PM',
-          occasion: formData.occasion,
-          numberOfPeople: formData.numberOfPeople,
-          selectedCakes: formData.selectedCakes.map(cakeId => ({
-            id: cakeId,
-            name: `Cake ${cakeId}`,
-            price: 1500,
-            quantity: 1
-          })),
-          selectedDecorItems: formData.selectedDecorItems.map(itemId => ({
-            id: itemId,
-            name: `Decor ${itemId}`,
-            price: 800,
-            quantity: 1
-          })),
-          selectedGifts: formData.selectedGifts.map(giftId => ({
-            id: giftId,
-            name: `Gift ${giftId}`,
-            price: 500,
-            quantity: 1
-          })),
-          selectedMovies: formData.selectedMovies.map(movieTitle => ({
-            id: movieTitle.toLowerCase().replace(/\s+/g, '_'),
-            name: movieTitle,
-            price: 100,
-            quantity: 1
-          })),
-          // Payment breakdown
-          totalAmount: totalAmount,
-          advancePayment: advancePayment, // Amount paid now (25%)
-          venuePayment: venuePayment, // Amount to be paid at venue
-          status: 'completed' // Booking status
-        };
-        
-        console.log(isEditingBooking ? 'Updating booking data:' : 'Saving booking data to database:', bookingData);
-        
-        // Use PUT for editing existing booking, POST for new booking
-        const url = isEditingBooking && editingBookingId 
-          ? `/api/booking/${editingBookingId}`
-          : '/api/booking';
-        const method = isEditingBooking && editingBookingId ? 'PUT' : 'POST';
-        
-        const response = await fetch(url, {
-          method: method,
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(bookingData)
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-          console.log('✅ Booking saved successfully:', result);
-          console.log('🎯 Showing success animation...');
-          console.log(`${isEditingBooking ? 'Booking Updated' : 'Booking Complete'} ${formData.bookingName} - Check your mail`);
-          
-          // Show success animation instead of closing
-          setBookingResult({
-            ...result,
-            wasEditing: isEditingBooking // Store editing state in result
-          });
-          setIsBookingSuccessful(true);
-          setIsEditingBooking(false); // Reset editing state
-        } else {
-          console.error('❌ Booking failed:', result.error);
-          console.log('🎯 Showing error toast...');
-          console.log(`❌ ${result.error}`);
-        }
-      } catch (error) {
-        console.error('❌ Error saving booking:', error);
-        console.log('🎯 Showing network error toast...');
-        console.log('❌ Network error. Please try again.');
+      // Check if this is the last tab (Complete Booking)
+      const isLastTab = activeTab === tabs[tabs.length - 1];
+      if (isLastTab) {
+        // Open terms and conditions popup
+        setShowTermsPopup(true);
+        return;
       }
     }
   };
@@ -599,76 +518,38 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
   const handleSkip = () => {
     const currentIndex = tabs.indexOf(activeTab);
     if (currentIndex < tabs.length - 1) {
-      setActiveTab(tabs[currentIndex + 1] as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions');
+      setActiveTab(tabs[currentIndex + 1] as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items');
     }
   };
 
   const handleClose = async () => {
-    // Check if we're in editing mode and if changes were made
-    if (isEditingBooking) {
-      if (hasFormDataChanged()) {
-        // Changes were made during editing - treat as incomplete booking
-        const hasData = formData.bookingName || formData.emailAddress || formData.whatsappNumber || formData.occasion;
-        
-        if (hasData && formData.emailAddress) {
-          // Send incomplete booking email for edited data
-          try {
-            const response = await fetch('/api/email/incomplete', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                name: formData.bookingName,
-                email: formData.emailAddress,
-                phone: formData.whatsappNumber,
-                occasion: formData.occasion
-              })
-            });
+    // Check if user has entered data but not completed booking
+    const hasData = formData.bookingName || formData.emailAddress || formData.whatsappNumber || formData.occasion;
+    
+    if (hasData && formData.emailAddress) {
+      // Send incomplete booking email
+      try {
+        const response = await fetch('/api/email/incomplete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: formData.bookingName,
+            email: formData.emailAddress,
+            phone: formData.whatsappNumber,
+            occasion: formData.occasion
+          })
+        });
 
-            const result = await response.json();
-            if (result.success) {
-              console.log('📧 Incomplete booking email sent for edited data');
-              console.log('🎯 Showing info toast...');
-              console.log('📧 Reminder email sent!');
-            }
-          } catch (error) {
-            console.log('⚠️ Failed to send incomplete booking email:', error);
-          }
+        const result = await response.json();
+        if (result.success) {
+          console.log('📧 Incomplete booking email sent');
+          console.log('🎯 Showing info toast...');
+          console.log('📧 Reminder email sent!');
         }
-      } else {
-        // No changes made during editing - booking remains completed
-        console.log('📝 No changes made during editing - booking remains completed');
-      }
-    } else {
-      // Not in editing mode - check if user has entered data but not completed booking
-      const hasData = formData.bookingName || formData.emailAddress || formData.whatsappNumber || formData.occasion;
-      
-      if (hasData && formData.emailAddress) {
-        // Send incomplete booking email
-        try {
-          const response = await fetch('/api/email/incomplete', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              name: formData.bookingName,
-              email: formData.emailAddress,
-              phone: formData.whatsappNumber,
-              occasion: formData.occasion
-            })
-          });
-
-          const result = await response.json();
-          if (result.success) {
-            console.log('📧 Incomplete booking email sent');
-            console.log('🎯 Showing info toast...');
-            console.log('📧 Reminder email sent!');
-          }
-        } catch (error) {
-          console.log('⚠️ Failed to send incomplete booking email:', error);
-        }
+      } catch (error) {
+        console.log('⚠️ Failed to send incomplete booking email:', error);
       }
     }
 
@@ -682,8 +563,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     // Reset form when closing popup
     resetForm();
     onClose();
-    // Navigate to theater page when popup is closed
-    router.push('/theater');
   };
 
   // Prevent scroll events from bubbling to background
@@ -771,19 +650,9 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                 <Calendar className="w-4 h-4" />
                 <span>{selectedDate || '18 Sep 2025'}</span>
               </div>
-              <div 
-                className="booking-popup-meta-item booking-popup-time-selector-meta"
-                onClick={() => setIsTimeSelectionOpen(true)}
-              >
+              <div className="booking-popup-meta-item">
                 <Clock className="w-4 h-4" />
-                <span className="booking-popup-time-text">
-                  {selectedTimeSlot || 'Choose Time'}
-                </span>
-                <div className="booking-popup-time-arrow-small">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="6,9 12,15 18,9"></polyline>
-                  </svg>
-                </div>
+                <span>{selectedTimeSlot || '9:00 AM - 12:00 PM'}</span>
               </div>
               <div className="booking-popup-meta-item">
                 <MapPin className="w-4 h-4" />
@@ -800,7 +669,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             {tabs.map((tab, index) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions')}
+                onClick={() => setActiveTab(tab as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items')}
                 className={`booking-popup-tab ${activeTab === tab ? 'booking-popup-tab-active' : ''}`}
               >
                 <span className="booking-popup-tab-number">{index + 1}</span>
@@ -859,49 +728,8 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                           placeholder="your@email.com"
                         />
                       </div>
-
                       
                       <div className="booking-popup-field-row">
-                        <div className="booking-popup-field">
-                          <label>Want Movies?</label>
-                          <div className="booking-popup-movie-selection">
-                            <select
-                              value={formData.wantMovies}
-                              onChange={(e) => handleInputChange('wantMovies', e.target.value as 'Yes' | 'No')}
-                              className="booking-popup-select"
-                            >
-                              <option value="No">No</option>
-                              <option value="Yes">Yes</option>
-                            </select>
-                            {formData.wantMovies === 'Yes' && (
-                              <div className="booking-popup-movie-selection-info">
-                                <button
-                                  type="button"
-                                  onClick={handleSelectMovies}
-                                  className="booking-popup-select-movies-btn"
-                                >
-                                  <Play className="w-4 h-4" />
-                                  {formData.selectedMovies.length > 0 ? (
-                                    <>
-                                      {formData.selectedMovies[0]}
-                                      <span className="booking-popup-movie-change-text">
-                                        (Change Movie)
-                                      </span>
-                                    </>
-                                  ) : (
-                                    'Select Movie'
-                                  )}
-                                </button>
-                                <div className="booking-popup-movie-price-info">
-                                  <span className="booking-popup-movie-price-text">
-                                    ₹100 per movie
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        
                         <div className="booking-popup-field">
                           <label>Want Cakes?</label>
                           <select
@@ -1054,56 +882,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                     </div>
                   </div>
                 )}
-
-
-                {activeTab === 'Terms & Conditions' && (
-                  <div className="booking-popup-section">
-                    <h3 className="booking-popup-section-title">
-                      <Check className="w-5 h-5" />
-                      Terms & Conditions
-                    </h3>
-                    
-                    <div className="booking-popup-terms-container">
-                      <div className="booking-popup-terms-section">
-                        <h4 className="booking-popup-terms-title">Terms & Conditions</h4>
-                        <div className="booking-popup-terms-content">
-                          <ul className="booking-popup-terms-list">
-                            <li>No movie/OTT accounts provided; setups use user&apos;s accounts/downloaded content.</li>
-                            <li>Smoking/Drinking is NOT allowed.</li>
-                            <li>Damage to the theater (including decorative materials like balloons, lights) must be reimbursed.</li>
-                            <li>Guests must maintain cleanliness.</li>
-                            <li>Party poppers, snow sprays, cold fire, and similar items are strictly prohibited.</li>
-                            <li>Carrying an AADHAAR CARD is mandatory for entry scanning.</li>
-                            <li>Couples under 18 years are not allowed to book.</li>
-                            <li>Pets are strictly not allowed.</li>
-                            <li>An advance amount of RS. {getPayableAmount()} plus a convenience fee is collected to book the slot.</li>
-                          </ul>
-                        </div>
-                      </div>
-
-                      <div className="booking-popup-terms-section">
-                        <h4 className="booking-popup-terms-title">Refund Policy</h4>
-                        <div className="booking-popup-terms-content">
-                          <p>Advance amount is fully refundable if slot is cancelled at least 72 hrs before the slot time. If your slot is less than 72 hrs away from time of payment then advance is non-refundable.</p>
-                        </div>
-                      </div>
-
-                      <div className="booking-popup-agreement">
-                        <label className="booking-popup-checkbox-label">
-                          <input
-                            type="checkbox"
-                            checked={formData.agreeToTerms}
-                            onChange={(e) => handleInputChange('agreeToTerms', e.target.checked)}
-                            className="booking-popup-checkbox"
-                          />
-                          <span className="booking-popup-checkbox-text">
-                            Click here to Agree to the above terms & conditions.
-                          </span>
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Action Buttons */}
@@ -1118,13 +896,13 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                       <span>Skip</span>
                     </button>
                     <button onClick={handleNextStep} className="booking-popup-btn">
-                      <span>{activeTab === tabs[tabs.length - 1] ? 'Pay Now' : 'Continue'}</span>
+                      <span>{activeTab === tabs[tabs.length - 1] ? 'Complete Booking' : 'Continue'}</span>
                       <ArrowLeft className="w-5 h-5" />
                     </button>
                   </div>
                 ) : (
                   <button onClick={handleNextStep} className="booking-popup-btn">
-                    <span>{activeTab === tabs[tabs.length - 1] ? 'Pay Now' : 'Continue'}</span>
+                    <span>{activeTab === tabs[tabs.length - 1] ? 'Complete Booking' : 'Continue'}</span>
                     <ArrowLeft className="w-5 h-5" />
                   </button>
                 )}
@@ -1146,26 +924,10 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                     <span>{selectedTheater ? selectedTheater.price : '₹1,399.00'}</span>
                   </div>
                   <div className="booking-popup-cart-item">
-                    <span>Base Guests (2)</span>
+                    <span>Guests ({formData.numberOfPeople})</span>
                     <span>Included</span>
                   </div>
-                  {formData.numberOfPeople > 2 && (
-                    <div className="booking-popup-cart-item">
-                      <span>Extra Guests ({formData.numberOfPeople - 2} × ₹400)</span>
-                      <span>₹{(formData.numberOfPeople - 2) * 400}</span>
-                    </div>
-                  )}
                 </div>
-
-                {formData.wantMovies === 'Yes' && formData.selectedMovies.length > 0 && (
-                  <div className="booking-popup-cart-section">
-                    <h4>Movies</h4>
-                    <div className="booking-popup-cart-item">
-                      <span>{formData.selectedMovies[0]}</span>
-                      <span>₹100</span>
-                    </div>
-                  </div>
-                )}
 
                 {formData.wantCakes === 'Yes' && formData.selectedCakes.length > 0 && (
                   <div className="booking-popup-cart-section">
@@ -1212,8 +974,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                   </div>
                 )}
 
-                
-
                 <div className="booking-popup-cart-divider"></div>
 
                 <div className="booking-popup-cart-totals">
@@ -1226,7 +986,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                     <span>₹{calculateTotal().toFixed(2)}</span>
                   </div>
                   <div className="booking-popup-cart-item booking-popup-cart-advance">
-                    <span>Pay Now (25%)</span>
+                    <span>Pay Now (28%)</span>
                     <span>₹{getPayableAmount()}</span>
                   </div>
                   <div className="booking-popup-cart-item booking-popup-cart-balance">
@@ -1238,133 +998,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             </div>
           </div>
         </div>
-
-        {/* Success Animation */}
-        {isBookingSuccessful && bookingResult && (
-          <div className="booking-popup-success">
-            <div className="booking-popup-success-content">
-              <div className="booking-popup-success-animation">
-                <div className="booking-popup-success-checkmark">
-                  <div className="booking-popup-success-checkmark-circle">
-                    <svg 
-                      xmlns="http://www.w3.org/2000/svg" 
-                      width="64" 
-                      height="64" 
-                      viewBox="0 0 16 16"
-                      className="booking-popup-success-checkmark-svg"
-                    >
-                      <polyline 
-                        fill="none" 
-                        stroke="currentColor" 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round" 
-                        strokeWidth="2" 
-                        points="2.75 8.75 6.25 12.25 13.25 4.75"
-                        className="booking-popup-success-checkmark-path"
-                      />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-              
-              <h2 className="booking-popup-success-title">
-                {(bookingResult as { wasEditing?: boolean })?.wasEditing ? 'Booking Updated!' : 'Booking Successful!'}
-              </h2>
-              
-              <div className="booking-popup-success-message">
-                <p>{(bookingResult as { wasEditing?: boolean })?.wasEditing ? 'Your booking has been updated and saved to our system.' : 'Your booking has been confirmed and saved to our system.'}</p>
-                <div className="booking-popup-success-email">
-                  <p>📧 Check your email for booking confirmation and details.</p>
-                </div>
-              </div>
-              
-              <div className="booking-popup-success-actions">
-                <button 
-                  onClick={() => {
-                    // Keep current form data and go back to booking for editing
-                    setIsBookingSuccessful(false);
-                    setBookingResult(null);
-                    setIsEditingBooking(true);
-                    setOriginalFormData({ ...formData }); // Store original data for comparison
-                    setEditingBookingId(bookingResult?.bookingId || null); // Store booking ID for updating
-                    setActiveTab('Overview');
-                  }}
-                  className="booking-popup-success-btn secondary"
-                >
-                  Edit Booking
-                </button>
-                <button 
-                  onClick={() => {
-                    onClose();
-                    // Open new booking popup
-                    setTimeout(() => {
-                      openBookingPopup();
-                    }, 100);
-                  }}
-                  className="booking-popup-success-btn primary"
-                >
-                  New Booking
-                </button>
-                <button 
-                  onClick={() => {
-                    // Reset all booking states and close popup completely
-                    setIsBookingSuccessful(false);
-                    setBookingResult(null);
-                    resetForm();
-                    
-                    // Close booking popup completely
-                    onClose();
-                    
-                    // Navigate to theater page
-                    router.push('/theater');
-                  }}
-                  className="booking-popup-success-btn secondary"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Validation Popup */}
-        {showValidationPopup && (
-          <div className="booking-popup-validation">
-            <div className="booking-popup-validation-content">
-              <div className="booking-popup-validation-icon">
-                <X className="w-12 h-12" />
-              </div>
-              
-              <h3 className="booking-popup-validation-title">
-                {validationErrorName || 'Incomplete Form'}
-              </h3>
-              
-              <p className="booking-popup-validation-message">
-                {validationMessage}
-              </p>
-              
-              <button 
-                onClick={() => setShowValidationPopup(false)}
-                className="booking-popup-validation-btn"
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        )}
-
-
-        {/* Time Selection Popup */}
-        <TimeSelectionPopup
-          isOpen={isTimeSelectionOpen}
-          onClose={() => setIsTimeSelectionOpen(false)}
-          selectedTime={selectedTimeSlot}
-          onTimeSelected={(time) => {
-            setSelectedTimeSlot(time);
-            setIsTimeSelectionOpen(false);
-          }}
-        />
-
 
         {/* Styles */}
         <style jsx global>{`
@@ -1524,31 +1157,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             color: #ffffff;
           }
 
-          .booking-popup-time-selector-meta {
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            pointer-events: auto;
-          }
-
-          .booking-popup-time-selector-meta:hover {
-            background: rgba(255, 0, 5, 0.3);
-            border: 1px solid rgba(255, 0, 5, 0.5);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(255, 0, 5, 0.2);
-          }
-
-          .booking-popup-time-arrow-small {
-            color: rgba(255, 255, 255, 0.8);
-            transition: all 0.3s ease;
-            margin-left: 0.5rem;
-          }
-
-          .booking-popup-time-selector-meta:hover .booking-popup-time-arrow-small {
-            color: #ffffff;
-            transform: translateY(1px) scale(1.1);
-          }
-
           .booking-popup-content {
             padding: 1rem 1.5rem;
             max-height: 65vh;
@@ -1650,7 +1258,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             margin: 0 0 1rem 0;
           }
 
-
           .booking-popup-form {
             display: flex;
             flex-direction: column;
@@ -1665,7 +1272,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
 
           .booking-popup-field-row {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 1rem;
             margin-bottom: 1rem;
           }
@@ -1903,14 +1510,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             color: #FF0005;
           }
 
-          .booking-popup-duration {
-            font-size: 0.875rem;
-            color: rgba(255, 255, 255, 0.6);
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-          }
-
-
           .booking-popup-action {
             padding: 1rem 1.5rem;
             background: rgba(255, 255, 255, 0.02);
@@ -1960,72 +1559,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           .booking-popup-select option {
             background: #1a1a1a;
             color: white;
-          }
-
-
-          .booking-popup-movie-selection {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-          }
-
-          .booking-popup-movie-selection-info {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-          }
-
-          .booking-popup-movie-price-info {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-          }
-
-          .booking-popup-movie-price-text {
-            font-size: 0.75rem;
-            color: #FF0005;
-            font-weight: 600;
-            background: rgba(255, 0, 5, 0.1);
-            padding: 0.25rem 0.5rem;
-            border-radius: 0.25rem;
-            border: 1px solid rgba(255, 0, 5, 0.2);
-          }
-
-          .booking-popup-movie-change-text {
-            font-size: 0.7rem;
-            color: rgba(255, 255, 255, 0.7);
-            font-weight: 400;
-            margin-left: 0.5rem;
-            font-style: italic;
-          }
-
-          .booking-popup-select-movies-btn {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            background: linear-gradient(135deg, #FF0005 0%, #ff3366 100%);
-            color: #ffffff;
-            border: none;
-            padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            justify-content: center;
-          }
-
-          .booking-popup-select-movies-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(255, 0, 5, 0.3);
-          }
-
-          .booking-popup-movie-count {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 0.25rem 0.5rem;
-            border-radius: 1rem;
-            font-size: 0.8rem;
-            font-weight: 700;
           }
 
           .booking-popup-btn {
@@ -2165,127 +1698,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             font-weight: 700;
           }
 
-          /* Terms & Conditions Styles */
-          .booking-popup-terms-container {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 1rem;
-            padding: 1.5rem;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-          }
-
-          .booking-popup-terms-section {
-            margin-bottom: 2rem;
-          }
-
-          .booking-popup-terms-section:last-of-type {
-            margin-bottom: 1rem;
-          }
-
-          .booking-popup-terms-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: #FF0005;
-            margin: 0 0 1rem 0;
-            font-family: 'Paralucent-Medium', sans-serif;
-          }
-
-          .booking-popup-terms-content {
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 0.75rem;
-            padding: 1.25rem;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-          }
-
-          .booking-popup-terms-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-          }
-
-          .booking-popup-terms-list li {
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 0.9rem;
-            line-height: 1.6;
-            margin-bottom: 0.75rem;
-            padding-left: 1.5rem;
-            position: relative;
-            font-family: 'Paralucent-Medium', sans-serif;
-          }
-
-          .booking-popup-terms-list li:before {
-            content: '•';
-            color: #FF0005;
-            font-weight: bold;
-            position: absolute;
-            left: 0;
-            top: 0;
-          }
-
-          .booking-popup-terms-list li:last-child {
-            margin-bottom: 0;
-          }
-
-          .booking-popup-terms-content p {
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 0.9rem;
-            line-height: 1.6;
-            margin: 0;
-            font-family: 'Paralucent-Medium', sans-serif;
-          }
-
-          .booking-popup-agreement {
-            background: rgba(255, 0, 5, 0.1);
-            border-radius: 0.75rem;
-            padding: 1.25rem;
-            border: 1px solid rgba(255, 0, 5, 0.2);
-            margin-top: 1.5rem;
-          }
-
-          .booking-popup-checkbox-label {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.75rem;
-            cursor: pointer;
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 0.9rem;
-            line-height: 1.5;
-            font-family: 'Paralucent-Medium', sans-serif;
-          }
-
-          .booking-popup-checkbox {
-            width: 1.25rem;
-            height: 1.25rem;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 0.25rem;
-            background: transparent;
-            cursor: pointer;
-            flex-shrink: 0;
-            margin-top: 0.125rem;
-            transition: all 0.3s ease;
-          }
-
-          .booking-popup-checkbox:checked {
-            background: #FF0005;
-            border-color: #FF0005;
-            position: relative;
-          }
-
-          .booking-popup-checkbox:checked:after {
-            content: '✓';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            font-size: 0.75rem;
-            font-weight: bold;
-          }
-
-          .booking-popup-checkbox-text {
-            flex: 1;
-            font-weight: 500;
-          }
-
           /* Mobile First Responsive Design */
           @media (max-width: 480px) {
             .booking-popup {
@@ -2303,7 +1715,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             }
 
             .booking-popup-field-row {
-              grid-template-columns: 1fr 1fr;
+              grid-template-columns: 1fr;
               gap: 0.75rem;
             }
 
@@ -2327,14 +1739,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             .booking-popup-meta-item {
               font-size: 0.8rem;
               padding: 0.4rem 0.8rem;
-            }
-
-            .booking-popup-time-selector-meta {
-              justify-content: center;
-            }
-
-            .booking-popup-time-arrow-small {
-              margin-left: 0.25rem;
             }
 
             .booking-popup-content {
@@ -2396,39 +1800,6 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
 
             .booking-popup-btn {
               padding: 0.75rem 1.25rem;
-              font-size: 0.85rem;
-            }
-
-            .booking-popup-terms-container {
-              padding: 1rem;
-            }
-
-            .booking-popup-terms-section {
-              margin-bottom: 1.5rem;
-            }
-
-            .booking-popup-terms-title {
-              font-size: 1.1rem;
-            }
-
-            .booking-popup-terms-content {
-              padding: 1rem;
-            }
-
-            .booking-popup-terms-list li {
-              font-size: 0.85rem;
-              margin-bottom: 0.5rem;
-            }
-
-            .booking-popup-terms-content p {
-              font-size: 0.85rem;
-            }
-
-            .booking-popup-agreement {
-              padding: 1rem;
-            }
-
-            .booking-popup-checkbox-label {
               font-size: 0.85rem;
             }
           }
@@ -2500,273 +1871,110 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
               grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             }
           }
-
-          /* Success Animation Styles */
-          .booking-popup-success {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.95);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            animation: fadeIn 0.5s ease-in-out;
-          }
-
-          .booking-popup-success-content {
-            text-align: center;
-            padding: 2rem;
-            max-width: 400px;
-            width: 100%;
-          }
-
-          .booking-popup-success-animation {
-            position: relative;
-            margin-bottom: 2rem;
-          }
-
-          .booking-popup-success-checkmark {
-            position: relative;
-            width: 80px;
-            height: 80px;
-            margin: 0 auto;
-          }
-
-          .booking-popup-success-checkmark-circle {
-            position: relative;
-            width: 80px;
-            height: 80px;
-            border: 4px solid #00ff00;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            animation: scaleIn 0.4s ease-out;
-            background: rgba(0, 255, 0, 0.1);
-          }
-
-          .booking-popup-success-checkmark-svg {
-            color: #00ff00;
-            width: 40px;
-            height: 40px;
-          }
-
-          .booking-popup-success-checkmark-path {
-            stroke-dasharray: 20;
-            stroke-dashoffset: 20;
-            animation: drawCheckmark 0.6s ease-out 0.4s forwards;
-          }
-
-          .booking-popup-success-title {
-            color: #ffffff;
-            font-size: 1.5rem;
-            font-weight: bold;
-            margin-bottom: 1rem;
-            animation: slideUp 0.5s ease-out 0.8s both;
-          }
-
-          .booking-popup-success-message {
-            color: #cccccc;
-            margin-bottom: 2rem;
-            animation: slideUp 0.5s ease-out 1s both;
-          }
-
-          .booking-popup-success-message p {
-            margin-bottom: 0.5rem;
-          }
-
-          .booking-popup-success-email {
-            background: rgba(0, 255, 0, 0.1);
-            border: 1px solid rgba(0, 255, 0, 0.3);
-            border-radius: 0.5rem;
-            padding: 1rem;
-            margin-top: 1rem;
-          }
-
-          .booking-popup-success-email p {
-            color: #00ff00;
-            font-weight: 500;
-          }
-
-          .booking-popup-success-actions {
-            display: flex;
-            gap: 0.75rem;
-            justify-content: center;
-            animation: slideUp 0.5s ease-out 1.2s both;
-            flex-wrap: wrap;
-          }
-
-          .booking-popup-success-btn {
-            padding: 0.75rem 1.25rem;
-            border: none;
-            border-radius: 0.5rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            min-width: 100px;
-            font-size: 0.9rem;
-          }
-
-          .booking-popup-success-btn.primary {
-            background: #FF0005;
-            color: #ffffff;
-          }
-
-          .booking-popup-success-btn.primary:hover {
-            background: #e60004;
-            transform: translateY(-2px);
-          }
-
-          .booking-popup-success-btn.secondary {
-            background: transparent;
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-          }
-
-          .booking-popup-success-btn.secondary:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.5);
-            transform: translateY(-2px);
-          }
-
-          /* Animations */
-          @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
-
-          @keyframes scaleIn {
-            0% { transform: scale(0); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-          }
-
-          @keyframes drawCheckmark {
-            0% { stroke-dashoffset: 20; }
-            100% { stroke-dashoffset: 0; }
-          }
-
-          @keyframes slideUp {
-            0% { transform: translateY(20px); opacity: 0; }
-            100% { transform: translateY(0); opacity: 1; }
-          }
-
-          /* Mobile Responsive */
-          @media (max-width: 768px) {
-            .booking-popup-success-content {
-              padding: 1.5rem;
-            }
-
-            .booking-popup-success-title {
-              font-size: 1.25rem;
-            }
-
-            .booking-popup-success-actions {
-              flex-direction: column;
-              gap: 0.75rem;
-            }
-
-            .booking-popup-success-btn {
-              width: 100%;
-            }
-          }
-
-          /* Validation Popup Styles */
-          .booking-popup-validation {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.95);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            animation: fadeIn 0.3s ease-in-out;
-          }
-
-          .booking-popup-validation-content {
-            text-align: center;
-            padding: 2rem;
-            max-width: 350px;
-            width: 100%;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 1rem;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-          }
-
-          .booking-popup-validation-icon {
-            color: #ff4444;
-            margin-bottom: 1rem;
-            animation: bounceIn 0.4s ease-out;
-          }
-
-          .booking-popup-validation-title {
-            color: #ffffff;
-            font-size: 1.25rem;
-            font-weight: bold;
-            margin-bottom: 1rem;
-            animation: slideUp 0.4s ease-out 0.2s both;
-          }
-
-          .booking-popup-validation-message {
-            color: #cccccc;
-            margin-bottom: 1.5rem;
-            line-height: 1.5;
-            animation: slideUp 0.4s ease-out 0.3s both;
-          }
-
-          .booking-popup-validation-btn {
-            background: #FF0005;
-            color: #ffffff;
-            border: none;
-            border-radius: 0.5rem;
-            padding: 0.75rem 2rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            animation: slideUp 0.4s ease-out 0.4s both;
-          }
-
-          .booking-popup-validation-btn:hover {
-            background: #e60004;
-            transform: translateY(-2px);
-          }
-
-          /* Mobile Responsive for Validation */
-          @media (max-width: 768px) {
-            .booking-popup-validation-content {
-              padding: 1.5rem;
-              margin: 1rem;
-            }
-
-            .booking-popup-validation-title {
-              font-size: 1.1rem;
-            }
-
-            .booking-popup-validation-message {
-              font-size: 0.9rem;
-            }
-          }
-
-          @keyframes bounceIn {
-            0% { transform: scale(0); opacity: 0; }
-            50% { transform: scale(1.2); opacity: 1; }
-            100% { transform: scale(1); opacity: 1; }
-          }
-
         `}</style>
+      </div>
+    </div>
+  );
+
+  // Terms & Conditions Popup
+  const termsPopupContent = (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">Terms & Conditions</h2>
+            <button
+              onClick={() => setShowTermsPopup(false)}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold text-blue-600 mb-3">Terms & Conditions</h3>
+              <div className="space-y-3 text-sm text-gray-600">
+                <p>• We do NOT provide any movie/OTT accounts. We will do the setups using your OTT accounts/downloaded content.</p>
+                <p>• Smoking/Drinking is NOT allowed inside the theater.</p>
+                <p>• Any DAMAGE caused to theater, including decorative materials like balloons, lights etc will have to be reimbursed.</p>
+                <p>• Guests are requested to maintain CLEANLINESS inside the theater.</p>
+                <p>• Party poppers/Snow sprays/Cold Fire, and any other similar items are strictly prohibited inside the theater.</p>
+                <p>• Carrying AADHAAR CARD is mandatory. It will be scanned during entry.</p>
+                <p>• Couples under 18 years of age are not allowed to book the theatre</p>
+                <p>• Pets are strictly not allowed inside the theatre</p>
+                <p>• We collect an advance amount of RS. 600 plus convenience fee to book the slot.</p>
+              </div>
+            </div>
+            
+            <div>
+              <h3 className="text-lg font-semibold text-blue-600 mb-3">Refund Policy</h3>
+              <p className="text-sm text-gray-600">
+                Advance amount is fully refundable if slot is cancelled at least 72 hrs before the slot time. 
+                If your slot is less than 72 hrs away from time of payment then advance is non-refundable.
+              </p>
+            </div>
+            
+            <div className="flex items-center space-x-3 pt-4 border-t">
+              <button
+                onClick={() => setTermsAccepted(!termsAccepted)}
+                className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                  termsAccepted ? 'bg-blue-600 border-blue-600' : 'border-gray-300'
+                }`}
+              >
+                {termsAccepted && <Check className="w-3 h-3 text-white" />}
+              </button>
+              <span className="text-sm text-gray-600">
+                I agree to the above Terms & Conditions and Refund Policy
+              </span>
+            </div>
+            
+            <div className="flex space-x-4 pt-4">
+              <button
+                onClick={() => setShowTermsPopup(false)}
+                className="flex-1 px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (termsAccepted) {
+                    setShowTermsPopup(false);
+                    // Trigger payment
+                    handlePayment();
+                  }
+                }}
+                disabled={!termsAccepted}
+                className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-colors ${
+                  termsAccepted
+                    ? 'bg-gradient-to-r from-yellow-600 to-yellow-700 text-white hover:from-yellow-700 hover:to-yellow-800'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                Pay Now
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 
   // Use portal to render popup at the root level
   if (typeof window !== 'undefined') {
-    return createPortal(popupContent, document.body);
+    return createPortal(
+      <>
+        {popupContent}
+        {showTermsPopup && termsPopupContent}
+      </>,
+      document.body
+    );
   }
   
-  return popupContent;
+  return (
+    <>
+      {popupContent}
+      {showTermsPopup && termsPopupContent}
+    </>
+  );
 }
