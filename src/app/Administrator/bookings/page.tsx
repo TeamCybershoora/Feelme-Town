@@ -117,16 +117,6 @@ export default function BookingsPage() {
                 <Calendar size={16} />
                 Manual Booking
               </button>
-              <button 
-                className="manual-booking-btn" 
-                onClick={() => {
-                  console.log('Manual popup open clicked');
-                  setIsManualBookingOpen(true);
-                }}
-                style={{ marginLeft: '10px', backgroundColor: '#28a745' }}
-              >
-                Test Open Popup
-              </button>
         </div>
       </div>
 

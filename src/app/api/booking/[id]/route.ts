@@ -136,8 +136,22 @@ export async function PUT(
     // Calculate total amount
     let totalAmount = 0;
     
-    // Add theater base price (default 1399 or extract from theater name)
-    const theaterBasePrice = 1399; // Default theater price
+    // Add theater base price based on theater name
+    let theaterBasePrice = 1399; // Default theater price
+    
+    // Extract price from theater name or set based on theater type
+    if (body.theaterName) {
+      if (body.theaterName.includes('PHILIA') || body.theaterName.includes('FRIENDS') || body.theaterName.includes('FMT-Hall-2')) {
+        theaterBasePrice = 1999;
+      } else if (body.theaterName.includes('PRAGMA') || body.theaterName.includes('LOVE') || body.theaterName.includes('FMT-Hall-3')) {
+        theaterBasePrice = 2999;
+      } else if (body.theaterName.includes('STORGE') || body.theaterName.includes('FAMILY') || body.theaterName.includes('FMT-Hall-4')) {
+        theaterBasePrice = 3999;
+      } else if (body.theaterName.includes('EROS') || body.theaterName.includes('COUPLES') || body.theaterName.includes('FMT-Hall-1')) {
+        theaterBasePrice = 1399;
+      }
+    }
+    
     totalAmount += theaterBasePrice;
     
     // Add extra guest charges (₹400 per guest beyond 2)
@@ -175,7 +189,7 @@ export async function PUT(
     }
 
     // Calculate payment breakdown
-    const advancePayment = Math.round(totalAmount * 0.25); // 25% advance payment
+    const advancePayment = 600; // Fixed advance payment
     const venuePayment = totalAmount - advancePayment; // Remaining amount to be paid at venue
 
     // Create updated booking data
@@ -195,7 +209,26 @@ export async function PUT(
       totalAmount: totalAmount,
       advancePayment: advancePayment, // Amount paid now (25%)
       venuePayment: venuePayment, // Amount to be paid at venue
-      status: 'completed' // Booking status
+      status: 'completed', // Booking status
+      // Occasion-specific data (only save relevant fields based on occasion)
+      occasionPersonName: body.occasionPersonName || '',
+      // Only save the relevant name field based on the selected occasion
+      ...(body.occasion === 'Birthday Party' && { birthdayName: body.birthdayName }),
+      ...(body.occasion === 'Anniversary' && { birthdayName: body.birthdayName }),
+      ...(body.occasion === 'Baby Shower' && { birthdayName: body.birthdayName }),
+      ...(body.occasion === 'Bride to be' && { birthdayName: body.birthdayName }),
+      ...(body.occasion === 'Congratulations' && { birthdayName: body.birthdayName }),
+      ...(body.occasion === 'Farewell' && { birthdayName: body.birthdayName }),
+      ...(body.occasion === 'Marriage Proposal' && { 
+        proposerName: body.proposerName,
+        proposalPartnerName: body.proposalPartnerName 
+      }),
+      ...(body.occasion === 'Romantic Date' && { 
+        partner1Name: body.partner1Name,
+        partner2Name: body.partner2Name 
+      }),
+      ...(body.occasion === "Valentine's Day" && { valentineName: body.valentineName }),
+      ...(body.occasion === 'Date Night' && { dateNightName: body.dateNightName })
     };
 
     // Update booking in database

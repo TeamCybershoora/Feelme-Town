@@ -14,7 +14,6 @@ export default function AdminLayoutWrapper({ children }: AdminLayoutWrapperProps
   const isAdminRoute = pathname.startsWith('/Administrator');
   
   // If it's an admin route, render children directly (admin layout is handled in Administrator/layout.tsx)
-  // If it's not an admin route, wrap with ClientLayout (includes navbar and footer)
   if (isAdminRoute) {
     return <>{children}</>;
   }

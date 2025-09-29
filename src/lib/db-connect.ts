@@ -2,6 +2,11 @@
 // This file connects to the real MongoDB database
 
 import { MongoClient, Db, ObjectId } from 'mongodb';
+import { gzip, gunzip } from 'zlib';
+import { promisify } from 'util';
+
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
 
 interface BookingData {
   name: string;
@@ -20,6 +25,21 @@ interface BookingData {
   advancePayment?: number;
   venuePayment?: number;
   status?: string;
+  // Timestamps
+  createdAt?: Date;
+  expiredAt?: Date;
+  // Occasion specific fields
+  birthdayName?: string;
+  birthdayGender?: string;
+  partner1Name?: string;
+  partner1Gender?: string;
+  partner2Name?: string;
+  partner2Gender?: string;
+  dateNightName?: string;
+  proposerName?: string;
+  proposalPartnerName?: string;
+  valentineName?: string;
+  customCelebration?: string;
 }
 
 // MongoDB connection string
@@ -27,12 +47,62 @@ const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://teamcybershoora_db
 const DB_NAME = 'feelmetown';
 const COLLECTION_NAME = 'booking';
 const INCOMPLETE_COLLECTION_NAME = 'incomplete_booking';
+const CANCELLED_COLLECTION_NAME = 'cancelled_booking';
+const MANUAL_BOOKING_COLLECTION_NAME = 'manual_booking';
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
 
 // Database connection status
 let isConnected = false;
+
+// Compression utilities
+const compressData = async (data: unknown): Promise<Buffer> => {
+  try {
+    const jsonString = JSON.stringify(data);
+    const compressed = await gzipAsync(Buffer.from(jsonString, 'utf8'));
+    return compressed;
+  } catch (error) {
+    console.error('❌ Error compressing data:', error);
+    throw error;
+  }
+};
+
+const decompressData = async (compressedData: Buffer | unknown): Promise<unknown> => {
+  try {
+    // Handle MongoDB Binary objects by converting to Buffer
+    let bufferData: Buffer;
+    
+    // Check if it's a MongoDB Binary object with buffer property
+    if (compressedData && typeof compressedData === 'object' && 'buffer' in compressedData) {
+      // This is a MongoDB Binary object
+      const binaryData = compressedData as { buffer: ArrayBuffer };
+      bufferData = Buffer.from(binaryData.buffer);
+    } else if (Buffer.isBuffer(compressedData)) {
+      // This is already a Buffer
+      bufferData = compressedData;
+    } else {
+      // Try to convert to Buffer - handle the unknown type properly
+      if (typeof compressedData === 'string') {
+        bufferData = Buffer.from(compressedData, 'utf8');
+      } else if (compressedData instanceof ArrayBuffer) {
+        bufferData = Buffer.from(compressedData);
+      } else if (Array.isArray(compressedData)) {
+        bufferData = Buffer.from(compressedData);
+      } else {
+        // Fallback: convert to string first, then to buffer
+        bufferData = Buffer.from(String(compressedData), 'utf8');
+      }
+    }
+    
+    const decompressed = await gunzipAsync(bufferData);
+    const jsonString = decompressed.toString('utf8');
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error('❌ Error decompressing data:', error);
+    throw error;
+  }
+};
 
 // Connect to FeelME Town MongoDB database (optimized for speed)
 const connectToDatabase = async () => {
@@ -51,8 +121,11 @@ const connectToDatabase = async () => {
     // Create MongoDB client with optimized settings
     client = new MongoClient(MONGODB_URI, {
       maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000
+      serverSelectionTimeoutMS: 10000, // Increased timeout
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 15000, // Added connection timeout
+      retryWrites: true,
+      retryReads: true,
     });
     
     // Connect to MongoDB
@@ -69,19 +142,23 @@ const connectToDatabase = async () => {
         success: true,
         message: 'Connected to FeelME Town MongoDB database',
         database: DB_NAME,
-        collections: [COLLECTION_NAME, INCOMPLETE_COLLECTION_NAME]
+        collections: [COLLECTION_NAME, INCOMPLETE_COLLECTION_NAME, CANCELLED_COLLECTION_NAME]
       };
     
   } catch (error) {
     console.error('❌ MongoDB connection failed:', error);
     isConnected = false;
     if (client) {
-      await client.close();
+      try {
+        await client.close();
+      } catch (closeError) {
+        console.error('Error closing client:', closeError);
+      }
       client = null;
     }
     return {
       success: false,
-      error: 'Failed to connect to MongoDB database'
+      error: error instanceof Error ? error.message : 'Failed to connect to MongoDB database'
     };
   }
 };
@@ -106,16 +183,19 @@ const checkConnection = async () => {
     }
     const collection = db.collection(COLLECTION_NAME);
     const incompleteCollection = db.collection(INCOMPLETE_COLLECTION_NAME);
+    const cancelledCollection = db.collection(CANCELLED_COLLECTION_NAME);
     
     const bookingCount = await collection.countDocuments();
     const incompleteBookingCount = await incompleteCollection.countDocuments();
+    const cancelledBookingCount = await cancelledCollection.countDocuments();
     
     return {
       connected: isConnected,
       database: DB_NAME,
       collections: {
         booking: bookingCount,
-        incomplete_booking: incompleteBookingCount
+        incomplete_booking: incompleteBookingCount,
+        cancelled_booking: cancelledBookingCount
       }
     };
   } catch (error) {
@@ -217,14 +297,87 @@ const saveBooking = async (bookingData: BookingData) => {
       status: bookingData.status || 'completed' // Use provided status or default to completed
     };
     
+    // Compress the booking data to save storage space
+    const compressedData = await compressData(booking);
+    
+    // Create compressed document
+    const compressedBooking = {
+      _id: new ObjectId(),
+      bookingId: customBookingId,
+      compressedData: compressedData,
+      createdAt: new Date(),
+      status: bookingData.status || 'completed',
+      // Add expiredAt field for auto-cleanup
+      expiredAt: bookingData.expiredAt,
+      // Keep some basic fields uncompressed for quick queries
+      name: bookingData.name,
+      email: bookingData.email,
+      theaterName: bookingData.theaterName,
+      date: bookingData.date,
+      time: bookingData.time,
+      occasion: bookingData.occasion,
+      totalAmount: bookingData.totalAmount,
+      // Keep occasion-specific names for easy querying
+      occasionPersonName: bookingData.occasion === 'Birthday Party' ? (bookingData.birthdayName || '') :
+                         bookingData.occasion === 'Anniversary' ? (bookingData.partner1Name || bookingData.partner2Name || '') :
+                         bookingData.occasion === 'Date Night' ? (bookingData.dateNightName || '') :
+                         bookingData.occasion === 'Marriage Proposal' ? (bookingData.proposerName || bookingData.proposalPartnerName || '') :
+                         bookingData.occasion === 'Romantic Date' ? (bookingData.partner1Name || bookingData.partner2Name || '') :
+                         bookingData.occasion === "Valentine's Day" ? (bookingData.valentineName || '') :
+                         bookingData.occasion === 'Baby Shower' || bookingData.occasion === 'Bride to be' || bookingData.occasion === 'Congratulations' || bookingData.occasion === 'Farewell' ? (bookingData.birthdayName || '') :
+                         bookingData.occasion === 'Custom Celebration' ? (bookingData.customCelebration || '') : '',
+      // Keep only relevant occasion-specific fields based on selected occasion
+      ...(bookingData.occasion === 'Birthday Party' && {
+        birthdayName: bookingData.birthdayName || ''
+      }),
+      ...(bookingData.occasion === 'Anniversary' && {
+        partner1Name: bookingData.partner1Name || '',
+        partner2Name: bookingData.partner2Name || ''
+      }),
+      ...(bookingData.occasion === 'Baby Shower' && {
+        birthdayName: bookingData.birthdayName || ''
+      }),
+      ...(bookingData.occasion === 'Bride to be' && {
+        birthdayName: bookingData.birthdayName || ''
+      }),
+      ...(bookingData.occasion === 'Congratulations' && {
+        birthdayName: bookingData.birthdayName || ''
+      }),
+      ...(bookingData.occasion === 'Farewell' && {
+        birthdayName: bookingData.birthdayName || ''
+      }),
+      ...(bookingData.occasion === 'Marriage Proposal' && {
+        proposerName: bookingData.proposerName || '',
+        proposalPartnerName: bookingData.proposalPartnerName || ''
+      }),
+      ...(bookingData.occasion === 'Romantic Date' && {
+        partner1Name: bookingData.partner1Name || '',
+        partner2Name: bookingData.partner2Name || ''
+      }),
+      ...(bookingData.occasion === "Valentine's Day" && {
+        valentineName: bookingData.valentineName || ''
+      }),
+      ...(bookingData.occasion === 'Date Night' && {
+        dateNightName: bookingData.dateNightName || ''
+      }),
+      ...(bookingData.occasion === 'Custom Celebration' && {
+        customCelebration: bookingData.customCelebration || ''
+      }),
+      // Keep some key items for easy querying
+      selectedMovies: bookingData.selectedMovies || [],
+      selectedCakes: bookingData.selectedCakes || [],
+      selectedDecorItems: bookingData.selectedDecorItems || [],
+      selectedGifts: bookingData.selectedGifts || []
+    };
+    
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
     
-    // Insert booking into MongoDB
-    const result = await collection.insertOne(booking);
+    // Insert compressed booking into MongoDB
+    const result = await collection.insertOne(compressedBooking);
     
     console.log('📝 New booking saved to FeelME Town MongoDB database:', {
       database: DB_NAME,
@@ -258,6 +411,81 @@ const saveBooking = async (bookingData: BookingData) => {
   }
 };
 
+// Save manual booking to manual_booking collection
+const saveManualBooking = async (bookingData: BookingData) => {
+  try {
+    // Ensure database connection
+    if (!isConnected || !db) {
+      const connectionResult = await connectToDatabase();
+      if (!connectionResult.success) {
+        throw new Error('Failed to connect to database');
+      }
+    }
+    
+    console.log('💾 Saving manual booking to FeelME Town MongoDB database...');
+    
+    // Generate custom booking ID
+    const customBookingId = await generateBookingId();
+    
+    // Add timestamp, status, and custom booking ID
+    const booking = {
+      ...bookingData,
+      bookingId: customBookingId,
+      createdAt: new Date(),
+      status: bookingData.status || 'completed',
+      isManualBooking: true,
+      bookingType: 'Manual',
+      createdBy: 'Admin'
+    };
+    
+    // Compress the booking data to save storage space
+    const compressedData = await compressData(booking);
+    
+    // Create compressed document
+    const compressedBooking = {
+      _id: new ObjectId(),
+      bookingId: customBookingId,
+      compressedData: compressedData,
+      createdAt: booking.createdAt,
+      status: booking.status
+    };
+    
+    // Save to manual_booking collection
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
+    const result = await collection.insertOne(compressedBooking);
+    
+    console.log('✅ Manual booking saved to FeelME Town database:', {
+      id: customBookingId,
+      mongoId: result.insertedId,
+      name: booking.name,
+      theater: booking.theaterName,
+      date: booking.date,
+      time: booking.time,
+      total: booking.totalAmount
+    });
+    
+    return {
+      success: true,
+      message: 'Manual booking saved to FeelME Town MongoDB database',
+      booking: {
+        id: customBookingId,
+        mongoId: result.insertedId,
+        ...booking
+      }
+    };
+    
+  } catch (error) {
+    console.error('❌ Error saving manual booking to MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to save manual booking to MongoDB database'
+    };
+  }
+};
+
 // Save incomplete booking to MongoDB database
 const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email: string }) => {
   try {
@@ -274,9 +502,9 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
     // Generate custom incomplete booking ID
     const customBookingId = await generateIncompleteBookingId();
     
-    // Set expiry time to 24 hours from now
+    // Set expiry time to 1 hour from now
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + (24 * 60 * 60 * 1000));
+    const expiresAt = new Date(now.getTime() + (1 * 60 * 60 * 1000));
     
     // Add timestamp, status, custom booking ID, and expiry
     const incompleteBooking = {
@@ -452,10 +680,28 @@ const getAllBookings = async () => {
     // Find all bookings
     const bookings = await collection.find({}).toArray();
     
+    // Decompress all booking data
+    const decompressedBookings = [];
+    for (const booking of bookings) {
+      if (booking.compressedData) {
+        try {
+          const decompressed = await decompressData(booking.compressedData);
+          decompressedBookings.push(decompressed);
+        } catch (error) {
+          console.error('❌ Error decompressing booking:', booking.bookingId, error);
+          // Fall back to uncompressed data
+          decompressedBookings.push(booking);
+        }
+      } else {
+        // Already uncompressed
+        decompressedBookings.push(booking);
+      }
+    }
+    
     return {
       success: true,
-      bookings: bookings,
-      total: bookings.length,
+      bookings: decompressedBookings,
+      total: decompressedBookings.length,
       database: DB_NAME,
       collection: COLLECTION_NAME
     };
@@ -500,9 +746,24 @@ const getBookingById = async (bookingId: string) => {
       };
     }
     
+    // Check if booking data is compressed
+    let decompressedBooking = booking;
+    if (booking.compressedData) {
+      try {
+        // Decompress the booking data
+        const decompressedData = await decompressData(booking.compressedData) as Record<string, unknown>;
+        decompressedBooking = { ...booking, ...decompressedData } as typeof booking;
+        console.log('📦 Decompressed booking data for:', booking.bookingId);
+      } catch (error) {
+        console.error('❌ Error decompressing booking data:', error);
+        // Fall back to uncompressed data if decompression fails
+        decompressedBooking = booking;
+      }
+    }
+    
     return {
       success: true,
-      booking: booking,
+      booking: decompressedBooking,
       database: DB_NAME,
       collection: COLLECTION_NAME
     };
@@ -601,6 +862,23 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
     }
     const collection = db.collection(COLLECTION_NAME);
     
+    // Compress the updated booking data
+    const compressedData = await compressData(bookingData);
+    
+    // Create update object with compressed data
+    const updateData = {
+      compressedData: compressedData,
+      updatedAt: new Date(),
+      // Keep some basic fields uncompressed for quick queries
+      name: bookingData.name,
+      email: bookingData.email,
+      theaterName: bookingData.theaterName,
+      date: bookingData.date,
+      time: bookingData.time,
+      occasion: bookingData.occasion,
+      totalAmount: bookingData.totalAmount
+    };
+    
     // Try to update by ObjectId first, then by custom bookingId
     let updateResult;
     
@@ -609,10 +887,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       updateResult = await collection.updateOne(
         { _id: new ObjectId(bookingId) },
         { 
-          $set: {
-            ...bookingData,
-            updatedAt: new Date()
-          }
+          $set: updateData
         }
       );
     } else {
@@ -620,10 +895,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       updateResult = await collection.updateOne(
         { bookingId: bookingId },
         { 
-          $set: {
-            ...bookingData,
-            updatedAt: new Date()
-          }
+          $set: updateData
         }
       );
     }
@@ -682,7 +954,92 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
   }
 };
 
-// Delete booking from MongoDB database
+// Move booking to cancelled collection instead of deleting
+const moveBookingToCancelled = async (bookingId: string, cancellationData: { cancelledAt: Date; refundAmount: number; refundStatus: string; cancellationReason?: string }) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    // Get collections
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(COLLECTION_NAME);
+    const cancelledCollection = db.collection(CANCELLED_COLLECTION_NAME);
+    
+    // First, get the booking to move
+    let booking;
+    
+    // First try as ObjectId if it's a valid format
+    if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
+      booking = await collection.findOne({ _id: new ObjectId(bookingId) });
+    } else {
+      // Try as custom ID field
+      booking = await collection.findOne({ bookingId: bookingId });
+    }
+    
+    if (!booking) {
+      return {
+        success: false,
+        error: 'Booking not found'
+      };
+    }
+    
+    // Add cancellation data to the booking
+    const cancelledBooking = {
+      ...booking,
+      status: 'cancelled',
+      cancelledAt: cancellationData.cancelledAt,
+      refundAmount: cancellationData.refundAmount,
+      refundStatus: cancellationData.refundStatus,
+      cancellationReason: cancellationData.cancellationReason || 'Customer requested cancellation',
+      originalCollection: COLLECTION_NAME
+    };
+    
+    // Insert into cancelled collection
+    const insertResult = await cancelledCollection.insertOne(cancelledBooking);
+    
+    // Delete from original collection
+    let deleteResult;
+    if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
+      deleteResult = await collection.deleteOne({ _id: new ObjectId(bookingId) });
+    } else {
+      deleteResult = await collection.deleteOne({ bookingId: bookingId });
+    }
+    
+    if (deleteResult.deletedCount === 0) {
+      return {
+        success: false,
+        error: 'Failed to remove booking from original collection'
+      };
+    }
+    
+    console.log(`✅ Booking moved to cancelled collection:`, bookingId);
+    
+    return {
+      success: true,
+      message: 'Booking moved to cancelled collection successfully',
+      cancelledBooking: {
+        id: (cancelledBooking as Record<string, unknown>).bookingId,
+        mongoId: insertResult.insertedId,
+        ...cancelledBooking
+      },
+      database: DB_NAME,
+      originalCollection: COLLECTION_NAME,
+      cancelledCollection: CANCELLED_COLLECTION_NAME
+    };
+    
+  } catch (error) {
+    console.error('❌ Error moving booking to cancelled collection:', error);
+    return {
+      success: false,
+      error: 'Failed to move booking to cancelled collection'
+    };
+  }
+};
+
+// Delete booking from MongoDB database (legacy function - now moves to cancelled)
 const deleteBooking = async (bookingId: string) => {
   try {
     if (!isConnected) {
@@ -903,11 +1260,94 @@ const getExpiredBookings = async (currentDateTime: Date) => {
   }
 };
 
+// Get all cancelled bookings from MongoDB database
+const getAllCancelledBookings = async () => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    // Get collection
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(CANCELLED_COLLECTION_NAME);
+    
+    // Find all cancelled bookings
+    const cancelledBookings = await collection.find({}).toArray();
+    
+    return {
+      success: true,
+      cancelledBookings: cancelledBookings,
+      total: cancelledBookings.length,
+      database: DB_NAME,
+      collection: CANCELLED_COLLECTION_NAME
+    };
+    
+  } catch (error) {
+    console.error('❌ Error getting cancelled bookings from MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to get cancelled bookings from MongoDB'
+    };
+  }
+};
+
+// Get all manual bookings from manual_booking collection
+const getAllManualBookings = async () => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
+    const bookings = await collection.find({}).sort({ createdAt: -1 }).toArray();
+
+    // Decompress all bookings
+    const decompressedBookings = [];
+    for (const booking of bookings) {
+      try {
+        const decompressedData = await decompressData(booking.compressedData);
+        decompressedBookings.push({
+          ...(decompressedData as Record<string, unknown>),
+          _id: booking._id,
+          bookingId: booking.bookingId,
+          createdAt: booking.createdAt,
+          status: booking.status
+        });
+      } catch (error) {
+        console.error('❌ Error decompressing manual booking:', booking.bookingId, error);
+      }
+    }
+
+    return {
+      success: true,
+      manualBookings: decompressedBookings,
+      total: decompressedBookings.length,
+      database: DB_NAME,
+      collection: MANUAL_BOOKING_COLLECTION_NAME
+    };
+
+  } catch (error) {
+    console.error('❌ Error getting manual bookings from MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to get manual bookings from MongoDB'
+    };
+  }
+};
+
 // Database operations
 const database = {
   connect: connectToDatabase,
   checkConnection: checkConnection,
   saveBooking: saveBooking,
+  saveManualBooking: saveManualBooking,
+  getAllManualBookings: getAllManualBookings,
   saveIncompleteBooking: saveIncompleteBooking,
   getAllBookings: getAllBookings,
   getAllIncompleteBookings: getAllIncompleteBookings,
@@ -917,12 +1357,51 @@ const database = {
   updateBooking: updateBooking,
   updateBookingStatus: updateBookingStatus,
   deleteBooking: deleteBooking,
+  moveBookingToCancelled: moveBookingToCancelled,
+  getAllCancelledBookings: getAllCancelledBookings,
   deleteExpiredBookings: deleteExpiredBookings,
   getExpiredBookings: getExpiredBookings,
   isConnected: () => isConnected
 };
 
+// Get bookings by occasion from MongoDB database
+const getBookingsByOccasion = async (occasion: string) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    // Get collection
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(COLLECTION_NAME);
+    
+    // Find bookings by occasion (limit to recent 50 for performance)
+    const bookings = await collection.find({ 
+      occasion: occasion 
+    }).sort({ createdAt: -1 }).limit(50).toArray();
+    
+    return {
+      success: true,
+      bookings: bookings,
+      total: bookings.length,
+      occasion: occasion,
+      database: DB_NAME,
+      collection: COLLECTION_NAME
+    };
+    
+  } catch (error) {
+    console.error('❌ Error getting bookings by occasion from MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to get bookings by occasion from MongoDB'
+    };
+  }
+};
+
 // Auto-connect when module loads
 connectToDatabase();
 
+export { connectToDatabase, getBookingsByOccasion };
 export default database;

@@ -31,6 +31,349 @@ const transporter = nodemailer.createTransport(EMAIL_CONFIG);
 
 // Email templates
 const emailTemplates = {
+  // Booking cancelled
+  bookingCancelled: (bookingData: BookingData & { refundAmount: number; refundStatus: string; cancelledAt: Date }) => ({
+    subject: 'Booking Cancelled - FeelME Town - Refund Information',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Booking Cancelled - FeelME Town</title>
+        <style>
+          @font-face {
+            font-family: 'Paralucent-DemiBold';
+            src: url('https://ik.imagekit.io/cybershoora/fonts/Paralucent-DemiBold.ttf?updatedAt=1758320830457') format('truetype');
+          }
+          @font-face {
+            font-family: 'Paralucent-Medium';
+            src: url('https://ik.imagekit.io/cybershoora/fonts/Paralucent-Medium.ttf?updatedAt=1758320830502') format('truetype');
+          }
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { 
+            margin: 0; padding: 0; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+          }
+          .email-wrapper { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            padding: 40px 20px; 
+            min-height: 100vh;
+          }
+          .container { 
+            max-width: 650px; 
+            margin: 0 auto; 
+            background: white; 
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            overflow: hidden;
+          }
+          .header { 
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); 
+            padding: 50px 30px; 
+            text-align: center; 
+            font-family: 'Paralucent-Medium', sans-serif;
+            position: relative;
+            overflow: hidden;
+          }
+          .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="50" cy="50" r="1" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+            opacity: 0.3;
+          }
+          .logo { 
+            color: white; 
+            font-size: 36px; 
+            font-weight: 800; 
+            margin-bottom: 15px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            position: relative;
+            z-index: 1;
+          }
+          .tagline { 
+            color: rgba(255,255,255,0.9); 
+            font-size: 18px; 
+            font-family: 'Paralucent-Medium', sans-serif;
+            font-weight: 300;
+            position: relative;
+            z-index: 1;
+          }
+          .brand-logo {
+            width: 120px;
+            height: auto;
+            display: block;
+            margin: 0 auto 12px;
+            position: relative;
+            z-index: 1;
+          }
+          .cancelled-badge {
+            background: linear-gradient(45deg, #dc3545, #c82333);
+            color: white;
+            font-family: 'Paralucent-Medium', sans-serif;
+            padding: 8px 20px;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 600;
+            display: inline-block;
+            margin: 20px auto;
+            box-shadow: 0 4px 15px rgba(220,53,69,0.3);
+          }
+          .content { 
+            padding: 50px 40px; 
+            background: white;
+          }
+          .greeting {
+            text-align: center;
+            margin-bottom: 40px;
+          }
+          .greeting h1 {
+            color: #dc3545;
+            font-family: 'Paralucent-Medium', sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 15px;
+          }
+          .greeting p {
+            color: #666;
+            font-size: 18px;
+            font-family: 'Paralucent-Medium', sans-serif;
+            line-height: 1.6;
+          }
+          .booking-card { 
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 35px; 
+            border-radius: 20px; 
+            margin: 30px 0;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+          }
+          .booking-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 25px;
+          }
+          .booking-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-size: 24px;
+          }
+          .booking-title {
+            color: #1a1a2e;
+            font-size: 24px;
+            font-weight: 700;
+            font-family: 'Paralucent-Medium', sans-serif;
+          }
+          .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 25px;
+          }
+          .detail-item {
+            background: white;
+            padding: 24px;
+            border-radius: 16px;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+          }
+          .detail-label {
+            display: inline-block;
+            font-weight: 700;
+            color: #fff;
+            font-family: 'Paralucent-Medium', sans-serif;
+            font-size: 14px;
+            text-transform: none;
+            letter-spacing: 0.3px;
+            margin-bottom: 10px;
+            padding: 8px 18px;
+            border-radius: 9999px;
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            box-shadow: 0 6px 18px rgba(220,53,69,0.35);
+          }
+          .detail-value {
+            font-size: 28px;
+            font-weight: 800;
+            font-family: 'Paralucent-Medium', sans-serif;
+            line-height: 1.2;
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+          }
+          .refund-section {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            font-family: 'Paralucent-DemiBold', sans-serif;
+            margin: 30px 0;
+            box-shadow: 0 15px 40px rgba(40,167,69,0.3);
+          }
+          .refund-label {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 10px;
+          }
+          .refund-amount {
+            font-size: 36px;
+            font-weight: 800;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+          }
+          .footer { 
+            background: #1a1a2e; 
+            color: white; 
+            font-family: 'Paralucent-Medium', sans-serif;
+            padding: 40px 30px; 
+            text-align: center;
+          }
+          .footer-logo {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 15px;
+          }
+          .footer-tagline {
+            color: rgba(255,255,255,0.8);
+            margin-bottom: 30px;
+          }
+          .footer-bottom {
+            border-top: 1px solid rgba(255,255,255,0.1);
+            padding-top: 20px;
+            margin-top: 20px;
+          }
+          .footer-bottom p {
+            font-size: 12px; 
+            color: rgba(255,255,255,0.6);
+          }
+          @media (max-width: 600px) {
+            .container { border-radius: 14px; margin: 0 8px; }
+            .header { padding: 28px 16px; }
+            .logo { font-size: 26px; }
+            .tagline { font-size: 14px; }
+            .content { padding: 24px 16px; }
+            .detail-grid { grid-template-columns: 1fr; gap: 14px; }
+            .detail-item { padding: 16px; border-radius: 12px; }
+            .detail-label { font-size: 12px; padding: 6px 12px; }
+            .detail-value { font-size: 22px; line-height: 1.25; word-break: break-word; }
+            .booking-card { padding: 20px; }
+            .refund-section { padding: 20px; border-radius: 14px; margin: 20px 0; }
+            .refund-amount { font-size: 28px; }
+            .footer { padding: 24px 16px; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="email-wrapper">
+        <div class="container">
+          <div class="header">
+            <img
+              class="brand-logo"
+              src="https://res.cloudinary.com/dr8razrcd/image/upload/v1758321248/FMT_logo_irtnlr.svg"
+              alt="FeelME Town logo"
+              loading="lazy"
+              decoding="async"
+            />
+            <div class="logo">FeelME Town</div>
+            <div class="tagline">Premium Entertainment Experience</div>
+          </div>
+          
+          <div class="content">
+              <div class="cancelled-badge">Booking Cancelled</div>
+              
+              <div class="greeting">
+                <h1>Booking Cancelled, ${bookingData.name}</h1>
+                <p>Your booking has been successfully cancelled. We're sorry to see you go, but we understand that plans can change.</p>
+              </div>
+              
+              <div class="booking-card">
+                <div class="booking-header">
+                  <div class="booking-icon">❌</div>
+                  <div class="booking-title">Cancelled Booking Details</div>
+                </div>
+                
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <div class="detail-label">Customer Name</div>
+                    <div class="detail-value">${bookingData.name}</div>
+                  </div>
+                  <div class="detail-item">
+                    <div class="detail-label">Theater Venue</div>
+                    <div class="detail-value">${bookingData.theaterName}</div>
+                  </div>
+                  <div class="detail-item">
+                    <div class="detail-label">Booking Date</div>
+                    <div class="detail-value">${bookingData.date}</div>
+                  </div>
+                  <div class="detail-item">
+                    <div class="detail-label">Show Time</div>
+                    <div class="detail-value">${bookingData.time}</div>
+                  </div>
+                  <div class="detail-item">
+                    <div class="detail-label">Cancelled At</div>
+                    <div class="detail-value">${bookingData.cancelledAt.toLocaleDateString()}</div>
+                  </div>
+                  <div class="detail-item">
+                    <div class="detail-label">Refund Status</div>
+                    <div class="detail-value">${bookingData.refundStatus === 'refundable' ? 'Eligible for Refund' : 'Non-Refundable'}</div>
+                  </div>
+                </div>
+              </div>
+              
+              ${bookingData.refundAmount > 0 ? `
+              <div class="refund-section">
+                <div class="refund-label">Refund Amount</div>
+                <div class="refund-amount">₹${bookingData.refundAmount}</div>
+                <p style="margin-top: 15px; font-size: 16px; opacity: 0.9;">
+                  Refund will be processed within 5-7 business days to your original payment method.
+                </p>
+              </div>
+              ` : `
+              <div class="refund-section" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%);">
+                <div class="refund-label">No Refund Applicable</div>
+                <div class="refund-amount">₹0</div>
+                <p style="margin-top: 15px; font-size: 16px; opacity: 0.9;">
+                  As per our cancellation policy, no refund is applicable for cancellations made within 72 hours of the booking date.
+                </p>
+              </div>
+              `}
+              
+              <div style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 15px;">
+                <p style="color: #666; font-size: 16px; margin: 0; font-family: 'Paralucent-Medium', sans-serif;">
+                  <strong>💡 We hope to see you again soon!</strong> 
+                  Feel free to book with us anytime for your special occasions. We're always here to create unforgettable memories.
+                </p>
+              </div>
+            </div>
+            
+            <div class="footer">
+              <div class="footer-logo">FeelME Town</div>
+              <div class="footer-tagline">Creating Unforgettable Memories</div>
+              
+              <div class="footer-bottom">
+                <p>© 2024 FeelME Town. All rights reserved.</p>
+                <p>Premium Entertainment • Luxury Experience • Unforgettable Moments</p>
+                <p>Designed and Developed by <a href="https://www.cybershoora.com/" target="_blank" rel="noopener noreferrer"><span style="font-weight: 600; color: #ffffff;">CYBERSHOORA</span></a></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  }),
+
   // Booking completed successfully
   bookingComplete: (bookingData: BookingData) => ({
     subject: 'Booking Confirmed - FeelME Town - Premium Entertainment',
@@ -1534,7 +1877,7 @@ const emailTemplates = {
 };
 
 // Send email function
-const sendEmail = async (to: string, templateType: 'bookingComplete' | 'bookingIncomplete', bookingData: BookingData | (Partial<BookingData> & { email?: string; bookingId?: string; selectedCakes?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedDecorItems?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedGifts?: Array<{ id: string; name: string; price: number; quantity: number }> })) => {
+const sendEmail = async (to: string, templateType: 'bookingComplete' | 'bookingIncomplete' | 'bookingCancelled', bookingData: BookingData | (Partial<BookingData> & { email?: string; bookingId?: string; selectedCakes?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedDecorItems?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedGifts?: Array<{ id: string; name: string; price: number; quantity: number }> }) | (BookingData & { refundAmount: number; refundStatus: string; cancelledAt: Date })) => {
   try {
     // Check if email credentials are configured
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || 
@@ -1546,7 +1889,8 @@ const sendEmail = async (to: string, templateType: 'bookingComplete' | 'bookingI
       };
     }
 
-    const template = emailTemplates[templateType](bookingData as BookingData & Partial<BookingData>);
+    // @ts-expect-error - Type mismatch due to complex email template types
+    const template = emailTemplates[templateType](bookingData);
     
     const mailOptions = {
       from: `"FeelME Town" <${EMAIL_CONFIG.auth.user}>`,
@@ -1587,6 +1931,16 @@ const emailService = {
     }
     
     return await sendEmail(bookingData.email, 'bookingComplete', bookingData);
+  },
+
+  // Send booking cancellation email
+  sendBookingCancelled: async (bookingData: BookingData & { refundAmount: number; refundStatus: string; cancelledAt: Date }) => {
+    if (!bookingData.email) {
+      console.log('⚠️ No email provided for booking cancellation notification');
+      return { success: false, error: 'No email provided' };
+    }
+    
+    return await sendEmail(bookingData.email, 'bookingCancelled', bookingData);
   },
 
   // Send booking incomplete email

@@ -118,9 +118,10 @@ export const db = {
   // Get theaters
   getTheaters: () => {
     return [
-      { id: 'theater1', name: 'EROS (Couples) (FMT-Hall-1)', price: '₹1399', capacity: 2, type: 'Couples' },
-      { id: 'theater2', name: 'FAMILY (FMT-Hall-2)', price: '₹1999', capacity: 4, type: 'Family' },
-      { id: 'theater3', name: 'PREMIUM (FMT-Hall-3)', price: '₹2999', capacity: 6, type: 'Premium' }
+      { id: 'theater1', name: 'EROS (COUPLES) (FMT-Hall-1)', price: '₹1399', capacity: 2, type: 'Couples' },
+      { id: 'theater2', name: 'PHILIA (FRIENDS) (FMT-Hall-2)', price: '₹1999', capacity: 4, type: 'Friends' },
+      { id: 'theater3', name: 'PRAGMA (LOVE) (FMT-Hall-3)', price: '₹2999', capacity: 6, type: 'Love' },
+      { id: 'theater4', name: 'STORGE (FAMILY) (FMT-Hall-4)', price: '₹3999', capacity: 8, type: 'Family' }
     ];
   },
 

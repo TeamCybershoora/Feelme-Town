@@ -14,7 +14,14 @@ const DatePickerContext = createContext<DatePickerContextType | undefined>(undef
 
 export function DatePickerProvider({ children }: { children: ReactNode }) {
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState('September 10, 2025');
+  const [selectedDate, setSelectedDate] = useState(() => {
+    return new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  });
 
   const openDatePicker = () => setIsDatePickerOpen(true);
   const closeDatePicker = () => setIsDatePickerOpen(false);

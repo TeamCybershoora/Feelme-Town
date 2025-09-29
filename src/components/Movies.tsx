@@ -37,6 +37,7 @@ interface MoviesProps {
   industry?: Industry;       // new filter
   selectedRows?: number;     // number of rows to display
   onMovieSelect?: (movieTitle: string) => void;
+  selectedMovies?: string[]; // already selected movies
 }
 
 function mapIndustry(industry: Industry) {
@@ -55,7 +56,7 @@ function mapIndustry(industry: Industry) {
 }
 
 // Card
-function MovieCard({ movie, onCardClick }: { movie: Movie; onCardClick: (movie: Movie) => void }) {
+function MovieCard({ movie, onCardClick, isSelected = false }: { movie: Movie; onCardClick: (movie: Movie) => void; isSelected?: boolean }) {
   const [isHovered, setIsHovered] = useState(false);
 
   const handleCardClick = () => {
@@ -64,7 +65,7 @@ function MovieCard({ movie, onCardClick }: { movie: Movie; onCardClick: (movie: 
 
   return (
     <div
-      className={`movie-card ${isHovered ? 'hovered' : ''}`}
+      className={`movie-card ${isHovered ? 'hovered' : ''} ${isSelected ? 'selected' : ''}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleCardClick}
@@ -87,6 +88,13 @@ function MovieCard({ movie, onCardClick }: { movie: Movie; onCardClick: (movie: 
             <span>{movie.rating}</span>
           </div>
         </div>
+        {isSelected && (
+          <div className="selected-indicator">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+            </svg>
+          </div>
+        )}
          <div className="movie-title-overlay">
            <h3 className="movie-title" title={movie.title}>{movie.title}</h3>
            <p className="movie-year">({movie.year})</p>
@@ -101,8 +109,12 @@ function MovieCard({ movie, onCardClick }: { movie: Movie; onCardClick: (movie: 
       </div>
 
       <style jsx>{`
-        .movie-card{background:#000;border-radius:16px;overflow:hidden;transition:.4s;border:1px solid rgba(139,69,255,.1);position:relative;cursor:pointer;height:350px}
+        .movie-card{background:#000;border-radius:16px;overflow:hidden;transition:.4s;border:1px solid rgba(139,69,255,.1);position:relative;cursor:pointer;height:280px}
         .movie-card:hover{transform:translateY(-8px) scale(1.02);border-color:rgba(139,69,255,.3);box-shadow:0 20px 40px rgba(0,0,0,.3)}
+        .movie-card.selected{border-color:#28a745;border-width:2px;box-shadow:0 0 20px rgba(40,167,69,.3)}
+        .movie-card.selected:hover{border-color:#20c997;box-shadow:0 0 25px rgba(40,167,69,.4)}
+        .selected-indicator{position:absolute;top:16px;left:16px;z-index:3;background:#28a745;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 2px 8px rgba(40,167,69,.4)}
+        .selected-indicator svg{width:16px;height:16px}
         .card-image-container{position:relative;width:100%;height:100%}
         .card-image{transition:transform .4s ease}
         .movie-card:hover .card-image{transform:scale(1.1)}
@@ -120,8 +132,8 @@ function MovieCard({ movie, onCardClick }: { movie: Movie; onCardClick: (movie: 
         .subscription-badge{position:absolute;top:50px;left:16px;background:linear-gradient(135deg,#ff6b35,#ff8c42);color:#fff;padding:4px 8px;border-radius:12px;font-size:.7rem;font-weight:600;font-family:'Paralucent-Medium',Arial,sans-serif;z-index:3}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.8}}
          @media (max-width:768px){
-           .movie-card{height:10rem}
-           .card-image-container{height:10rem}
+           .movie-card{height:8rem}
+           .card-image-container{height:8rem}
            .movie-title{font-size:0.75rem;bottom:2.5rem;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
            .movie-year{font-size:0.6rem}
            .rating{font-size:0.6rem;padding:3px 6px}
@@ -147,6 +159,7 @@ export default function Movies({
   industry = 'ALL',
   selectedRows = 3,
   onMovieSelect,
+  selectedMovies = [],
 }: MoviesProps) {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [filteredMovies, setFilteredMovies] = useState<Movie[]>([]);
@@ -157,6 +170,7 @@ export default function Movies({
   const [isPopupOpen, setIsPopupOpen] = useState(false);
 
   const handleCardClick = (movie: Movie) => {
+    console.log('🎬 Movies: Card clicked:', movie.title);
     setSelectedMovie(movie);
     setIsPopupOpen(true);
   };
@@ -310,10 +324,10 @@ export default function Movies({
              max-width: 1400px; 
              margin: 0 auto; 
              padding: 0 1rem; 
-             grid-template-rows: repeat(${selectedRows}, 350px);
+             grid-template-rows: repeat(${selectedRows}, 280px);
              overflow: hidden;
            }
-           .loading-card { background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 16px; height: 350px; overflow: hidden; position: relative; }
+           .loading-card { background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 16px; height: 280px; overflow: hidden; position: relative; }
            .loading-shimmer { position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,69,69,0.1), transparent); animation: shimmer 2s infinite; }
            @keyframes shimmer { 0% { left: -100%; } 100% { left: 100%; } }
            @media (min-width: 1200px) { 
@@ -333,7 +347,7 @@ export default function Movies({
                grid-template-columns: repeat(3, 1fr) !important; 
                gap: 8px; 
                padding: 0 0.5rem; 
-               grid-template-rows: repeat(${selectedRows}, 10rem);
+               grid-template-rows: repeat(${selectedRows}, 8rem);
                height: ${containerHeight.mobile}px !important;
              }
              .loading-card { height: 10rem; }
@@ -364,7 +378,11 @@ export default function Movies({
                   display: index >= (selectedRows * 4) ? 'none' : 'block'
                 }}
               >
-                <MovieCard movie={movie} onCardClick={handleCardClick} />
+                <MovieCard 
+                  movie={movie} 
+                  onCardClick={handleCardClick} 
+                  isSelected={selectedMovies.includes(movie.title)}
+                />
               </div>
              ))
            )}
@@ -392,7 +410,7 @@ export default function Movies({
           display: grid; 
           grid-template-columns: repeat(3, 1fr); 
           gap: 24px; 
-          grid-template-rows: repeat(${selectedRows}, 350px);
+          grid-template-rows: repeat(${selectedRows}, 280px);
           height: 100%;
         }
         

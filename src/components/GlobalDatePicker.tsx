@@ -11,6 +11,15 @@ interface GlobalDatePickerProps {
 
 export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, selectedDate }: GlobalDatePickerProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  
+  // Get current date for highlighting
+  const currentDate = new Date();
+  const currentDateString = currentDate.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
 
   const navigateMonth = (direction: 'prev' | 'next') => {
     setCurrentMonth(prev => {
@@ -146,6 +155,31 @@ export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, select
           padding-right: 3rem !important;
         }
 
+        .global-date-picker-today-section {
+          display: flex !important;
+          justify-content: center !important;
+          margin-bottom: 1rem !important;
+        }
+
+        .global-today-btn {
+          background: #ff0000 !important;
+          color: white !important;
+          border: none !important;
+          border-radius: 8px !important;
+          padding: 0.5rem 1rem !important;
+          font-size: 0.9rem !important;
+          font-weight: 600 !important;
+          cursor: pointer !important;
+          transition: all 0.3s ease !important;
+          font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif !important;
+        }
+
+        .global-today-btn:hover {
+          background: #cc0000 !important;
+          transform: translateY(-1px) !important;
+          box-shadow: 0 4px 8px rgba(255, 0, 0, 0.3) !important;
+        }
+
         .global-month-nav-btn {
           background: rgba(251, 191, 36, 0.2) !important;
           border: 1px solid rgba(251, 191, 36, 0.3) !important;
@@ -277,6 +311,32 @@ export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, select
           color: #ffffff !important;
         }
 
+        .global-calendar-day.current-date {
+          background: rgba(255, 0, 5, 0.3) !important;
+          border-color: #FF0005 !important;
+          color: #ffffff !important;
+          font-weight: 700 !important;
+        }
+
+        .global-calendar-day.current-date:hover {
+          background: rgba(255, 0, 5, 0.4) !important;
+          border-color: #FF0005 !important;
+          color: #ffffff !important;
+        }
+
+        .global-calendar-day.selected {
+          background: rgba(251, 191, 36, 0.4) !important;
+          border-color: #fbbf24 !important;
+          color: #ffffff !important;
+          font-weight: 700 !important;
+        }
+
+        .global-calendar-day.selected:hover {
+          background: rgba(251, 191, 36, 0.5) !important;
+          border-color: #fbbf24 !important;
+          color: #ffffff !important;
+        }
+
         @keyframes globalModalFadeIn {
           from {
             opacity: 0;
@@ -321,6 +381,24 @@ export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, select
             </button>
           </div>
           
+          <div className="global-date-picker-today-section">
+            <button 
+              className="global-today-btn"
+              onClick={() => {
+                const today = new Date();
+                const todayString = today.toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                });
+                onDateSelect(todayString);
+              }}
+            >
+              Today
+            </button>
+          </div>
+          
           <button 
             className="global-date-picker-close-btn"
             onClick={onClose}
@@ -340,16 +418,42 @@ export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, select
             </div>
             
             <div className="global-calendar-days">
-              {getDaysInMonth(currentMonth).map((day, index) => (
-                <button
-                  key={index}
-                  className={`global-calendar-day ${day ? '' : 'empty'}`}
-                  onClick={() => day && handleDateSelect(day)}
-                  disabled={!day}
-                >
-                  {day ? day.getDate() : ''}
-                </button>
-              ))}
+              {getDaysInMonth(currentMonth).map((day, index) => {
+                if (!day) {
+                  return (
+                    <button
+                      key={index}
+                      className="global-calendar-day empty"
+                      disabled
+                    >
+                      {''}
+                    </button>
+                  );
+                }
+
+                const dayDateString = day.toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                });
+
+                const isCurrentDate = dayDateString === currentDateString;
+                const isSelectedDate = dayDateString === selectedDate;
+                const isPastDate = day < currentDate && !isCurrentDate;
+
+                return (
+                  <button
+                    key={index}
+                    className={`global-calendar-day ${isCurrentDate ? 'current-date' : ''} ${isSelectedDate ? 'selected' : ''}`}
+                    onClick={() => !isPastDate && handleDateSelect(day)}
+                    disabled={isPastDate}
+                    style={isPastDate ? { opacity: 0.3, cursor: 'not-allowed' } : {}}
+                  >
+                    {day.getDate()}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -9,6 +9,71 @@ interface Testimonial {
   text: string;
 }
 
+// Animated Counter Component
+const AnimatedCounter = ({ end, duration = 2000, suffix = '', prefix = '' }: { 
+  end: number; 
+  duration?: number; 
+  suffix?: string; 
+  prefix?: string; 
+}) => {
+  const [count, setCount] = useState(0);
+  const [isVisible, setIsVisible] = useState(false);
+  const counterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !isVisible) {
+          setIsVisible(true);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (counterRef.current) {
+      observer.observe(counterRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [isVisible]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+
+    let startTime: number;
+    const startValue = 0;
+    const endValue = end;
+
+    const animate = (currentTime: number) => {
+      if (!startTime) startTime = currentTime;
+      const progress = Math.min((currentTime - startTime) / duration, 1);
+      
+      // Easing function for smooth animation
+      const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+      const currentValue = startValue + (endValue - startValue) * easeOutQuart;
+      
+      // Handle decimal numbers properly
+      if (end % 1 !== 0) {
+        setCount(Number(currentValue.toFixed(1)));
+      } else {
+        setCount(Math.floor(currentValue));
+      }
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [isVisible, end, duration]);
+
+  return (
+    <div ref={counterRef}>
+      {prefix}{count}{suffix}
+    </div>
+  );
+};
+
 const TestimonialPage = () => {
   const ballRef = useRef<HTMLDivElement>(null);
   const animationFrame = useRef<number | null>(null);
@@ -249,13 +314,13 @@ const TestimonialPage = () => {
             transform: translateX(0);
           }
           100% {
-            transform: translateX(-100%);
+            transform: translateX(-33.333%);
           }
         }
 
         @keyframes scrollLTR {
           0% {
-            transform: translateX(-100%);
+            transform: translateX(-33.333%);
           }
           100% {
             transform: translateX(0);
@@ -286,6 +351,11 @@ const TestimonialPage = () => {
           90% { transform: rotate(-1deg) scale(1.01); }
           100% { transform: rotate(0deg) scale(1); }
         }
+
+        .scrollRow:hover .scrollRowRTL,
+        .scrollRow:hover .scrollRowLTR {
+          animation-play-state: paused !important;
+        }
         
         .call-icon {
           animation: phoneShake 1.5s ease-in-out infinite !important;
@@ -309,15 +379,21 @@ const TestimonialPage = () => {
         </p>
         <div style={styles.statsContainer}>
           <div style={styles.statItem}>
-            <div style={styles.statNumber}>1000+</div>
+            <div style={styles.statNumber}>
+              <AnimatedCounter end={1000} suffix="+" duration={2500} />
+            </div>
             <div style={styles.statLabel}>Happy Customers</div>
           </div>
           <div style={styles.statItem}>
-            <div style={styles.statNumber}>4.8/5</div>
+            <div style={styles.statNumber}>
+              <AnimatedCounter end={4.8} suffix="/5" duration={2000} />
+            </div>
             <div style={styles.statLabel}>Average Rating</div>
           </div>
           <div style={styles.statItem}>
-            <div style={styles.statNumber}>98%</div>
+            <div style={styles.statNumber}>
+              <AnimatedCounter end={98} suffix="%" duration={2200} />
+            </div>
             <div style={styles.statLabel}>Satisfaction Rate</div>
           </div>
         </div>
@@ -446,13 +522,15 @@ const styles = {
   },
   scrollRowRTL: {
     display: 'flex',
-    animation: 'scrollRTL 60s linear infinite',
+    animation: 'scrollRTL 30s linear infinite',
     gap: '1rem',
+    transition: 'animation-play-state 0.3s ease',
   },
   scrollRowLTR: {
     display: 'flex',
-    animation: 'scrollLTR 60s linear infinite',
+    animation: 'scrollLTR 30s linear infinite',
     gap: '1rem',
+    transition: 'animation-play-state 0.3s ease',
   },
   testimonialCard: {
     flexShrink: 0,

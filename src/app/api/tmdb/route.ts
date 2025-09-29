@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
         Accept: 'application/json',
       },
       // cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(30000), // Increased timeout to 30 seconds
     });
 
     if (!r.ok) {

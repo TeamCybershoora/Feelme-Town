@@ -7,7 +7,6 @@ import Movies from '@/components/Movies';
 import SearchFilter from '@/components/SearchFilter';
 import Pagination from '@/components/Pagination';
 
-
 type Industry =
   | 'ALL'
   | 'BOLLYWOOD'
@@ -28,15 +27,58 @@ export default function MoviesPage() {
   const [selectedGenre, setSelectedGenre] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('');
   const [selectedIndustry, setSelectedIndustry] = useState<Industry>('ALL');
-  const [selectedRows, setSelectedRows] = useState(3);
+  const [selectedRows, setSelectedRows] = useState(2);
   const itemsPerPage = selectedRows * 4; // 4 cards per row on desktop
 
   // Check if coming from booking popup or admin booking
   const fromBooking = searchParams.get('from') === 'booking';
   const fromAdminBooking = searchParams.get('from') === 'admin-booking';
 
+  // Ensure body scroll is enabled when component mounts
+  useEffect(() => {
+    // Force reset all scroll-related styles
+    document.body.style.overflow = 'auto';
+    document.body.style.position = 'static';
+    document.body.style.top = 'auto';
+    document.body.style.width = '100%';
+    document.body.style.height = 'auto';
+    document.body.style.left = 'auto';
+    document.body.style.right = 'auto';
+    document.documentElement.style.overflow = 'auto';
+    document.documentElement.style.height = 'auto';
+    document.documentElement.style.position = 'static';
+    document.body.classList.remove('popup-open');
+    
+    // Force scroll to top
+    window.scrollTo(0, 0);
+    
+    // Cleanup function to restore scroll on unmount
+    return () => {
+      document.body.style.overflow = 'auto';
+      document.body.style.position = 'static';
+      document.body.style.top = 'auto';
+      document.body.style.width = '100%';
+      document.body.style.height = 'auto';
+      document.body.style.left = 'auto';
+      document.body.style.right = 'auto';
+      document.documentElement.style.overflow = 'auto';
+      document.documentElement.style.height = 'auto';
+      document.documentElement.style.position = 'static';
+      document.body.classList.remove('popup-open');
+    };
+  }, []);
+
   const handleBackClick = () => {
     console.log('Back button clicked, fromAdminBooking:', fromAdminBooking);
+    
+    // Ensure body scroll is enabled before navigation
+    document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.width = '';
+    document.body.style.height = '';
+    document.documentElement.style.overflow = '';
+    document.body.classList.remove('popup-open');
     
     if (fromBooking) {
       router.push('/theater?reopenBooking=true');
@@ -56,6 +98,15 @@ export default function MoviesPage() {
     console.log('Movie selected:', movieTitle);
     console.log('From admin booking:', fromAdminBooking);
     
+    // Ensure body scroll is enabled before navigation
+    document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.width = '';
+    document.body.style.height = '';
+    document.documentElement.style.overflow = '';
+    document.body.classList.remove('popup-open');
+    
     if (fromBooking) {
       // Return to theater page which will reopen booking popup
       router.push('/theater?reopenBooking=true');
@@ -68,7 +119,6 @@ export default function MoviesPage() {
       router.back();
     }
   };
-
 
   return (
     <>
@@ -84,13 +134,15 @@ export default function MoviesPage() {
               <ArrowLeft className="back-icon" />
               Back
             </button>
-            <h1 className="movies-title">
-              <Play className="title-icon" />
-              Select Your Movie
-            </h1>
-            <p className="movies-subtitle">
-              Choose your preferred movie for the theater experience
-            </p>
+            <div className="movies-title-section">
+              <h1 className="movies-title">
+                <Play className="title-icon" />
+                Select Your Movie
+              </h1>
+              <p className="movies-subtitle">
+                Choose your preferred movie for the theater experience
+              </p>
+            </div>
           </div>
         </div>
 
@@ -128,23 +180,41 @@ export default function MoviesPage() {
             onPageChange={setCurrentPage}
           />
         </div>
-
       </div>
 
       <style jsx>{`
+        /* Reset any global scroll issues */
+        :global(html, body) {
+          overflow: auto !important;
+          height: auto !important;
+          position: static !important;
+          width: 100% !important;
+          left: auto !important;
+          right: auto !important;
+          top: auto !important;
+        }
+        
+        :global(body) {
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+
         .movies-container {
           width: 100%;
           min-height: 100vh;
           background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0f0f0f 100%);
           position: relative;
           overflow-x: hidden;
+          overflow-y: auto;
         }
 
         .movies-header {
-          padding: 2rem 3rem 1rem 3rem;
+          padding: 1rem 3rem 0.75rem 3rem;
           background: linear-gradient(135deg, rgba(0, 0, 0, 0.8) 0%, rgba(20, 20, 20, 0.6) 100%);
           border-bottom: 1px solid rgba(255, 255, 255, 0.1);
           position: relative;
+          flex-shrink: 0;
+          z-index: 10;
         }
 
         .movies-header::before {
@@ -161,6 +231,16 @@ export default function MoviesPage() {
           max-width: 1400px;
           margin: 0 auto;
           position: relative;
+          display: flex;
+          align-items: flex-start;
+          gap: 2rem;
+        }
+
+        @media (max-width: 768px) {
+          .movies-header-content {
+            display: block;
+            text-align: center;
+          }
         }
 
         .back-button {
@@ -177,7 +257,19 @@ export default function MoviesPage() {
           cursor: pointer;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           backdrop-filter: blur(20px);
-          margin-bottom: 2rem;
+          flex-shrink: 0;
+        }
+
+        @media (max-width: 768px) {
+          .back-button {
+            margin: 0 auto 1.5rem auto;
+            display: inline-flex;
+          }
+        }
+
+        .movies-title-section {
+          flex: 1;
+          text-align: center;
         }
 
         .back-button:hover {
@@ -195,12 +287,13 @@ export default function MoviesPage() {
         .movies-title {
           display: flex;
           align-items: center;
+          justify-content: center;
           gap: 1rem;
           color: #ffffff;
-          font-size: 2.8rem;
+          font-size: 2.2rem;
           font-weight: 900;
           font-family: 'Paralucent-Bold', Arial, sans-serif;
-          margin: 0 0 1rem 0;
+          margin: 0 0 0.5rem 0;
           background: linear-gradient(135deg, #ffffff 0%, #e0e0e0 50%, #cccccc 100%);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
@@ -210,27 +303,44 @@ export default function MoviesPage() {
         }
 
         .title-icon {
-          width: 2.2rem;
-          height: 2.2rem;
+          width: 1.8rem;
+          height: 1.8rem;
           color: #ff3366;
         }
 
         .movies-subtitle {
           color: rgba(255, 255, 255, 0.7);
-          font-size: 1.2rem;
-          margin: 0 0 2rem 0;
-          line-height: 1.6;
+          font-size: 1rem;
+          margin: 0 0 1rem 0;
+          line-height: 1.4;
           font-weight: 400;
-          max-width: 600px;
+          max-width: 500px;
+          margin-left: auto;
+          margin-right: auto;
         }
 
         .movies-content {
           max-width: 1400px;
           margin: 0 auto;
-          padding: 2rem 3rem;
+          padding: 1rem 3rem 2rem 3rem;
+          position: relative;
+          width: 100%;
         }
 
-
+        @media (max-width: 768px) {
+          .movies-content {
+            padding: 1rem 1rem 2rem 1rem;
+            text-align: center;
+          }
+          
+          .movies-content > div:first-child {
+            margin-bottom: 2rem;
+          }
+          
+          .movies-content > div:nth-child(2) {
+            margin-bottom: 2rem;
+          }
+        }
         .ai-recommendations-section {
           padding: 4rem 2rem;
           text-align: center;
@@ -260,9 +370,34 @@ export default function MoviesPage() {
           margin: 0 auto;
         }
 
-        @media (max-width: 768px) {
+        /* Desktop specific fixes */
+        @media (min-width: 1024px) {
+          .movies-container {
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+            overflow-y: auto;
+          }
+          
           .movies-header {
-            padding: 1.5rem 1.5rem 1rem 1.5rem;
+            padding: 1rem 3rem 0.75rem 3rem;
+          }
+          
+          .movies-content {
+            padding: 1rem 3rem 2rem 3rem;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .movies-container {
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+            overflow-y: auto;
+          }
+          
+          .movies-header {
+            padding: 0.75rem 1.5rem 0.5rem 1.5rem;
           }
 
           .movies-header-content {
@@ -272,7 +407,8 @@ export default function MoviesPage() {
           .back-button {
             padding: 0.6rem 1.25rem;
             font-size: 0.85rem;
-            margin-bottom: 1.5rem;
+            margin: 0 auto 1.5rem auto;
+            display: inline-flex;
           }
 
           .movies-title {
@@ -291,7 +427,16 @@ export default function MoviesPage() {
           }
 
           .movies-content {
-            padding: 1.5rem 1.5rem;
+            padding: 1rem 1rem;
+            text-align: center;
+          }
+          
+          .movies-content > div:first-child {
+            margin-bottom: 1.5rem;
+          }
+          
+          .movies-content > div:nth-child(2) {
+            margin-bottom: 1.5rem;
           }
 
           .ai-recommendations-section {
@@ -309,14 +454,22 @@ export default function MoviesPage() {
         }
 
         @media (max-width: 480px) {
+          .movies-container {
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+            overflow-y: auto;
+          }
+          
           .movies-header {
-            padding: 1rem 1rem 0.75rem 1rem;
+            padding: 0.5rem 1rem 0.25rem 1rem;
           }
 
           .back-button {
             padding: 0.5rem 1rem;
             font-size: 0.8rem;
-            margin-bottom: 1rem;
+            margin: 0 auto 1rem auto;
+            display: inline-flex;
           }
 
           .movies-title {
@@ -335,7 +488,16 @@ export default function MoviesPage() {
           }
 
           .movies-content {
-            padding: 1rem 1rem;
+            padding: 0.75rem 1rem;
+            text-align: center;
+          }
+          
+          .movies-content > div:first-child {
+            margin-bottom: 1.5rem;
+          }
+          
+          .movies-content > div:nth-child(2) {
+            margin-bottom: 1.5rem;
           }
 
           .ai-recommendations-section {

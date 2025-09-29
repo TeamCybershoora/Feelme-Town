@@ -186,13 +186,7 @@ const Loading = () => {
           Your browser does not support the video tag.
         </video>
         
-        <div className="loading-text">
-          <h1>
-            <span className="hold-on">HOLD ON</span>
-            
-            <span className="is-loading">Loading...</span>
-          </h1>
-        </div>
+        
         
         <div className="loading-counter">
           {loadingProgress}

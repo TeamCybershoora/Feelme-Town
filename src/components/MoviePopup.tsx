@@ -53,9 +53,9 @@ export default function MoviePopup({ movie, isOpen, onClose, onMovieSelect, isFr
   }, [onClose]);
 
   const handleMovieSelect = () => {
+    console.log('🎬 MoviePopup: Movie selection triggered', { movie: movie?.title, onMovieSelect: !!onMovieSelect });
     if (movie && onMovieSelect) {
-      // Store selected movie in sessionStorage
-      sessionStorage.setItem('selectedMovie', movie.title);
+      console.log('🎬 MoviePopup: Calling onMovieSelect with:', movie.title);
       onMovieSelect(movie.title);
       onClose();
     }

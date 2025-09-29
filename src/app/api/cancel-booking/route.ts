@@ -70,21 +70,26 @@ export async function POST(request: NextRequest) {
       refundStatus = 'refundable';
     }
 
-    // Delete booking from database
-    const deleteResult = await database.deleteBooking(bookingId);
+    // Move booking to cancelled collection instead of deleting
+    const moveResult = await database.moveBookingToCancelled(bookingId, {
+      cancelledAt: new Date(),
+      refundAmount: refundAmount,
+      refundStatus: refundStatus,
+      cancellationReason: 'Customer requested cancellation'
+    });
     
-    if (!deleteResult.success) {
+    if (!moveResult.success) {
       return NextResponse.json(
         { 
           success: false, 
-          error: deleteResult.error || 'Failed to delete booking' 
+          error: moveResult.error || 'Failed to cancel booking' 
         },
         { status: 500 }
       );
     }
 
-    // Log deletion
-    console.log('✅ Booking deleted successfully:', {
+    // Log cancellation
+    console.log('✅ Booking cancelled and moved to cancelled collection:', {
       bookingId: booking.id,
       customerName: booking.name,
       theater: booking.theaterName,
@@ -93,8 +98,32 @@ export async function POST(request: NextRequest) {
       totalAmount: booking.totalAmount,
       refundAmount: refundAmount,
       refundStatus: refundStatus,
-      hoursUntilBooking: Math.round(hoursUntilBooking)
+      hoursUntilBooking: Math.round(hoursUntilBooking),
+      cancelledAt: new Date().toISOString()
     });
+
+    // Send cancellation email
+    try {
+      const emailService = await import('@/lib/email-service');
+      await emailService.default.sendBookingCancelled({
+        id: booking.bookingId || '',
+        name: booking.name || '',
+        email: booking.email || '',
+        phone: booking.phone || '',
+        theaterName: booking.theaterName || '',
+        date: booking.date || '',
+        time: booking.time || '',
+        occasion: booking.occasion || '',
+        numberOfPeople: booking.numberOfPeople || 0,
+        totalAmount: booking.totalAmount || 0,
+        refundAmount: refundAmount,
+        refundStatus: refundStatus,
+        cancelledAt: new Date()
+      });
+      console.log('📧 Cancellation email sent successfully');
+    } catch (emailError) {
+      console.log('⚠️ Failed to send cancellation email:', emailError);
+    }
 
     // TODO: Integrate with payment gateway for actual refund processing
     // For now, we'll just log the refund details
@@ -110,14 +139,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Booking deleted successfully',
+      message: 'Booking cancelled successfully',
       bookingId: booking.id,
       refundAmount: refundAmount,
       refundStatus: refundStatus,
       refundMessage: refundAmount > 0 
         ? `Refund of ₹${refundAmount} will be processed within 5-7 business days`
         : 'No refund applicable as per cancellation policy',
-      hoursUntilBooking: Math.round(hoursUntilBooking)
+      hoursUntilBooking: Math.round(hoursUntilBooking),
+      cancelledAt: new Date().toISOString(),
+      database: 'FeelME Town',
+      collection: 'cancelled_booking'
     }, { status: 200 });
 
   } catch (error) {
