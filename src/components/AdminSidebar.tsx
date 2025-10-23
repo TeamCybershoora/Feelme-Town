@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { 
   LayoutDashboard, 
@@ -17,7 +17,10 @@ import {
   Tag, 
   Clock, 
   Wrench, 
-  User
+  User,
+  DollarSign,
+  FileSpreadsheet,
+  Edit
 } from 'lucide-react';
 
 interface AdminSidebarProps {
@@ -28,6 +31,103 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [activeItem, setActiveItem] = useState('Dashboard');
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [currentDateBookingsCount, setCurrentDateBookingsCount] = useState(0);
+
+  // Helper function to get current date in IST
+  const getCurrentDateIST = () => {
+    const now = new Date();
+    return now.toLocaleDateString('en-IN', { 
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+  };
+
+  // Helper function to check if booking is from current date
+  const isCurrentDateBooking = (bookingDate: string) => {
+    if (!bookingDate) return false;
+    const currentDate = getCurrentDateIST();
+    const bookingDateIST = new Date(bookingDate).toLocaleDateString('en-IN', { 
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    return bookingDateIST === currentDate;
+  };
+
+  // Fetch pending requests count and current date bookings count
+  useEffect(() => {
+    const fetchPendingRequestsCount = async () => {
+      try {
+        const response = await fetch('/api/admin/requests');
+        const data = await response.json();
+        
+        if (data.success && data.requests) {
+          const pendingCount = data.requests.filter((req: any) => req.status === 'pending').length;
+          setPendingRequestsCount(pendingCount);
+        }
+      } catch (error) {
+        
+      }
+    };
+
+    const fetchCurrentDateBookingsCount = async () => {
+      try {
+        // Fetch ONLY confirmed bookings from database
+        const dbResponse = await fetch('/api/admin/bookings');
+        const dbData = await dbResponse.json();
+        
+        let currentDateCount = 0;
+        
+        if (dbData.success && dbData.bookings) {
+          currentDateCount = dbData.bookings.filter((booking: any) => 
+            isCurrentDateBooking(booking.date) && booking.status.toLowerCase() === 'confirmed'
+          ).length;
+        }
+
+        setCurrentDateBookingsCount(currentDateCount);
+      } catch (error) {
+        console.error('Error fetching current date bookings count:', error);
+      }
+    };
+
+    fetchPendingRequestsCount();
+    fetchCurrentDateBookingsCount();
+    
+    // Refresh every 15 seconds for better responsiveness
+    const interval = setInterval(() => {
+      fetchPendingRequestsCount();
+      fetchCurrentDateBookingsCount();
+    }, 15000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // Function to refresh requests count (can be called from outside)
+  const refreshRequestsCount = async () => {
+    try {
+      const response = await fetch('/api/admin/requests');
+      const data = await response.json();
+      
+      if (data.success && data.requests) {
+        const pendingCount = data.requests.filter((req: any) => req.status === 'pending').length;
+        setPendingRequestsCount(pendingCount);
+      }
+    } catch (error) {
+      
+    }
+  };
+
+  // Make refresh function globally available
+  useEffect(() => {
+    (window as any).refreshSidebarRequestsCount = refreshRequestsCount;
+    return () => {
+      delete (window as any).refreshSidebarRequestsCount;
+    };
+  }, []);
 
   const menuItems = [
     {
@@ -42,7 +142,14 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       label: 'Booking Applications',
       icon: Calendar,
       path: '/Administrator/bookings',
-      badge: 26
+      badge: currentDateBookingsCount > 0 ? currentDateBookingsCount : null
+    },
+    {
+      id: 'edit-booking-requests',
+      label: 'Edit Booking Requests',
+      icon: Edit,
+      path: '/Administrator/edit-booking-requests',
+      badge: null
     },
     {
       id: 'support-mail',
@@ -59,10 +166,32 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       badge: 0
     },
     {
-      id: 'client-lists',
-      label: 'Client Lists',
+      id: 'requests',
+      label: 'Requests',
       icon: Users,
-      path: '/Administrator/clients',
+      path: '/Administrator/requests',
+      badge: pendingRequestsCount > 0 ? pendingRequestsCount : null
+    },
+    {
+      id: 'staff-bookings',
+      label: 'Staff Bookings',
+      icon: User,
+      path: '/Administrator/staff-bookings',
+      badge: null
+    },
+    {
+      id: 'excel-manager',
+      label: 'Excel Manager',
+      icon: FileSpreadsheet,
+      path: '/Administrator/excel-manager',
+      badge: null
+    }
+    ,
+    {
+      id: 'history',
+      label: 'History',
+      icon: FileText,
+      path: '/Administrator/history',
       badge: null
     }
   ];
@@ -103,13 +232,20 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       path: '/Administrator/gallery',
       badge: null
     },
-    {
-      id: 'faqs',
-      label: 'FAQs',
-      icon: HelpCircle,
-      path: '/Administrator/faqs',
-      badge: null
-    },
+        {
+          id: 'faqs',
+          label: 'FAQs',
+          icon: HelpCircle,
+          path: '/Administrator/faqs',
+          badge: null
+        },
+        {
+          id: 'pricing',
+          label: 'Pricing',
+          icon: DollarSign,
+          path: '/Administrator/pricing',
+          badge: null
+        },
     {
       id: 'testimonials',
       label: 'Testimonials',
@@ -132,13 +268,6 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       badge: null
     },
     {
-      id: 'extra-services',
-      label: 'Extra Services',
-      icon: Wrench,
-      path: '/Administrator/extra-services',
-      badge: null
-    },
-    {
       id: 'system-setting',
       label: 'System Setting',
       icon: Settings,
@@ -146,10 +275,10 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       badge: null
     },
     {
-      id: 'user-list',
-      label: 'User List',
+      id: 'staff-list',
+      label: 'Staff List',
       icon: User,
-      path: '/Administrator/users',
+      path: '/Administrator/staff-list',
       badge: null
     }
   ];
@@ -416,3 +545,4 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
     </div>
   );
 }
+

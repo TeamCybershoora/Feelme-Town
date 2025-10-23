@@ -1,15 +1,33 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Minus, X, Check, Star, Calendar, Clock, Users, MapPin, Gift, Cake, Sparkles, Play } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, X, Check, Star, Calendar, Clock, Users, MapPin, Gift, Cake, Sparkles, Play, Phone, MessageCircle } from 'lucide-react';
 import { useBooking } from '@/contexts/BookingContext';
 import { useDatePicker } from '@/contexts/DatePickerContext';
-import TimeSelectionPopup from './TimeSelectionPopup';
+
 import GlobalDatePicker from './GlobalDatePicker';
 import MoviesModal from './MoviesModal';
+import { useToast } from '@/hooks/useToast';
 
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
+
+
+interface OccasionOption {
+  _id: string;
+  occasionId: string;
+  name: string;
+  icon: string;
+  popular: boolean;
+  requiredFields: string[];
+  fieldLabels: { [key: string]: string };
+  isActive: boolean;
+}
 
 interface BookingForm {
   bookingName: string;
@@ -28,7 +46,9 @@ interface BookingForm {
   wantMovies: 'Yes' | 'No';
   promoCode: string;
   agreeToTerms: boolean;
-  // Occasion specific details
+  // Dynamic occasion specific details
+  occasionData?: { [key: string]: string };
+  // Legacy fields (for backward compatibility)
   occasionPersonName?: string;
   birthdayName?: string;
   birthdayGender?: string;
@@ -39,18 +59,26 @@ interface BookingForm {
   proposerName?: string;
   proposalPartnerName?: string;
   valentineName?: string;
+  dateNightName?: string;
   customCelebration?: string;
 }
 
 interface BookingPopupProps {
   isOpen: boolean;
   onClose: () => void;
+  isManualMode?: boolean; // Manual booking mode for admin
+  onSuccess?: () => void; // Callback after successful booking
 }
 
 
-export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
-  const { selectedTheater, selectedDate, selectedTimeSlot, setSelectedTimeSlot, setSelectedTheater, openBookingPopup, closeBookingPopup, refreshBookedSlots } = useBooking();
-  const { isDatePickerOpen, openDatePicker, closeDatePicker, setSelectedDate } = useDatePicker();
+export default function BookingPopup({ isOpen, onClose, isManualMode = false, onSuccess }: BookingPopupProps) {
+  const { selectedTheater, selectedDate, selectedTimeSlot, setSelectedTimeSlot, setSelectedTheater, setSelectedDate, openBookingPopup, closeBookingPopup, refreshBookedSlots } = useBooking();
+  const { isDatePickerOpen, openDatePicker, closeDatePicker } = useDatePicker();
+  
+  // Track date changes
+  useEffect(() => {
+    // Date change tracking
+  }, [selectedDate]);
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions'>('Overview');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -64,9 +92,17 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
   const [validationErrorName, setValidationErrorName] = useState('');
   const [isTimeSelectionOpen, setIsTimeSelectionOpen] = useState(false);
   const [bookedTimeSlots, setBookedTimeSlots] = useState<string[]>([]);
+  const autoCloseTimerRef = useRef<number | null>(null);
+  const [hasSentEditRequest, setHasSentEditRequest] = useState(false);
   const [isMoviesModalOpen, setIsMoviesModalOpen] = useState(false);
   const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [showPaymentConfirmation, setShowPaymentConfirmation] = useState(false);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [realTheaterData, setRealTheaterData] = useState<any[]>([]);
+  const [showEditRequestPopup, setShowEditRequestPopup] = useState(false);
+  const { showSuccess, showError } = useToast();
+  const [isSendingEditRequest, setIsSendingEditRequest] = useState(false);
 
   const [formData, setFormData] = useState<BookingForm>({
     bookingName: '',
@@ -83,13 +119,64 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     wantGifts: 'No',
     wantMovies: 'No',
     promoCode: '',
-    agreeToTerms: false
+    agreeToTerms: false,
+    occasionData: {} // Initialize dynamic occasion data
   });
+  const [pricingData, setPricingData] = useState({
+    slotBookingFee: 1000,
+    extraGuestFee: 400,
+    convenienceFee: 50
+  });
+  const [pricingLoaded, setPricingLoaded] = useState(false);
 
-  // Debug: Watch for changes in selectedMovies
+  // Fetch pricing data from JSON file
   useEffect(() => {
-    console.log('🎬 selectedMovies changed:', formData.selectedMovies);
+    const fetchPricingData = async () => {
+      try {
+        const response = await fetch('/api/pricing');
+        const data = await response.json();
+        
+        if (data.success && data.pricing) {
+          setPricingData(data.pricing);
+          setPricingLoaded(true);
+        } else {
+          console.error('Failed to fetch pricing data:', data.error);
+          setPricingLoaded(false);
+        }
+      } catch (error) {
+        console.error('Error fetching pricing data:', error);
+      }
+    };
+
+    if (isOpen) {
+      fetchPricingData();
+    }
+  }, [isOpen]);
+
+  // Fetch real theater data from database
+  useEffect(() => {
+    const fetchTheaterData = async () => {
+      try {
+        const response = await fetch('/api/admin/theaters');
+        const data = await response.json();
+        
+        if (data.success && data.theaters) {
+          setRealTheaterData(data.theaters);
+        }
+      } catch (error) {
+        // Failed to fetch theater data
+      }
+    };
+
+    fetchTheaterData();
+  }, []);
+
+  // Track movie selection changes
+  useEffect(() => {
+    // Movie selection tracking
   }, [formData.selectedMovies]);
+
+  // No longer need Razorpay script loading
 
 
   // Validation function to check form completeness
@@ -108,10 +195,24 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
       setShowValidationPopup(true);
       return false;
     }
+    // Format check: WhatsApp/mobile must be exactly 10 digits
+    if (formData.whatsappNumber.replace(/\D/g, '').length !== 10) {
+      setValidationErrorName('Invalid WhatsApp Number');
+      setValidationMessage('Please enter a valid 10-digit mobile number.');
+      setShowValidationPopup(true);
+      return false;
+    }
 
     if (!formData.emailAddress.trim()) {
       setValidationErrorName('Missing Email Address');
       setValidationMessage('Please enter your email address to continue.');
+      setShowValidationPopup(true);
+      return false;
+    }
+    // Format check: email should be valid
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(formData.emailAddress)) {
+      setValidationErrorName('Invalid Email Address');
+      setValidationMessage('Please enter a valid email address (e.g., name@example.com).');
       setShowValidationPopup(true);
       return false;
     }
@@ -128,6 +229,21 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
       setValidationMessage('Please select an occasion to continue.');
       setShowValidationPopup(true);
       return false;
+    }
+
+    // Validate dynamic occasion required fields
+    if (selectedOccasionData && selectedOccasionData.requiredFields) {
+      for (const fieldKey of selectedOccasionData.requiredFields) {
+        const fieldValue = formData.occasionData?.[fieldKey];
+        const fieldLabel = selectedOccasionData.fieldLabels[fieldKey] || fieldKey;
+        
+        if (!fieldValue || fieldValue.trim() === '') {
+          setValidationErrorName(`Missing ${fieldLabel}`);
+          setValidationMessage(`Please enter ${fieldLabel.toLowerCase()} to continue.`);
+          setShowValidationPopup(true);
+          return false;
+        }
+      }
     }
 
     // Check if user selected "Yes" for items but didn&apos;t select any
@@ -171,6 +287,238 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     return true;
   };
 
+  // Handle Pay Now with Razorpay
+  // Handle Confirm Booking without online payment
+  const handleConfirmWithoutPayment = async () => {
+    // Ensure terms are agreed
+    if (!formData.agreeToTerms) {
+      setValidationErrorName('Terms & Conditions Required');
+      setValidationMessage('Please agree to the terms & conditions to continue.');
+      setShowValidationPopup(true);
+      return;
+    }
+
+    // Run final validation similar to last step guard
+    if (!validateForm()) {
+      return;
+    }
+
+    // Quick conflict check (no await to speed up)
+    // Skip this check if editing (we're allowed to keep our own time slot)
+    if (!isEditingBooking && bookedTimeSlots.includes(selectedTimeSlot || '')) {
+      setValidationErrorName('Time Slot Already Booked');
+      setValidationMessage('This time slot was just booked by another user. Please select a different time slot.');
+      setShowValidationPopup(true);
+      return;
+    }
+
+    try {
+      // Calculate pricing (same as payment flow)
+      const discountedTotal = getFinalTotal();
+      const advancePayment = getPayableAmount(); // Use slot booking fee from pricing data
+      const venuePayment = discountedTotal - advancePayment;
+      
+      // Get theater base price
+      const theaterBasePrice = selectedTheater
+        ? parseFloat(selectedTheater.price.replace(/[₹,\s]/g, ''))
+        : 1399.00;
+
+      const bookingData = {
+        name: formData.bookingName,
+        email: formData.emailAddress,
+        phone: formData.whatsappNumber,
+        theaterName: selectedTheater?.name || 'FeelME Town Theater',
+        date: selectedDate || new Date().toISOString().split('T')[0],
+        time: selectedTimeSlot || '6:00 PM',
+        occasion: formData.occasion,
+        occasionData: formData.occasionData || {},
+        numberOfPeople: formData.numberOfPeople,
+        selectedCakes: formData.selectedCakes.map((cakeName) => {
+          const cake = cakeOptions.find(c => c.name === cakeName);
+          return { id: cake?.id || cakeName.toLowerCase().replace(/\s+/g, '-'), name: cake?.name || cakeName, price: Number(cake?.price ?? 0), quantity: 1 };
+        }),
+        selectedDecorItems: formData.selectedDecorItems.map((decorName) => {
+          const decor = decorOptions.find(d => d.name === decorName);
+          return { id: decor?.id || decorName.toLowerCase().replace(/\s+/g, '-'), name: decor?.name || decorName, price: Number(decor?.price ?? 0), quantity: 1 };
+        }),
+        selectedGifts: formData.selectedGifts.map((giftName) => {
+          const gift = giftOptions.find(g => g.name === giftName);
+          return { id: gift?.id || giftName.toLowerCase().replace(/\s+/g, '-'), name: gift?.name || giftName, price: Number(gift?.price ?? 0), quantity: 1 };
+        }),
+        selectedMovies: formData.selectedMovies.map(movieTitle => {
+          // Ensure we store the complete movie title
+          const fullMovieTitle = movieTitle || 'Unknown Movie';
+          return {
+            id: fullMovieTitle.toLowerCase().replace(/\s+/g, '_'),
+            name: fullMovieTitle,
+            title: fullMovieTitle, // Also store as title for compatibility
+            price: 0,
+            quantity: 1
+          };
+        }),
+        totalAmount: discountedTotal,
+        advancePayment,
+        venuePayment,
+        appliedCouponCode: appliedCouponCode || undefined,
+        couponDiscount: appliedDiscount || 0,
+        status: 'confirmed',
+        paymentMode: 'pay_at_venue',
+        // Store pricing data used at time of booking
+        pricingData: {
+          slotBookingFee: pricingData.slotBookingFee,
+          extraGuestFee: pricingData.extraGuestFee,
+          convenienceFee: pricingData.convenienceFee,
+          theaterBasePrice: theaterBasePrice
+        },
+        // Store calculated guest charges for easy reference
+        extraGuestCharges: (() => {
+          const capacity = getTheaterCapacity();
+          const extraGuests = Math.max(0, formData.numberOfPeople - capacity.min);
+          return extraGuests * pricingData.extraGuestFee;
+        })(),
+        // Store extra guests count for easy reference
+        extraGuestsCount: (() => {
+          const capacity = getTheaterCapacity();
+          return Math.max(0, formData.numberOfPeople - capacity.min);
+        })()
+      };
+
+      // Save as confirmed booking with pay at venue option
+      const res = await fetch('/api/new-booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bookingData)
+      });
+      const json = await res.json();
+
+      if (json.success) {
+        setBookingResult({ success: true, message: 'Booking confirmed successfully! Our team will contact you to collect payment at the venue.', bookingId: json.bookingId });
+        setIsBookingSuccessful(true);
+        // Remove slow API calls - booking popup will close anyway
+      } else {
+        setValidationErrorName('Booking Save Failed');
+        setValidationMessage(json.error || 'Unable to save booking. Please try again.');
+        setShowValidationPopup(true);
+      }
+    } catch (error) {
+      setValidationErrorName('Booking Save Error');
+      setValidationMessage('Something went wrong while saving your booking. Please try again.');
+      setShowValidationPopup(true);
+    }
+  };
+  const handlePaymentDone = async () => {
+    setIsProcessingPayment(true);
+
+    // Quick conflict check (no await to speed up)
+    // Skip this check if editing (we're allowed to keep our own time slot)
+    if (!isEditingBooking && bookedTimeSlots.includes(selectedTimeSlot || '')) {
+      setValidationErrorName('Time Slot Already Booked');
+      setValidationMessage('This time slot was just booked by another user. Please select a different time slot.');
+      setShowValidationPopup(true);
+      setShowPaymentConfirmation(false);
+      setIsProcessingPayment(false);
+      return;
+    }
+
+    try {
+      // Calculate pricing
+      const discountedTotal = getFinalTotal();
+      const advancePayment = getPayableAmount(); // Use slot booking fee from pricing data
+      const venuePayment = discountedTotal - advancePayment;
+      
+      // Get theater base price
+      const theaterBasePrice = selectedTheater
+        ? parseFloat(selectedTheater.price.replace(/[₹,\s]/g, ''))
+        : 1399.00;
+
+      const bookingData = {
+        name: formData.bookingName,
+        email: formData.emailAddress,
+        phone: formData.whatsappNumber,
+        theaterName: selectedTheater?.name || 'FeelME Town Theater',
+        date: selectedDate || new Date().toISOString().split('T')[0],
+        time: selectedTimeSlot || '6:00 PM',
+        occasion: formData.occasion,
+        occasionData: formData.occasionData || {},
+        numberOfPeople: formData.numberOfPeople,
+        selectedCakes: formData.selectedCakes.map((cakeName) => {
+          const cake = cakeOptions.find(c => c.name === cakeName);
+          return { id: cake?.id || cakeName.toLowerCase().replace(/\s+/g, '-'), name: cake?.name || cakeName, price: Number(cake?.price ?? 0), quantity: 1 };
+        }),
+        selectedDecorItems: formData.selectedDecorItems.map((decorName) => {
+          const decor = decorOptions.find(d => d.name === decorName);
+          return { id: decor?.id || decorName.toLowerCase().replace(/\s+/g, '-'), name: decor?.name || decorName, price: Number(decor?.price ?? 0), quantity: 1 };
+        }),
+        selectedGifts: formData.selectedGifts.map((giftName) => {
+          const gift = giftOptions.find(g => g.name === giftName);
+          return { id: gift?.id || giftName.toLowerCase().replace(/\s+/g, '-'), name: gift?.name || giftName, price: Number(gift?.price ?? 0), quantity: 1 };
+        }),
+        selectedMovies: formData.selectedMovies.map(movieTitle => {
+          // Ensure we store the complete movie title
+          const fullMovieTitle = movieTitle || 'Unknown Movie';
+          return {
+            id: fullMovieTitle.toLowerCase().replace(/\s+/g, '_'),
+            name: fullMovieTitle,
+            title: fullMovieTitle, // Also store as title for compatibility
+            price: 0,
+            quantity: 1
+          };
+        }),
+        totalAmount: discountedTotal,
+        advancePayment,
+        venuePayment,
+        appliedCouponCode: appliedCouponCode || undefined,
+        couponDiscount: appliedDiscount || 0,
+        paymentMode: 'online_payment',
+        // Store pricing data used at time of booking
+        pricingData: {
+          slotBookingFee: pricingData.slotBookingFee,
+          extraGuestFee: pricingData.extraGuestFee,
+          convenienceFee: pricingData.convenienceFee,
+          theaterBasePrice: theaterBasePrice
+        },
+        // Store calculated guest charges for easy reference
+        extraGuestCharges: (() => {
+          const capacity = getTheaterCapacity();
+          const extraGuests = Math.max(0, formData.numberOfPeople - capacity.min);
+          return extraGuests * pricingData.extraGuestFee;
+        })(),
+        // Store extra guests count for easy reference
+        extraGuestsCount: (() => {
+          const capacity = getTheaterCapacity();
+          return Math.max(0, formData.numberOfPeople - capacity.min);
+        })()
+      };
+
+      // Save confirmed booking directly using new-booking API
+      const res = await fetch('/api/new-booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bookingData)
+      });
+      const json = await res.json();
+
+      if (json.success) {
+        setBookingResult({ success: true, message: 'Payment completed and booking confirmed successfully!', bookingId: json.bookingId });
+        setIsBookingSuccessful(true);
+        setShowPaymentConfirmation(false);
+        // Remove slow API calls - booking popup will close anyway
+      } else {
+        setValidationErrorName('Booking Confirmation Failed');
+        setValidationMessage(json.error || 'Unable to confirm booking after payment. Please contact support.');
+        setShowValidationPopup(true);
+        setShowPaymentConfirmation(false);
+      }
+    } catch (error) {
+      setValidationErrorName('Booking Confirmation Error');
+      setValidationMessage('Something went wrong while confirming your booking after payment.');
+      setShowValidationPopup(true);
+      setShowPaymentConfirmation(false);
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
   // Check if form data has changed during editing
   const hasFormDataChanged = () => {
     if (!isEditingBooking || !originalFormData) return false;
@@ -204,10 +552,193 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     setIsEditingBooking(false); // Reset editing state
     setOriginalFormData(null); // Reset original form data
     setEditingBookingId(null); // Reset editing booking ID
+    setHasSentEditRequest(false); // Reset edit request sent flag
   };
 
   useEffect(() => {
     if (isOpen) {
+      // Check if editing an existing booking
+      const editingBooking = sessionStorage.getItem('editingBooking');
+      if (editingBooking) {
+        try {
+          const bookingData = JSON.parse(editingBooking);
+          console.log('📝 Loading booking data for editing:', bookingData);
+          
+          // Set as editing mode
+          setIsEditingBooking(true);
+          setEditingBookingId(bookingData.bookingId || bookingData.id);
+          console.log('✅ Edit mode enabled. BookingID:', bookingData.bookingId || bookingData.id);
+          
+          // Build occasionData from booking data (include all possible occasion fields)
+          const occasionDataFromBooking: { [key: string]: string } = {};
+          
+          // List of all possible occasion field keys
+          const possibleOccasionFields = [
+            'birthdayName', 'birthdayGender',
+            'partner1Name', 'partner1Gender',
+            'partner2Name', 'partner2Gender',
+            'dateNightName',
+            'proposerName', 'proposalPartnerName',
+            'valentineName',
+            'customCelebration',
+            'babyShowerParentName', 'babyGender',
+            'farewellPersonName', 'farewellReason',
+            'congratulationsPersonName', 'congratulationsReason'
+          ];
+          
+          // Populate occasionData with any occasion-related fields from booking
+          possibleOccasionFields.forEach(fieldKey => {
+            if (bookingData[fieldKey]) {
+              occasionDataFromBooking[fieldKey] = bookingData[fieldKey];
+            }
+          });
+          
+          // Also check if there's an occasionData object in booking
+          if (bookingData.occasionData && typeof bookingData.occasionData === 'object') {
+            Object.assign(occasionDataFromBooking, bookingData.occasionData);
+          }
+          
+          // IMPORTANT: Also check for fields stored with full label names (e.g., "Nickname of Bride to be")
+          // These need to be converted to camelCase keys for the form
+          Object.keys(bookingData).forEach(key => {
+            // Skip system fields
+            if (['_id', 'bookingId', 'compressedData', 'createdAt', 'status', 'name', 'email', 
+                 'theaterName', 'date', 'time', 'occasion', 'totalAmount', 'selectedMovies', 
+                 'selectedCakes', 'selectedDecorItems', 'selectedGifts', 'isManualBooking',
+                 'bookingType', 'createdBy', 'staffId', 'staffName', 'notes', 'expiredAt',
+                 'occasionPersonName'].includes(key)) {
+              return;
+            }
+            
+            // Check if this is a _label field (e.g., "Nickname of Bride to be_label")
+            if (key.endsWith('_label')) {
+              // Get the base field name by removing _label
+              const baseFieldName = key.replace('_label', '');
+              
+              // Get the actual value from the base field or _value field
+              const fieldValue = bookingData[baseFieldName] || bookingData[`${baseFieldName}_value`];
+              
+              if (fieldValue) {
+                // Convert base field name to camelCase
+                const camelCaseKey = baseFieldName
+                  .split(' ')
+                  .map((word, index) => 
+                    index === 0 
+                      ? word.toLowerCase() 
+                      : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+                  )
+                  .join('');
+                
+                occasionDataFromBooking[camelCaseKey] = fieldValue;
+                console.log(`📝 Mapped occasion field from _label: "${baseFieldName}" → "${camelCaseKey}" = "${fieldValue}"`);
+              }
+              return;
+            }
+            
+            // Skip _value fields (already handled above)
+            if (key.endsWith('_value')) {
+              return;
+            }
+            
+            // Check if field name has spaces (old format with full labels)
+            if (key.includes(' ')) {
+              // This is likely an occasion field with full label - convert to camelCase
+              const camelCaseKey = key
+                .split(' ')
+                .map((word, index) => 
+                  index === 0 
+                    ? word.toLowerCase() 
+                    : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+                )
+                .join('');
+              
+              occasionDataFromBooking[camelCaseKey] = bookingData[key];
+              console.log(`📝 Mapped occasion field: "${key}" → "${camelCaseKey}" = "${bookingData[key]}"`);
+            }
+          });
+          
+          console.log('📝 Populated occasion data for editing:', occasionDataFromBooking);
+          
+          // Pre-fill form with existing booking data
+          setFormData({
+            bookingName: bookingData.customerName || bookingData.bookingName || '',
+            numberOfPeople: bookingData.numberOfPeople || 2,
+            whatsappNumber: bookingData.phone || bookingData.whatsappNumber || '',
+            emailAddress: bookingData.email || bookingData.emailAddress || '',
+            occasion: bookingData.occasion || '',
+            selectedCakes: bookingData.selectedCakes || [],
+            selectedDecorItems: bookingData.selectedDecorItems || [],
+            selectedGifts: bookingData.selectedGifts || [],
+            selectedMovies: bookingData.selectedMovies || [],
+            wantCakes: (bookingData.selectedCakes && bookingData.selectedCakes.length > 0) ? 'Yes' : 'No',
+            wantDecorItems: (bookingData.selectedDecorItems && bookingData.selectedDecorItems.length > 0) ? 'Yes' : 'No',
+            wantGifts: (bookingData.selectedGifts && bookingData.selectedGifts.length > 0) ? 'Yes' : 'No',
+            wantMovies: (bookingData.selectedMovies && bookingData.selectedMovies.length > 0) ? 'Yes' : 'No',
+            promoCode: bookingData.promoCode || '',
+            agreeToTerms: true, // Auto-agree for editing
+            occasionData: occasionDataFromBooking,
+            // Legacy fields (for backward compatibility)
+            birthdayName: bookingData.birthdayName,
+            birthdayGender: bookingData.birthdayGender,
+            partner1Name: bookingData.partner1Name,
+            partner1Gender: bookingData.partner1Gender,
+            partner2Name: bookingData.partner2Name,
+            partner2Gender: bookingData.partner2Gender,
+            dateNightName: bookingData.dateNightName,
+            proposerName: bookingData.proposerName,
+            proposalPartnerName: bookingData.proposalPartnerName,
+            valentineName: bookingData.valentineName,
+            customCelebration: bookingData.customCelebration,
+          });
+          
+          // Set context data
+          if (bookingData.date) setSelectedDate(bookingData.date);
+          if (bookingData.time) setSelectedTimeSlot(bookingData.time);
+          
+          // Set selected occasion data for showing required fields
+          if (bookingData.occasion && occasionOptions.length > 0) {
+            const selectedOccasion = occasionOptions.find(occ => occ.name === bookingData.occasion);
+            if (selectedOccasion) {
+              setSelectedOccasionData(selectedOccasion);
+            }
+          }
+          
+          // Fetch full theater object from database if we only have theater name
+          if (bookingData.theater && typeof bookingData.theater === 'string') {
+            const fetchTheaterObject = async () => {
+              try {
+                const response = await fetch('/api/admin/theaters');
+                const data = await response.json();
+                
+                if (data.success && data.theaters) {
+                  const theaterObj = data.theaters.find((t: any) => 
+                    t.name === bookingData.theater || 
+                    `${t.name} (${t.type}) (${t.hallNumber})` === bookingData.theater
+                  );
+                  if (theaterObj) {
+                    setSelectedTheater(theaterObj);
+                  } else {
+                    // Fallback: use theater name
+                    setSelectedTheater(bookingData.theater);
+                  }
+                }
+              } catch (error) {
+                console.error('Error fetching theater object:', error);
+                setSelectedTheater(bookingData.theater);
+              }
+            };
+            fetchTheaterObject();
+          } else if (bookingData.theater) {
+            setSelectedTheater(bookingData.theater);
+          }
+          
+          setIsLoaded(true);
+          return;
+        } catch (error) {
+          console.error('Error loading editing booking:', error);
+        }
+      }
+      
       // Check if returning from movies page and restore form data
       const bookingFromPopup = sessionStorage.getItem('bookingFromPopup');
       const storedFormData = sessionStorage.getItem('bookingFormData');
@@ -219,7 +750,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           // Check if there's a new selected movie to add
           const selectedMovie = sessionStorage.getItem('selectedMovie');
           if (selectedMovie) {
-            console.log('🎬 Found selected movie in sessionStorage:', selectedMovie);
+            
             // Replace existing movie with new selection (only one movie allowed)
             parsedFormData.selectedMovies = [selectedMovie];
             parsedFormData.wantMovies = 'Yes';
@@ -234,14 +765,14 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
 
           // Restore selected theater if it was stored in form data
           if (storedTheater) {
-            console.log('🎭 Restoring theater from form data:', storedTheater.name);
+            
             setSelectedTheater(storedTheater);
           }
 
           // Restore selected time slot if it was stored
           const storedTimeSlot = sessionStorage.getItem('selectedTimeSlot');
           if (storedTimeSlot) {
-            console.log('⏰ Restoring selected time slot:', storedTimeSlot);
+            
             setSelectedTimeSlot(storedTimeSlot);
             // Clear the stored time slot
             sessionStorage.removeItem('selectedTimeSlot');
@@ -251,28 +782,45 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           sessionStorage.removeItem('bookingFromPopup');
           sessionStorage.removeItem('bookingFormData');
         } catch (error) {
-          console.error('Error parsing stored form data:', error);
+          
           // If error, reset form
           resetForm();
         }
       } else {
-        // Check if returning from movies page with selected movies (legacy support)
-        const selectedMovies = sessionStorage.getItem('selectedMovies');
-        if (selectedMovies) {
-          try {
-            const parsedMovies = JSON.parse(selectedMovies);
-            setFormData(prev => ({
-              ...prev,
-              selectedMovies: parsedMovies
-            }));
-            // Clear the stored movies
-            sessionStorage.removeItem('selectedMovies');
-          } catch (error) {
-            console.error('Error parsing selected movies:', error);
+        // Check if there's a new selected movie from movie popup
+        const selectedMovie = sessionStorage.getItem('selectedMovie');
+        if (selectedMovie) {
+          console.log('🎬 BookingPopup: Found selected movie:', selectedMovie);
+          // Set movie selection for fresh booking
+          setFormData(prev => ({
+            ...prev,
+            selectedMovies: [selectedMovie],
+            wantMovies: 'Yes'
+          }));
+          console.log('🎬 BookingPopup: Movie auto-selected and wantMovies set to Yes');
+          // Clear the selected movie from sessionStorage
+          sessionStorage.removeItem('selectedMovie');
+        } else {
+          // Check if returning from movies page with selected movies (legacy support)
+          const selectedMovies = sessionStorage.getItem('selectedMovies');
+          if (selectedMovies) {
+            try {
+              const parsedMovies = JSON.parse(selectedMovies);
+              setFormData(prev => ({
+                ...prev,
+                selectedMovies: parsedMovies,
+                wantMovies: 'Yes'
+              }));
+              // Clear the stored movies
+              sessionStorage.removeItem('selectedMovies');
+            } catch (error) {
+              
+            }
+          } else {
+            // Reset form when popup opens to ensure fresh start (only if no movie selected)
+            resetForm();
           }
         }
-        // Reset form when popup opens to ensure fresh start
-        resetForm();
       }
 
       setIsLoaded(true);
@@ -346,48 +894,222 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     return availableTabs;
   };
 
+  // Auto-close success popup after 2 seconds if user doesn't interact
+  useEffect(() => {
+    if (isBookingSuccessful && bookingResult) {
+      if (autoCloseTimerRef.current) {
+        clearTimeout(autoCloseTimerRef.current);
+        autoCloseTimerRef.current = null;
+      }
+      autoCloseTimerRef.current = window.setTimeout(() => {
+        // Check editing state BEFORE resetting
+        const wasEditingBooking = isEditingBooking;
+        
+        // Same behavior as Close: reset and navigate
+        setIsBookingSuccessful(false);
+        setBookingResult(null);
+        resetForm();
+        onClose();
+        
+        // Only redirect to theater page if not editing from admin
+        if (!wasEditingBooking) {
+          router.push('/theater');
+        }
+      }, 2000);
+    }
+    return () => {
+      if (autoCloseTimerRef.current) {
+        clearTimeout(autoCloseTimerRef.current);
+        autoCloseTimerRef.current = null;
+      }
+    };
+  }, [isBookingSuccessful, bookingResult]);
+
   const tabs = getAvailableTabs();
 
-  const occasionOptions = [
-    { name: 'Birthday Party', icon: '/images/occasion/Birthday.jpg', popular: true },
-    { name: 'Anniversary', icon: '/images/occasion/Anniversary.jpg', popular: true },
-    { name: 'Baby Shower', icon: '/images/occasion/Baby%20Shower.jpg', popular: true },
-    { name: 'Bride to be', icon: '/images/occasion/Bride.jpg', popular: true },
-    { name: 'Congratulations', icon: '/images/occasion/Congratulations.jpg', popular: true },
-    { name: 'Farewell', icon: '/images/occasion/Farewell.jpg', popular: false },
-    { name: 'Marriage Proposal', icon: '/images/occasion/Marrige%20Proposal.jpg', popular: true },
-    { name: 'Proposal', icon: '/images/occasion/Proposal.jpg', popular: true },
-    { name: 'Romantic Date', icon: '/images/occasion/Romatic%20Date.jpg', popular: true },
-    { name: "Valentine's Day", icon: '/images/occasion/Valentine.jpg', popular: false },
-    { name: 'Custom Celebration', icon: '/images/occasion/Custom%20Celebration.jpg', popular: false }
-  ];
+  // State for occasions from database (dynamic)
+  const [occasionOptions, setOccasionOptions] = useState<OccasionOption[]>([]);
+  const [isLoadingOccasions, setIsLoadingOccasions] = useState(true);
+  const [selectedOccasionData, setSelectedOccasionData] = useState<OccasionOption | null>(null);
 
-  const cakeOptions = [
-    { name: 'Chocolate Cake', price: 299, rating: 4.8, image: '🍫', bestseller: true },
-    { name: 'Vanilla Cake', price: 249, rating: 4.6, image: '🍰', bestseller: false },
-    { name: 'Red Velvet Cake', price: 349, rating: 4.9, image: '❤️', bestseller: true },
-    { name: 'Strawberry Cake', price: 299, rating: 4.7, image: '🍓', bestseller: false },
-    { name: 'Black Forest Cake', price: 399, rating: 4.8, image: '🍒', bestseller: true },
-    { name: 'Cheesecake', price: 449, rating: 4.9, image: '🧀', bestseller: false }
-  ];
+  // Fetch occasions from database
+  useEffect(() => {
+    const fetchOccasions = async () => {
+      try {
+        setIsLoadingOccasions(true);
+        const response = await fetch('/api/occasions');
+        const data = await response.json();
+        
+        if (data.success && data.occasions) {
+          
+          setOccasionOptions(data.occasions);
+          
+          // If editing, set selectedOccasionData after occasions are loaded
+          const editingBooking = sessionStorage.getItem('editingBooking');
+          if (editingBooking) {
+            try {
+              const bookingData = JSON.parse(editingBooking);
+              console.log('🔍 Checking occasion for editing:', bookingData.occasion);
+              console.log('🔍 Available occasions:', data.occasions.map((o: any) => o.name));
+              if (bookingData.occasion) {
+                const selectedOccasion = data.occasions.find((occ: any) => occ.name === bookingData.occasion);
+                console.log('🔍 Found matching occasion:', selectedOccasion);
+                if (selectedOccasion) {
+                  setSelectedOccasionData(selectedOccasion);
+                  console.log('✅ selectedOccasionData set:', selectedOccasion);
+                } else {
+                  console.warn('⚠️ No matching occasion found for:', bookingData.occasion);
+                }
+              }
+            } catch (e) {
+              console.error('Error setting occasion data:', e);
+            }
+          }
+        } else {
+          
+        }
+      } catch (error) {
+        
+      } finally {
+        setIsLoadingOccasions(false);
+      }
+    };
 
-  const decorOptions = [
-    { name: 'Balloons', price: 150, rating: 4.5, image: '🎈', category: 'Essential' },
-    { name: 'Flowers', price: 200, rating: 4.8, image: '🌹', category: 'Premium' },
-    { name: 'Candles', price: 100, rating: 4.3, image: '🕯️', category: 'Essential' },
-    { name: 'Banner', price: 120, rating: 4.4, image: '🎯', category: 'Essential' },
-    { name: 'Photo Booth', price: 500, rating: 4.9, image: '📸', category: 'Premium' },
-    { name: 'LED Lights', price: 180, rating: 4.6, image: '💡', category: 'Premium' }
-  ];
+    fetchOccasions();
+  }, []);
 
-  const giftOptions = [
-    { name: 'Chocolate Box', price: 199, rating: 4.7, image: '🍫', category: 'Sweet' },
-    { name: 'Flower Bouquet', price: 299, rating: 4.8, image: '💐', category: 'Romantic' },
-    { name: 'Teddy Bear', price: 149, rating: 4.5, image: '🧸', category: 'Cute' },
-    { name: 'Photo Frame', price: 99, rating: 4.2, image: '🖼️', category: 'Memory' },
-    { name: 'Perfume', price: 599, rating: 4.6, image: '🌸', category: 'Luxury' },
-    { name: 'Jewelry', price: 899, rating: 4.9, image: '💎', category: 'Luxury' }
-  ];
+  // Handle occasion selection and set required fields
+  const handleOccasionSelect = (occasionName: string) => {
+    const selectedOccasion = occasionOptions.find(occ => occ.name === occasionName);
+    
+    
+    setFormData(prev => ({
+      ...prev,
+      occasion: occasionName,
+      occasionData: {} // Reset occasion data
+    }));
+    
+    setSelectedOccasionData(selectedOccasion || null);
+  };
+
+  // Update occasion data when user fills required fields
+  const updateOccasionData = (fieldKey: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      occasionData: {
+        ...prev.occasionData,
+        [fieldKey]: value
+      }
+    }));
+  };
+
+  // Dynamic services options – populated from Services API (no static fallback)
+  const [cakeOptions, setCakeOptions] = useState<any[]>([]);
+  const [decorOptions, setDecorOptions] = useState<any[]>([]);
+  const [giftOptions, setGiftOptions] = useState<any[]>([]);
+  const [isLoadingServices, setIsLoadingServices] = useState<boolean>(true);
+  const [servicesError, setServicesError] = useState<string | null>(null);
+
+  // Fetch services (cakes, decor, gifts) dynamically
+  useEffect(() => {
+    const fetchServices = async () => {
+      try {
+        setIsLoadingServices(true);
+        setServicesError(null);
+        const res = await fetch('/api/admin/services');
+        const data = await res.json();
+        if (data?.success && Array.isArray(data.services)) {
+          const services = data.services;
+
+          const cleanUrl = (u: any) => {
+            if (typeof u !== 'string') return '';
+            return u.trim().replace(/^`+|`+$/g, '').replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '');
+          };
+
+          const normalizeItem = (item: any, prefix: string) => ({
+            id: item.id || item.itemId || `${prefix}-${String(item.name || item.title || 'item').toLowerCase().replace(/\s+/g, '-')}`,
+            name: item.name || item.title || 'Item',
+            price: Number(item.price ?? item.cost ?? 0),
+            rating: Number(item.rating ?? 4.5),
+            image: cleanUrl(item.image || item.imageUrl) || item.emoji || '🛍️',
+            category: item.category || item.type || prefix,
+            bestseller: Boolean(item.bestseller ?? false)
+          });
+
+          const detectCategory = (serviceName: string) => {
+            const n = String(serviceName).toLowerCase();
+            if (n.includes('gift')) return 'gift';
+            if (n.includes('decor')) return 'decor';
+            if (n.includes('party') || n.includes('places') || n.includes('patry')) return 'decor';
+            if (n.includes('cake') || n.includes('food') || n.includes('beverages')) return 'cake';
+            return null;
+          };
+
+          const categorized: Record<'cake' | 'decor' | 'gift', any[]> = { cake: [], decor: [], gift: [] };
+          services.forEach((s: any) => {
+            const cat = detectCategory(s.name);
+            if (!cat || !Array.isArray(s.items)) return;
+            categorized[cat] = s.items.map((it: any) => normalizeItem(it, cat));
+          });
+
+          const allFetched = [...categorized.cake, ...categorized.decor, ...categorized.gift];
+          const pricesPresent = allFetched.some(it => Number(it.price) > 0);
+
+          if (allFetched.length === 0 || !pricesPresent) {
+            // Fallback: fetch mock items if services are missing or lack prices
+            try {
+              const [cakesRes, decorRes, giftsRes] = await Promise.all([
+                fetch('/api/items?category=cakes'),
+                fetch('/api/items?category=decor'),
+                fetch('/api/items?category=gifts')
+              ]);
+              const [cakesData, decorData, giftsData] = await Promise.all([
+                cakesRes.json(), decorRes.json(), giftsRes.json()
+              ]);
+              const cakes = Array.isArray(cakesData.items) ? cakesData.items.map((it: any) => normalizeItem(it, 'cake')) : [];
+              const decor = Array.isArray(decorData.items) ? decorData.items.map((it: any) => normalizeItem(it, 'decor')) : [];
+              const gifts = Array.isArray(giftsData.items) ? giftsData.items.map((it: any) => normalizeItem(it, 'gift')) : [];
+
+              setCakeOptions(cakes);
+              setDecorOptions(decor);
+              setGiftOptions(gifts);
+              
+            } catch (fallbackError) {
+              
+              setCakeOptions(categorized.cake);
+              setDecorOptions(categorized.decor);
+              setGiftOptions(categorized.gift);
+            }
+          } else {
+            setCakeOptions(categorized.cake);
+            setDecorOptions(categorized.decor);
+            setGiftOptions(categorized.gift);
+          }
+        } else {
+          setServicesError('Services API returned no data');
+        }
+      } catch (error) {
+        
+        setServicesError('Failed to fetch services');
+      } finally {
+        setIsLoadingServices(false);
+      }
+    };
+
+    fetchServices();
+  }, []);
+
+  // Helper: render image or emoji depending on value
+  const renderItemImage = (img: string, alt: string) => {
+    const isImg = typeof img === 'string' && (
+      img.startsWith('http') || img.startsWith('/') || /\.(png|jpe?g|webp|svg)$/i.test(img)
+    );
+    return isImg ? (
+      <img src={img} alt={alt} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: 12 }} />
+    ) : (
+      <span>{img || '🎁'}</span>
+    );
+  };
 
   const handleInputChange = async (field: keyof BookingForm, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -411,24 +1133,66 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
       const data = await response.json();
       
       if (data.success) {
-        console.log('📅 Fetched booked slots:', data.bookedTimeSlots);
+        
         setBookedTimeSlots(data.bookedTimeSlots || []);
       } else {
-        console.error('Failed to fetch booked slots:', data.error);
+        
         setBookedTimeSlots([]);
       }
     } catch (error) {
-      console.error('Error fetching booked slots:', error);
+      
       setBookedTimeSlots([]);
     }
   };
 
-  // Fetch booked slots when popup opens
+  // Fetch booked slots when popup opens and refresh every 3 seconds for real-time updates
   useEffect(() => {
     if (isOpen && selectedTheater && selectedDate) {
       fetchBookedSlots();
+      
+      // Set up real-time refresh for booking popup (optimized)
+      const refreshInterval = setInterval(() => {
+        fetchBookedSlots();
+      }, 5000); // Every 5 seconds when popup is open (faster performance)
+      
+      return () => clearInterval(refreshInterval);
     }
   }, [isOpen, selectedTheater, selectedDate]);
+
+  // Auto-set decoration for couple theaters (optimized)
+  useEffect(() => {
+    if (selectedTheater?.name && isOpen) {
+      // Check if it's a couple theater (EROS or COUPLES or FMT-Hall-1)
+      const isCoupleTheater = selectedTheater.name.includes('EROS') || 
+                             selectedTheater.name.includes('COUPLES') || 
+                             selectedTheater.name.includes('FMT-Hall-1');
+      
+      if (isCoupleTheater && formData.wantDecorItems !== 'Yes') {
+        // Auto-set decoration to Yes for couple theaters (only if not already set)
+        setFormData(prev => ({
+          ...prev,
+          wantDecorItems: 'Yes',
+          wantGifts: 'Yes',
+          wantCakes: 'Yes'
+        }));
+      }
+    }
+  }, [selectedTheater, isOpen, formData.wantDecorItems]);
+
+  // Auto-adjust numberOfPeople when theater changes (set to theater's minimum capacity)
+  useEffect(() => {
+    if (selectedTheater && isOpen) {
+      const capacity = getTheaterCapacity();
+      
+      // Only update if current numberOfPeople is less than minimum or if it's the default value (2)
+      if (formData.numberOfPeople < capacity.min || formData.numberOfPeople === 2) {
+        setFormData(prev => ({
+          ...prev,
+          numberOfPeople: capacity.min
+        }));
+      }
+    }
+  }, [selectedTheater, isOpen]);
 
   // Auto-update occasionPersonName only for the specific occasion field
   useEffect(() => {
@@ -451,7 +1215,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
         case 'Marriage Proposal':
           personName = formData.proposerName || '';
           break;
-        case "Valentine's Day":
+        case 'Valentine':
           personName = formData.valentineName || '';
           break;
         case 'Custom Celebration':
@@ -473,30 +1237,59 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     formData.customCelebration
   ]);
 
+  // Helper function to get theater capacity (min/max) ONLY from real database - NO hardcoded values
+  const getTheaterCapacity = () => {
+    if (!selectedTheater) {
+      return { min: 1, max: 10 }; // Emergency fallback only
+    }
+
+    // Priority 1: Check real database theater data (MAIN SOURCE)
+    if (realTheaterData.length > 0) {
+      const realTheater = realTheaterData.find(theater => 
+        (selectedTheater.name && theater.name === selectedTheater.name) || 
+        (selectedTheater.id && theater.theaterId === selectedTheater.id) ||
+        (selectedTheater.name && theater.name.includes(selectedTheater.name.split(' ')[0])) // Match by first word (EROS, PHILIA, etc.)
+      );
+      
+      if (realTheater && realTheater.capacity && realTheater.capacity.min && realTheater.capacity.max) {
+        return {
+          min: realTheater.capacity.min,
+          max: realTheater.capacity.max
+        };
+      }
+    }
+
+    // Priority 2: Check if theater object has capacity properties (from context)
+    if (typeof selectedTheater.capacity === 'object' && selectedTheater.capacity.min && selectedTheater.capacity.max) {
+      return {
+        min: selectedTheater.capacity.min,
+        max: selectedTheater.capacity.max
+      };
+    }
+
+    // Emergency fallback - should rarely be used
+    return { min: 1, max: 10 };
+  };
+
   const handleNumberChange = (field: 'numberOfPeople', action: 'increment' | 'decrement') => {
     setFormData(prev => {
-      const newValue = action === 'increment' ? prev[field] + 1 : Math.max(1, prev[field] - 1);
-
-      // Get theater capacity limit
-      let maxCapacity = 2; // Default for couples
-      if (selectedTheater?.name) {
-        if (selectedTheater.name.includes('PHILIA') || selectedTheater.name.includes('FRIENDS') || selectedTheater.name.includes('FMT-Hall-2')) {
-          maxCapacity = 4;
-        } else if (selectedTheater.name.includes('PRAGMA') || selectedTheater.name.includes('LOVE') || selectedTheater.name.includes('FMT-Hall-3')) {
-          maxCapacity = 8;
-        } else if (selectedTheater.name.includes('STORGE') || selectedTheater.name.includes('FAMILY') || selectedTheater.name.includes('FMT-Hall-4')) {
-          maxCapacity = 12;
-        } else if (selectedTheater.name.includes('EROS') || selectedTheater.name.includes('COUPLES') || selectedTheater.name.includes('FMT-Hall-1')) {
-          maxCapacity = 2;
-        }
+      // Get dynamic theater capacity
+      const capacity = getTheaterCapacity();
+      
+      // Calculate new value with proper min/max limits
+      const currentValue = prev[field];
+      let newValue;
+      
+      if (action === 'increment') {
+        newValue = Math.min(currentValue + 1, capacity.max);
+      } else {
+        // Allow decrease to minimum 1, regardless of theater's default minimum
+        newValue = Math.max(currentValue - 1, 1);
       }
-
-      // Don't allow more people than theater capacity
-      const finalValue = Math.min(newValue, maxCapacity);
 
       return {
         ...prev,
-        [field]: finalValue
+        [field]: newValue
       };
     });
   };
@@ -512,16 +1305,16 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
 
   // Handle movie selection - open movies modal
   const handleSelectMovies = () => {
-    console.log('🎬 Opening movies modal from booking popup');
-    console.log('🎬 Current isMoviesModalOpen state:', isMoviesModalOpen);
+    
+    
     setIsMoviesModalOpen(true);
-    console.log('🎬 Set isMoviesModalOpen to true');
+    
   };
 
   // Handle movie selection from modal
   const handleMovieSelect = (movieTitle: string) => {
-    console.log('🎬 Movie selected from modal:', movieTitle);
-    console.log('🎬 Current formData before update:', formData);
+    
+    
     
     setFormData(prev => {
       const newFormData = {
@@ -529,25 +1322,27 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
         selectedMovies: [movieTitle], // Only one movie allowed
         wantMovies: 'Yes' as 'Yes' | 'No'
       };
-      console.log('🎬 New formData after update:', newFormData);
+      
       return newFormData;
     });
     
-    console.log('🎬 Closing movies modal');
+    
     setIsMoviesModalOpen(false);
   };
 
   const calculateTotal = () => {
     // Extract price from selected theater or use default
-    const basePrice = selectedTheater
-      ? parseFloat(selectedTheater.price.replace(/[₹,\s]/g, ''))
+    const basePrice = (selectedTheater && selectedTheater.price)
+      ? parseFloat(String(selectedTheater.price).replace(/[₹,\s]/g, ''))
       : 1399.00;
 
     let total = basePrice;
 
-    // Add extra guest charges (₹400 per guest beyond 2)
-    const extraGuests = Math.max(0, formData.numberOfPeople - 2);
-    const extraGuestCharges = extraGuests * 400;
+    // Add extra guest charges (dynamic fee per guest beyond theater minimum capacity)
+    const capacity = getTheaterCapacity();
+    const extraGuests = Math.max(0, formData.numberOfPeople - capacity.min);
+    const extraGuestFee = getExtraGuestFee();
+    const extraGuestCharges = extraGuests * extraGuestFee;
     total += extraGuestCharges;
 
     formData.selectedCakes.forEach(cakeName => {
@@ -570,14 +1365,107 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     return total;
   };
 
+  // Coupon code state and helpers
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
+  const [couponApplying, setCouponApplying] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [appliedDiscount, setAppliedDiscount] = useState<number>(0);
+  const [appliedDiscountType, setAppliedDiscountType] = useState<'percentage' | 'fixed' | null>(null);
+  const [appliedDiscountValue, setAppliedDiscountValue] = useState<number | null>(null);
+
+  const getFinalTotal = () => {
+    const total = calculateTotal();
+    return Math.max(total - appliedDiscount, 0);
+  };
+
+  const applyCoupon = async () => {
+    setCouponError(null);
+    const code = couponCode.trim().toUpperCase();
+    if (!code) {
+      setCouponError('Please enter a coupon code');
+      // 1s error toast when input empty
+      (window as any).showToast?.({
+        type: 'error',
+        message: 'Please enter a coupon code',
+        duration: 1000,
+      });
+      return;
+    }
+    setCouponApplying(true);
+    try {
+      const resp = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, amount: calculateTotal() })
+      });
+      const data = await resp.json();
+      if (data.success && data.discountAmount > 0) {
+        setAppliedCouponCode(code);
+        setAppliedDiscount(Number(data.discountAmount));
+        setAppliedDiscountType(data.coupon?.discountType ?? null);
+        setAppliedDiscountValue(typeof data.coupon?.discountValue === 'number' ? data.coupon.discountValue : null);
+
+        // Show a small animated toast for 1 second
+        (window as any).showToast?.({
+          type: 'success',
+          message: data.coupon?.couponCode
+            ? `Coupon applied: ${data.coupon.couponCode}`
+            : 'Coupon code applied',
+          duration: 1000,
+        });
+      } else {
+        setAppliedCouponCode(null);
+        setAppliedDiscount(0);
+        setCouponError(data.error || 'Invalid or expired coupon');
+        setAppliedDiscountType(null);
+        setAppliedDiscountValue(null);
+        // 1s error toast on invalid/expired
+        (window as any).showToast?.({
+          type: 'error',
+          message: data.error || 'Invalid or expired coupon',
+          duration: 1000,
+        });
+      }
+    } catch (e) {
+      
+      setCouponError('Unable to validate coupon');
+      setAppliedDiscountType(null);
+      setAppliedDiscountValue(null);
+      // 1s error toast on network/API failure
+      (window as any).showToast?.({
+        type: 'error',
+        message: 'Unable to validate coupon',
+        duration: 1000,
+      });
+    } finally {
+      setCouponApplying(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setAppliedCouponCode(null);
+    setAppliedDiscount(0);
+    setCouponError(null);
+    setAppliedDiscountType(null);
+    setAppliedDiscountValue(null);
+  };
+
   const getPayableAmount = () => {
-    return 600; // Fixed amount
+    const amount = pricingData.slotBookingFee || 10;
+    return amount; // Dynamic amount from JSON file
   };
 
   const getBalanceAmount = () => {
-    const total = calculateTotal();
+    const total = getFinalTotal();
     const payable = getPayableAmount();
     return total - payable;
+  };
+
+  // Debug function to check extra guest fee
+  const getExtraGuestFee = () => {
+    const fee = pricingData.extraGuestFee || 0;
+    return fee;
   };
 
   const handleNextStep = async () => {
@@ -619,7 +1507,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           const oneHourBefore = new Date(slotStartTime.getTime() - (60 * 60 * 1000));
           return now.getTime() >= oneHourBefore.getTime();
         } catch (error) {
-          console.error('Error checking booking time:', error);
+          
           return false;
         }
       };
@@ -650,9 +1538,21 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           setShowValidationPopup(true);
           return;
         }
+        // Format check: 10-digit mobile number
+        if (formData.whatsappNumber.replace(/\D/g, '').length !== 10) {
+          setValidationMessage('Please enter a valid 10-digit mobile number.');
+          setShowValidationPopup(true);
+          return;
+        }
 
         if (!formData.emailAddress.trim()) {
           setValidationMessage('Please enter your email address to continue.');
+          setShowValidationPopup(true);
+          return;
+        }
+        // Format check: valid email
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(formData.emailAddress)) {
+          setValidationMessage('Please enter a valid email address (e.g., name@example.com).');
           setShowValidationPopup(true);
           return;
         }
@@ -664,21 +1564,15 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
         }
 
         // Validate theater capacity
-        let maxCapacity = 2; // Default for couples
-        if (selectedTheater?.name) {
-          if (selectedTheater.name.includes('PHILIA') || selectedTheater.name.includes('FRIENDS') || selectedTheater.name.includes('FMT-Hall-2')) {
-            maxCapacity = 4;
-          } else if (selectedTheater.name.includes('PRAGMA') || selectedTheater.name.includes('LOVE') || selectedTheater.name.includes('FMT-Hall-3')) {
-            maxCapacity = 8;
-          } else if (selectedTheater.name.includes('STORGE') || selectedTheater.name.includes('FAMILY') || selectedTheater.name.includes('FMT-Hall-4')) {
-            maxCapacity = 12;
-          } else if (selectedTheater.name.includes('EROS') || selectedTheater.name.includes('COUPLES') || selectedTheater.name.includes('FMT-Hall-1')) {
-            maxCapacity = 2;
-          }
+        const capacity = getTheaterCapacity();
+        if (formData.numberOfPeople < capacity.min) {
+          setValidationMessage(`This theater requires minimum ${capacity.min} people. Please increase the number of people to continue.`);
+          setShowValidationPopup(true);
+          return;
         }
 
-        if (formData.numberOfPeople > maxCapacity) {
-          setValidationMessage(`This theater allows maximum ${maxCapacity} people. Please reduce the number of people to continue.`);
+        if (formData.numberOfPeople > capacity.max) {
+          setValidationMessage(`This theater allows maximum ${capacity.max} people. Please reduce the number of people to continue.`);
           setShowValidationPopup(true);
           return;
         }
@@ -704,9 +1598,14 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
       // Final step - save booking to database
       try {
         // Calculate payment amounts
-        const totalAmount = calculateTotal();
-        const advancePayment = Math.round(totalAmount * 0.25); // 25% advance payment
-        const venuePayment = totalAmount - advancePayment; // Remaining amount to be paid at venue
+        const discountedTotal = getFinalTotal();
+        const advancePayment = getPayableAmount(); // Use slot booking fee from pricing data
+        const venuePayment = discountedTotal - advancePayment; // Remaining amount to be paid at venue
+        
+        // Get theater base price
+        const theaterBasePrice = (selectedTheater && selectedTheater.price)
+          ? parseFloat(String(selectedTheater.price).replace(/[₹,\s]/g, ''))
+          : 1399.00;
 
         // Map form data to API format
         const bookingData = {
@@ -717,52 +1616,52 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           date: selectedDate || new Date().toISOString().split('T')[0],
           time: selectedTimeSlot || '6:00 PM',
           occasion: formData.occasion,
-          occasionPersonName: formData.birthdayName || formData.partner1Name || formData.partner2Name || formData.proposerName || formData.proposalPartnerName || formData.valentineName || '',
-          // Debug Anniversary data
-          ...(formData.occasion === 'Anniversary' && {
-            debugPartner1: formData.partner1Name,
-            debugPartner2: formData.partner2Name
-          }),
-          // Only send relevant occasion-specific names based on selected occasion
-          ...(formData.occasion === 'Birthday Party' && { 
-            birthdayName: formData.birthdayName
-          }),
-          ...(formData.occasion === 'Anniversary' && { 
-            partner1Name: formData.partner1Name,
-            partner2Name: formData.partner2Name
-          }),
-          ...(formData.occasion === 'Baby Shower' && { birthdayName: formData.birthdayName }),
-          ...(formData.occasion === 'Bride to be' && { birthdayName: formData.birthdayName }),
-          ...(formData.occasion === 'Congratulations' && { birthdayName: formData.birthdayName }),
-          ...(formData.occasion === 'Farewell' && { birthdayName: formData.birthdayName }),
-          ...(formData.occasion === 'Marriage Proposal' && { 
-            proposerName: formData.proposerName,
-            proposalPartnerName: formData.proposalPartnerName 
-          }),
-          ...(formData.occasion === 'Romantic Date' && { 
-            partner1Name: formData.partner1Name,
-            partner2Name: formData.partner2Name 
-          }),
-          ...(formData.occasion === "Valentine's Day" && { valentineName: formData.valentineName }),
+          // Dynamic occasion data from database
+          occasionData: formData.occasionData || {},
+          // No occasionPersonName needed - using dynamic fields only
+          // Include all dynamic occasion fields for database storage
+          ...formData.occasionData,
+          // Legacy fields (for backward compatibility)
+          ...(formData.birthdayName && { birthdayName: formData.birthdayName }),
+          ...(formData.birthdayGender && { birthdayGender: formData.birthdayGender }),
+          ...(formData.partner1Name && { partner1Name: formData.partner1Name }),
+          ...(formData.partner1Gender && { partner1Gender: formData.partner1Gender }),
+          ...(formData.partner2Name && { partner2Name: formData.partner2Name }),
+          ...(formData.partner2Gender && { partner2Gender: formData.partner2Gender }),
+          ...(formData.proposerName && { proposerName: formData.proposerName }),
+          ...(formData.proposalPartnerName && { proposalPartnerName: formData.proposalPartnerName }),
+          ...(formData.valentineName && { valentineName: formData.valentineName }),
+          ...(formData.dateNightName && { dateNightName: formData.dateNightName }),
+          ...(formData.customCelebration && { customCelebration: formData.customCelebration }),
           numberOfPeople: formData.numberOfPeople,
-          selectedCakes: formData.selectedCakes.map(cakeId => ({
-            id: cakeId,
-            name: `Cake ${cakeId}`,
-            price: 1500,
-            quantity: 1
-          })),
-          selectedDecorItems: formData.selectedDecorItems.map(itemId => ({
-            id: itemId,
-            name: `Decor ${itemId}`,
-            price: 800,
-            quantity: 1
-          })),
-          selectedGifts: formData.selectedGifts.map(giftId => ({
-            id: giftId,
-            name: `Gift ${giftId}`,
-            price: 500,
-            quantity: 1
-          })),
+          // Use real prices from fetched service options instead of static placeholders
+          selectedCakes: formData.selectedCakes.map((cakeName) => {
+            const cake = cakeOptions.find(c => c.name === cakeName);
+            return {
+              id: cake?.id || cakeName.toLowerCase().replace(/\s+/g, '-'),
+              name: cake?.name || cakeName,
+              price: Number(cake?.price ?? 0),
+              quantity: 1
+            };
+          }),
+          selectedDecorItems: formData.selectedDecorItems.map((decorName) => {
+            const decor = decorOptions.find(d => d.name === decorName);
+            return {
+              id: decor?.id || decorName.toLowerCase().replace(/\s+/g, '-'),
+              name: decor?.name || decorName,
+              price: Number(decor?.price ?? 0),
+              quantity: 1
+            };
+          }),
+          selectedGifts: formData.selectedGifts.map((giftName) => {
+            const gift = giftOptions.find(g => g.name === giftName);
+            return {
+              id: gift?.id || giftName.toLowerCase().replace(/\s+/g, '-'),
+              name: gift?.name || giftName,
+              price: Number(gift?.price ?? 0),
+              quantity: 1
+            };
+          }),
           selectedMovies: formData.selectedMovies.map(movieTitle => ({
             id: movieTitle.toLowerCase().replace(/\s+/g, '_'),
             name: movieTitle,
@@ -770,48 +1669,70 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             quantity: 1
           })),
           // Payment breakdown
-          totalAmount: totalAmount,
+          totalAmount: discountedTotal,
           advancePayment: advancePayment, // Amount paid now (₹600)
           venuePayment: venuePayment, // Amount to be paid at venue
-          status: 'completed' // Booking status
-        };
+          appliedCouponCode: appliedCouponCode || undefined,
+          couponDiscount: appliedDiscount || 0,
+          status: isManualMode ? 'manual' : 'completed', // Booking status - manual for admin, completed for regular
+          isManualBooking: isManualMode, // Flag for manual booking
+          bookingType: isManualMode ? 'Manual' : 'Online', // Booking type
+          // Store pricing data used at time of booking
+          pricingData: {
+            slotBookingFee: pricingData.slotBookingFee,
+            extraGuestFee: pricingData.extraGuestFee,
+            convenienceFee: pricingData.convenienceFee
+          },
+          // Store calculated guest charges for easy reference
+          extraGuestCharges: (() => {
+            const capacity = getTheaterCapacity();
+            const extraGuests = Math.max(0, formData.numberOfPeople - capacity.min);
+            return extraGuests * pricingData.extraGuestFee;
+          })()        };
 
-        console.log(isEditingBooking ? 'Updating booking data:' : 'Saving booking data to database:', bookingData);
         
-        // Debug Anniversary data specifically
-        if (formData.occasion === 'Anniversary') {
-          console.log('🔍 Anniversary Debug - Form Data:', {
-            partner1Name: formData.partner1Name,
-            partner2Name: formData.partner2Name,
-            occasion: formData.occasion
-          });
-          console.log('🔍 Anniversary Debug - Booking Data:', {
-            partner1Name: bookingData.partner1Name,
-            partner2Name: bookingData.partner2Name,
-            occasion: bookingData.occasion
-          });
-        }
+        
+        // Debug occasion data specifically
+        
+        
+        
+        
+        // Booking data prepared for API
+        
+        // Anniversary data processing
 
-        // Use PUT for editing existing booking, POST for new booking
-        const url = isEditingBooking && editingBookingId
-          ? `/api/booking/${editingBookingId}`
-          : '/api/booking';
-        const method = isEditingBooking && editingBookingId ? 'PUT' : 'POST';
+        // Decide endpoint/body for create vs edit
+        const isEdit = isEditingBooking && !!editingBookingId;
+        const url = isEdit ? '/api/admin/edit-booking' : '/api/booking';
+        const method = isEdit ? 'POST' : 'POST';
+
+        const payload = isEdit
+          ? { bookingId: editingBookingId, data: bookingData }
+          : bookingData;
+
+        console.log('🔄 Saving booking:', {
+          isEditing: isEditingBooking,
+          bookingId: editingBookingId,
+          url,
+          method,
+          payload
+        });
 
         const response = await fetch(url, {
           method: method,
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(bookingData)
+          body: JSON.stringify(payload)
         });
 
         const result = await response.json();
+        console.log('📥 API Response:', result);
 
         if (result.success) {
-          console.log('✅ Booking saved successfully:', result);
-          console.log('🎯 Showing success animation...');
-          console.log(`${isEditingBooking ? 'Booking Updated' : 'Booking Complete'} ${formData.bookingName} - Check your mail`);
+          
+          
+          
 
           // Show success animation instead of closing
           setBookingResult({
@@ -821,19 +1742,26 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           setIsBookingSuccessful(true);
           setIsEditingBooking(false); // Reset editing state
 
+          // Call onSuccess callback if provided (for manual booking mode)
+          if (onSuccess) {
+            onSuccess();
+          }
+
           // Refresh booked slots in real-time
           refreshBookedSlots();
           // Also refresh booked slots in this popup
           fetchBookedSlots();
         } else {
-          console.error('❌ Booking failed:', result.error);
-          console.log('🎯 Showing error toast...');
-          console.log(`❌ ${result.error}`);
+          console.error('❌ Booking failed:', result.error || result.message);
+          setValidationErrorName('Booking Save Error');
+          setValidationMessage(result.error || result.message || 'Failed to save booking. Please try again.');
+          setShowValidationPopup(true);
         }
       } catch (error) {
-        console.error('❌ Error saving booking:', error);
-        console.log('🎯 Showing network error toast...');
-        console.log('❌ Network error. Please try again.');
+        console.error('❌ Booking error:', error);
+        setValidationErrorName('Booking Save Error');
+        setValidationMessage('An unexpected error occurred. Please try again.');
+        setShowValidationPopup(true);
       }
     }
   };
@@ -893,6 +1821,17 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
         const hasData = formData.bookingName || formData.emailAddress || formData.whatsappNumber || formData.occasion;
 
         if (hasData && formData.emailAddress) {
+          // Log the data being sent for edited booking
+          console.log('📧 Sending incomplete booking data (edited):', {
+            name: formData.bookingName,
+            email: formData.emailAddress,
+            phone: formData.whatsappNumber,
+            theaterName: selectedTheater?.name || '',
+            date: selectedDate || '',
+            time: selectedTimeSlot || '',
+            occasion: formData.occasion
+          });
+          
           // Send incomplete booking email for edited data
           try {
             const response = await fetch('/api/email/incomplete', {
@@ -904,55 +1843,59 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                 name: formData.bookingName,
                 email: formData.emailAddress,
                 phone: formData.whatsappNumber,
+                theaterName: selectedTheater?.name || '',
+                date: selectedDate || '',
+                time: selectedTimeSlot || '',
                 occasion: formData.occasion,
                 occasionPersonName: formData.birthdayName || formData.partner1Name || formData.partner2Name || formData.proposerName || formData.proposalPartnerName || formData.valentineName || '',
-                // Only send relevant occasion-specific names based on selected occasion
-                ...(formData.occasion === 'Birthday Party' && { 
-                  birthdayName: formData.birthdayName,
-                  birthdayGender: formData.birthdayGender
-                }),
-                ...(formData.occasion === 'Anniversary' && { 
-                  partner1Name: formData.partner1Name,
-                  partner2Name: formData.partner2Name
-                }),
-                ...(formData.occasion === 'Baby Shower' && { birthdayName: formData.birthdayName }),
-                ...(formData.occasion === 'Bride to be' && { birthdayName: formData.birthdayName }),
-                ...(formData.occasion === 'Congratulations' && { birthdayName: formData.birthdayName }),
-                ...(formData.occasion === 'Farewell' && { birthdayName: formData.birthdayName }),
-                ...(formData.occasion === 'Marriage Proposal' && { 
-                  proposerName: formData.proposerName,
-                  proposalPartnerName: formData.proposalPartnerName 
-                }),
-                ...(formData.occasion === 'Romantic Date' && { 
-                  partner1Name: formData.partner1Name,
-                  partner2Name: formData.partner2Name 
-                }),
-                ...(formData.occasion === "Valentine's Day" && { valentineName: formData.valentineName }),
+                // Send all occasion-specific fields dynamically (database will handle mapping)
+                ...(formData.birthdayName && { birthdayName: formData.birthdayName }),
+                ...(formData.birthdayGender && { birthdayGender: formData.birthdayGender }),
+                ...(formData.partner1Name && { partner1Name: formData.partner1Name }),
+                ...(formData.partner1Gender && { partner1Gender: formData.partner1Gender }),
+                ...(formData.partner2Name && { partner2Name: formData.partner2Name }),
+                ...(formData.partner2Gender && { partner2Gender: formData.partner2Gender }),
+                ...(formData.proposerName && { proposerName: formData.proposerName }),
+                ...(formData.proposalPartnerName && { proposalPartnerName: formData.proposalPartnerName }),
+                ...(formData.valentineName && { valentineName: formData.valentineName }),
+                ...(formData.dateNightName && { dateNightName: formData.dateNightName }),
+                ...(formData.customCelebration && { customCelebration: formData.customCelebration }),
               })
             });
 
             const result = await response.json();
             if (result.success) {
-              console.log('📧 Incomplete booking email sent for edited data');
-              console.log('🎯 Showing info toast...');
-              console.log('📧 Reminder email sent!');
+              
+              
+              
             }
           } catch (error) {
-            console.log('⚠️ Failed to send incomplete booking email:', error);
+            
           }
         }
       } else {
         // No changes made during editing - booking remains completed
-        console.log('📝 No changes made during editing - booking remains completed');
+        
       }
     } else {
       // Not in editing mode - check if user has entered data but not completed booking
       const hasData = formData.bookingName || formData.emailAddress || formData.whatsappNumber || formData.occasion;
 
-      if (hasData && formData.emailAddress) {
-        // Send incomplete booking email
-        try {
-          const response = await fetch('/api/email/incomplete', {
+        if (hasData && formData.emailAddress) {
+          // Log the data being sent
+          console.log('📧 Sending incomplete booking data:', {
+            name: formData.bookingName,
+            email: formData.emailAddress,
+            phone: formData.whatsappNumber,
+            theaterName: selectedTheater?.name || '',
+            date: selectedDate || '',
+            time: selectedTimeSlot || '',
+            occasion: formData.occasion
+          });
+          
+          // Send incomplete booking email
+          try {
+            const response = await fetch('/api/email/incomplete', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -961,41 +1904,34 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
               name: formData.bookingName,
               email: formData.emailAddress,
               phone: formData.whatsappNumber,
+              theaterName: selectedTheater?.name || '',
+              date: selectedDate || '',
+              time: selectedTimeSlot || '',
               occasion: formData.occasion,
               occasionPersonName: formData.birthdayName || formData.partner1Name || formData.partner2Name || formData.proposerName || formData.proposalPartnerName || formData.valentineName || '',
-              // Only send relevant occasion-specific names based on selected occasion
-              ...(formData.occasion === 'Birthday Party' && { 
-                birthdayName: formData.birthdayName,
-                birthdayGender: formData.birthdayGender
-              }),
-              ...(formData.occasion === 'Anniversary' && { 
-                partner1Name: formData.partner1Name,
-                partner2Name: formData.partner2Name
-              }),
-              ...(formData.occasion === 'Baby Shower' && { birthdayName: formData.birthdayName }),
-              ...(formData.occasion === 'Bride to be' && { birthdayName: formData.birthdayName }),
-              ...(formData.occasion === 'Congratulations' && { birthdayName: formData.birthdayName }),
-              ...(formData.occasion === 'Farewell' && { birthdayName: formData.birthdayName }),
-              ...(formData.occasion === 'Marriage Proposal' && { 
-                proposerName: formData.proposerName,
-                proposalPartnerName: formData.proposalPartnerName 
-              }),
-              ...(formData.occasion === 'Romantic Date' && { 
-                partner1Name: formData.partner1Name,
-                partner2Name: formData.partner2Name 
-              }),
-              ...(formData.occasion === "Valentine's Day" && { valentineName: formData.valentineName }),
+              // Send all occasion-specific fields dynamically (database will handle mapping)
+              ...(formData.birthdayName && { birthdayName: formData.birthdayName }),
+              ...(formData.birthdayGender && { birthdayGender: formData.birthdayGender }),
+              ...(formData.partner1Name && { partner1Name: formData.partner1Name }),
+              ...(formData.partner1Gender && { partner1Gender: formData.partner1Gender }),
+              ...(formData.partner2Name && { partner2Name: formData.partner2Name }),
+              ...(formData.partner2Gender && { partner2Gender: formData.partner2Gender }),
+              ...(formData.proposerName && { proposerName: formData.proposerName }),
+              ...(formData.proposalPartnerName && { proposalPartnerName: formData.proposalPartnerName }),
+              ...(formData.valentineName && { valentineName: formData.valentineName }),
+              ...(formData.dateNightName && { dateNightName: formData.dateNightName }),
+              ...(formData.customCelebration && { customCelebration: formData.customCelebration }),
             })
           });
 
           const result = await response.json();
           if (result.success) {
-            console.log('📧 Incomplete booking email sent');
-            console.log('🎯 Showing info toast...');
-            console.log('📧 Reminder email sent!');
+            
+            
+            
           }
         } catch (error) {
-          console.log('⚠️ Failed to send incomplete booking email:', error);
+          
         }
       }
     }
@@ -1007,11 +1943,17 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
     document.body.style.width = '';
     document.body.style.height = '';
     document.body.classList.remove('popup-open');
+    // Check editing state BEFORE resetting (resetForm will set isEditingBooking to false)
+    const wasEditingBooking = isEditingBooking;
+    
     // Reset form when closing popup
     resetForm();
     onClose();
-    // Navigate to theater page when popup is closed
-    router.push('/theater');
+    
+    // Navigate to theater page when popup is closed (only if not editing from admin)
+    if (!wasEditingBooking) {
+      router.push('/theater');
+    }
   };
 
   // Prevent scroll events from bubbling to background
@@ -1100,20 +2042,15 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             <div className="booking-popup-meta">
               <div 
                 className="booking-popup-meta-item booking-popup-date-selector-meta"
-                onClick={openDatePicker}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="booking-popup-meta-icon">
                   <path fill="currentColor" d="M22 10H2v9a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3zM7 8a1 1 0 0 1-1-1V3a1 1 0 0 1 2 0v4a1 1 0 0 1-1 1m10 0a1 1 0 0 1-1-1V3a1 1 0 0 1 2 0v4a1 1 0 0 1-1 1" opacity="0.5" />
                   <path fill="currentColor" d="M19 4h-1v3a1 1 0 0 1-2 0V4H8v3a1 1 0 0 1-2 0V4H5a3 3 0 0 0-3 3v3h20V7a3 3 0 0 0-3-3" />
                 </svg>
                 <span>{selectedDate || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="booking-popup-date-arrow-small">
-                  <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
-                </svg>
               </div>
               <div
                 className="booking-popup-meta-item booking-popup-time-selector-meta"
-                onClick={() => setIsTimeSelectionOpen(true)}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="booking-popup-meta-icon">
                   <g fill="none">
@@ -1122,13 +2059,8 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                   </g>
                 </svg>
                 <span className="booking-popup-time-text">
-                  {selectedTimeSlot || 'Choose Time'}
+                  {selectedTimeSlot}
                 </span>
-                <div className="booking-popup-time-arrow-small">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="6,9 12,15 18,9"></polyline>
-                  </svg>
-                </div>
               </div>
               <div className="booking-popup-meta-item">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" className="booking-popup-meta-icon">
@@ -1179,49 +2111,59 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                       <div className="booking-popup-field">
                         <label>Number of People *</label>
                         <div className="booking-popup-number">
-                          <button onClick={() => handleNumberChange('numberOfPeople', 'decrement')}>
+                          <button 
+                            onClick={() => handleNumberChange('numberOfPeople', 'decrement')}
+                            disabled={formData.numberOfPeople <= 1}
+                          >
                             <Minus className="w-4 h-4" />
                           </button>
                           <span>{formData.numberOfPeople}</span>
                           <button
                             onClick={() => handleNumberChange('numberOfPeople', 'increment')}
                             disabled={(() => {
-                              let maxCapacity = 2; // Default for couples
-                              if (selectedTheater?.name) {
-                                if (selectedTheater.name.includes('PHILIA') || selectedTheater.name.includes('FRIENDS') || selectedTheater.name.includes('FMT-Hall-2')) {
-                                  maxCapacity = 4;
-                                } else if (selectedTheater.name.includes('PRAGMA') || selectedTheater.name.includes('LOVE') || selectedTheater.name.includes('FMT-Hall-3')) {
-                                  maxCapacity = 8;
-                                } else if (selectedTheater.name.includes('STORGE') || selectedTheater.name.includes('FAMILY') || selectedTheater.name.includes('FMT-Hall-4')) {
-                                  maxCapacity = 12;
-                                } else if (selectedTheater.name.includes('EROS') || selectedTheater.name.includes('COUPLES') || selectedTheater.name.includes('FMT-Hall-1')) {
-                                  maxCapacity = 2;
-                                }
-                              }
-                              return formData.numberOfPeople >= maxCapacity;
+                              const capacity = getTheaterCapacity();
+                              return formData.numberOfPeople >= capacity.max;
                             })()}
                           >
                             <Plus className="w-4 h-4" />
                           </button>
                         </div>
                         {(() => {
-                          let maxCapacity = 2; // Default for couples
-                          if (selectedTheater?.name) {
-                            if (selectedTheater.name.includes('PHILIA') || selectedTheater.name.includes('FRIENDS') || selectedTheater.name.includes('FMT-Hall-2')) {
-                              maxCapacity = 4;
-                            } else if (selectedTheater.name.includes('PRAGMA') || selectedTheater.name.includes('LOVE') || selectedTheater.name.includes('FMT-Hall-3')) {
-                              maxCapacity = 8;
-                            } else if (selectedTheater.name.includes('STORGE') || selectedTheater.name.includes('FAMILY') || selectedTheater.name.includes('FMT-Hall-4')) {
-                              maxCapacity = 12;
-                            } else if (selectedTheater.name.includes('EROS') || selectedTheater.name.includes('COUPLES') || selectedTheater.name.includes('FMT-Hall-1')) {
-                              maxCapacity = 2;
-                            }
+                          const capacity = getTheaterCapacity();
+                          
+                          // Show capacity info and warnings
+                          if (formData.numberOfPeople >= capacity.max) {
+                            return (
+                              <div className="booking-popup-capacity-warning">
+                                <span>Maximum capacity reached for this theater ({capacity.max} people)</span>
+                              </div>
+                            );
+                          } else if (formData.numberOfPeople === capacity.min) {
+                            return (
+                              <div className="booking-popup-capacity-info">
+                                <span>Base capacity: {capacity.min} people (extra guests: ₹{pricingData.extraGuestFee || 0} each)</span>
+                              </div>
+                            );
+                          } else if (formData.numberOfPeople > capacity.min) {
+                            const extraGuests = formData.numberOfPeople - capacity.min;
+                            return (
+                              <div className="booking-popup-capacity-info">
+                                <span>Extra guests: {extraGuests} × ₹{pricingData.extraGuestFee || 400} = ₹{extraGuests * (pricingData.extraGuestFee || 400)}</span>
+                              </div>
+                            );
+                          } else if (capacity.min !== capacity.max) {
+                            return (
+                              <div className="booking-popup-capacity-info">
+                                <span>Recommended: {capacity.min}-{capacity.max} people (minimum 1 allowed)</span>
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="booking-popup-capacity-info">
+                                <span>Recommended: {capacity.min} people (minimum 1 allowed)</span>
+                              </div>
+                            );
                           }
-                          return formData.numberOfPeople >= maxCapacity ? (
-                            <div className="booking-popup-capacity-warning">
-                              <span>Maximum capacity reached for this theater ({maxCapacity} people)</span>
-                            </div>
-                          ) : null;
                         })()}
                       </div>
                       <div className="booking-popup-field">
@@ -1232,6 +2174,9 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                           onChange={(e) => handleInputChange('whatsappNumber', e.target.value)}
                           placeholder="+91 XXXXX XXXXX"
                         />
+                        {formData.whatsappNumber && formData.whatsappNumber.replace(/\D/g, '').length !== 10 && (
+                          <div style={{ color: '#ff5555', fontSize: 12, marginTop: 6 }}>Please enter a 10-digit mobile number.</div>
+                        )}
                       </div>
                       <div className="booking-popup-field">
                         <label>Email Address *</label>
@@ -1241,6 +2186,9 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                           onChange={(e) => handleInputChange('emailAddress', e.target.value)}
                           placeholder="your@email.com"
                         />
+                        {formData.emailAddress && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(formData.emailAddress) && (
+                          <div style={{ color: '#ff5555', fontSize: 12, marginTop: 6 }}>Please enter a valid email address.</div>
+                        )}
                       </div>
 
 
@@ -1268,6 +2216,9 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                                     <>
                                       {(() => {
                                         const movieName = formData.selectedMovies[0];
+                                        if (!movieName || typeof movieName !== 'string') {
+                                          return 'Movie Selected';
+                                        }
                                         const words = movieName.split(' ');
                                         if (words.length > 2) {
                                           return words.slice(0, 2).join(' ') + '...';
@@ -1306,10 +2257,39 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                               }));
                             }}
                             className="booking-popup-select"
+                            disabled={(() => {
+                              // Disable for couple theaters - decoration is mandatory
+                              const isCoupleTheater = selectedTheater?.name && (
+                                selectedTheater.name.includes('EROS') || 
+                                selectedTheater.name.includes('COUPLES') || 
+                                selectedTheater.name.includes('FMT-Hall-1')
+                              );
+                              return Boolean(isCoupleTheater);
+                            })()}
+                            style={(() => {
+                              const isCoupleTheater = selectedTheater?.name && (
+                                selectedTheater.name.includes('EROS') || 
+                                selectedTheater.name.includes('COUPLES') || 
+                                selectedTheater.name.includes('FMT-Hall-1')
+                              );
+                              return isCoupleTheater ? { opacity: 0.7, cursor: 'not-allowed' } : {};
+                            })()}
                           >
                             <option value="No">No</option>
                             <option value="Yes">Yes</option>
                           </select>
+                          {(() => {
+                            const isCoupleTheater = selectedTheater?.name && (
+                              selectedTheater.name.includes('EROS') || 
+                              selectedTheater.name.includes('COUPLES') || 
+                              selectedTheater.name.includes('FMT-Hall-1')
+                            );
+                            return isCoupleTheater ? (
+                              <small style={{ color: '#10b981', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>
+                                ✨ Decoration & Gifts are included with couple theaters
+                              </small>
+                            ) : null;
+                          })()}
                         </div>
 
 
@@ -1329,16 +2309,23 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                               <span>{selectedTheater ? selectedTheater.name : 'EROS Theatre'}</span>
                               <span>{selectedTheater ? selectedTheater.price : '₹1,399.00'}</span>
                             </div>
-                            <div className="booking-popup-overview-summary-item">
-                              <span>Base Guests (2)</span>
-                              <span>Included</span>
-                            </div>
-                            {formData.numberOfPeople > 2 && (
-                              <div className="booking-popup-overview-summary-item">
-                                <span>Extra Guests ({formData.numberOfPeople - 2} × ₹400)</span>
-                                <span>₹{(formData.numberOfPeople - 2) * 400}</span>
-                              </div>
-                            )}
+                            {(() => {
+                              const capacity = getTheaterCapacity();
+                              return (
+                                <>
+                                  <div className="booking-popup-overview-summary-item">
+                                    <span>Base Guests ({capacity.min})</span>
+                                    <span>Included</span>
+                                  </div>
+                                  {formData.numberOfPeople > capacity.min && (
+                                    <div className="booking-popup-overview-summary-item">
+                                      <span>Extra Guests ({formData.numberOfPeople - capacity.min} × ₹{pricingData.extraGuestFee || 400})</span>
+                                      <span>₹{(formData.numberOfPeople - capacity.min) * (pricingData.extraGuestFee || 400)}</span>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
 
                           {/* Divider Line - Only when movies are selected */}
@@ -1414,9 +2401,15 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                                 <span>Subtotal</span>
                                 <span>₹{calculateTotal().toFixed(2)}</span>
                               </div>
+                              {appliedDiscount > 0 && (
+                                <div className="booking-popup-overview-summary-item">
+                                  <span>Coupon Discount</span>
+                                  <span>-₹{appliedDiscount.toFixed(2)}</span>
+                                </div>
+                              )}
                               <div className="booking-popup-overview-summary-item booking-popup-overview-summary-total">
                                 <span>Total Amount</span>
-                                <span>₹{calculateTotal().toFixed(2)}</span>
+                                <span>₹{getFinalTotal().toFixed(2)}</span>
                               </div>
                             </div>
 
@@ -1454,7 +2447,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                         {occasionOptions.map((occasion) => (
                           <div
                             key={occasion.name}
-                            onClick={() => handleInputChange('occasion', occasion.name)}
+                            onClick={() => handleOccasionSelect(occasion.name)}
                             className="booking-popup-occasion"
                             style={{
                               backgroundImage: `url(${occasion.icon})`,
@@ -1477,7 +2470,10 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                               <h4>{formData.occasion}</h4>
                             </div>
                           <button
-                            onClick={() => handleInputChange('occasion', '')}
+                            onClick={() => {
+                              setFormData(prev => ({ ...prev, occasion: '', occasionData: {} }));
+                              setSelectedOccasionData(null);
+                            }}
                             className="booking-popup-change-occasion-btn"
                           >
                             Change
@@ -1485,183 +2481,62 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                         </div>
 
                         <div className="booking-popup-occasion-details">
-                          {formData.occasion === 'Birthday Party' && (
-                            <div className="booking-popup-field">
-                              <label>Birthday Person Name</label>
-                              <input
-                                type="text"
-                                value={formData.birthdayName || ''}
-                                onChange={(e) => handleInputChange('birthdayName', e.target.value)}
-                                placeholder="Enter birthday person&apos;s name"
-                              />
-                            </div>
-                          )}
+                          {selectedOccasionData && selectedOccasionData.requiredFields && selectedOccasionData.requiredFields.length > 0 ? (
+                            selectedOccasionData.requiredFields.map((fieldKey: string) => {
+                              const fieldLabel = selectedOccasionData.fieldLabels?.[fieldKey] || fieldKey;
+                              const currentValue = formData.occasionData?.[fieldKey] || '';
+                              
+                              console.log('📋 Rendering field:', { fieldKey, fieldLabel, currentValue, selectedOccasionData });
+                              
+                              // Special handling for gender fields
+                              if (fieldKey.toLowerCase().includes('gender')) {
+                                return (
+                                  <div key={fieldKey} className="booking-popup-field">
+                                    <label>{fieldLabel}</label>
+                                    <select
+                                      value={currentValue}
+                                      onChange={(e) => updateOccasionData(fieldKey, e.target.value)}
+                                    >
+                                      <option value="">Select Gender</option>
+                                      <option value="Male">Male</option>
+                                      <option value="Female">Female</option>
+                                      <option value="Other">Other</option>
+                                    </select>
+                                  </div>
+                                );
+                              }
 
-                          {formData.occasion === 'Anniversary' && (
-                            <div className="booking-popup-field-row">
-                              <div className="booking-popup-field">
-                                <label>Partner 1 Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.partner1Name || ''}
-                                  onChange={(e) => handleInputChange('partner1Name', e.target.value)}
-                                  placeholder="Enter partner&apos;s name"
-                                />
-                              </div>
-                              <div className="booking-popup-field">
-                                <label>Partner 2 Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.partner2Name || ''}
-                                  onChange={(e) => handleInputChange('partner2Name', e.target.value)}
-                                  placeholder="Enter partner&apos;s name"
-                                />
-                              </div>
-                            </div>
-                          )}
+                              // Special handling for celebration details (textarea)
+                              if (fieldKey.toLowerCase().includes('celebration') || fieldKey.toLowerCase().includes('details')) {
+                                return (
+                                  <div key={fieldKey} className="booking-popup-field">
+                                    <label>{fieldLabel}</label>
+                                    <textarea
+                                      value={currentValue}
+                                      onChange={(e) => updateOccasionData(fieldKey, e.target.value)}
+                                      placeholder={`Enter ${fieldLabel.toLowerCase()}...`}
+                                      rows={3}
+                                    />
+                                  </div>
+                                );
+                              }
 
-
-                          {formData.occasion === 'Proposal' && (
-                            <div className="booking-popup-field-row">
-                              <div className="booking-popup-field">
-                                <label>Proposer Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.proposerName || ''}
-                                  onChange={(e) => handleInputChange('proposerName', e.target.value)}
-                                  placeholder="Enter proposer's name"
-                                />
-                              </div>
-                              <div className="booking-popup-field">
-                                <label>Partner Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.proposalPartnerName || ''}
-                                  onChange={(e) => handleInputChange('proposalPartnerName', e.target.value)}
-                                  placeholder="Enter partner's name"
-                                />
-                              </div>
-                            </div>
-                          )}
-
-                          {formData.occasion === "Valentine's Day" && (
-                            <div className="booking-popup-field-row">
-                              <div className="booking-popup-field">
-                                <label>Partner Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.valentineName || ''}
-                                  onChange={(e) => handleInputChange('valentineName', e.target.value)}
-                                  placeholder="Enter partner's name"
-                                />
-                              </div>
-                            </div>
-                          )}
-
-                          {formData.occasion === 'Baby Shower' && (
-                            <div className="booking-popup-field">
-                              <label>Mother&apos;s Name</label>
-                              <input
-                                type="text"
-                                value={formData.birthdayName || ''}
-                                onChange={(e) => handleInputChange('birthdayName', e.target.value)}
-                                  placeholder="Enter mother&apos;s name"
-                              />
-                            </div>
-                          )}
-
-
-                          {formData.occasion === 'Bride to be' && (
-                            <div className="booking-popup-field">
-                              <label>Bride&apos;s Name</label>
-                              <input
-                                type="text"
-                                value={formData.birthdayName || ''}
-                                onChange={(e) => handleInputChange('birthdayName', e.target.value)}
-                                placeholder="Enter bride's name"
-                              />
-                            </div>
-                          )}
-
-                          {formData.occasion === 'Congratulations' && (
-                            <div className="booking-popup-field">
-                              <label>Person&apos;s Name</label>
-                              <input
-                                type="text"
-                                value={formData.birthdayName || ''}
-                                onChange={(e) => handleInputChange('birthdayName', e.target.value)}
-                                placeholder="Enter person&apos;s name"
-                              />
-                            </div>
-                          )}
-
-                          {formData.occasion === 'Farewell' && (
-                            <div className="booking-popup-field">
-                              <label>Person&apos;s Name</label>
-                              <input
-                                type="text"
-                                value={formData.birthdayName || ''}
-                                onChange={(e) => handleInputChange('birthdayName', e.target.value)}
-                                placeholder="Enter person&apos;s name"
-                              />
-                            </div>
-                          )}
-
-                          {formData.occasion === 'Marriage Proposal' && (
-                            <div className="booking-popup-field-row">
-                              <div className="booking-popup-field">
-                                <label>Proposer Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.proposerName || ''}
-                                  onChange={(e) => handleInputChange('proposerName', e.target.value)}
-                                  placeholder="Enter proposer's name"
-                                />
-                              </div>
-                              <div className="booking-popup-field">
-                                <label>Partner Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.proposalPartnerName || ''}
-                                  onChange={(e) => handleInputChange('proposalPartnerName', e.target.value)}
-                                  placeholder="Enter partner's name"
-                                />
-                              </div>
-                            </div>
-                          )}
-
-                          {formData.occasion === 'Romantic Date' && (
-                            <div className="booking-popup-field-row">
-                              <div className="booking-popup-field">
-                                <label>Partner 1 Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.partner1Name || ''}
-                                  onChange={(e) => handleInputChange('partner1Name', e.target.value)}
-                                  placeholder="Enter first partner's name"
-                                />
-                              </div>
-                              <div className="booking-popup-field">
-                                <label>Partner 2 Name</label>
-                                <input
-                                  type="text"
-                                  value={formData.partner2Name || ''}
-                                  onChange={(e) => handleInputChange('partner2Name', e.target.value)}
-                                  placeholder="Enter second partner's name"
-                                />
-                              </div>
-                            </div>
-                          )}
-
-                          {formData.occasion === 'Custom Celebration' && (
-                            <div className="booking-popup-field">
-                              <label>Celebration Details</label>
-                              <textarea
-                                value={formData.customCelebration || ''}
-                                onChange={(e) => handleInputChange('customCelebration', e.target.value)}
-                                placeholder="Describe your custom celebration..."
-                                rows={3}
-                              />
+                              // Default text input for all other fields
+                              return (
+                                <div key={fieldKey} className="booking-popup-field">
+                                  <label>{fieldLabel}</label>
+                                  <input
+                                    type="text"
+                                    value={currentValue}
+                                    onChange={(e) => updateOccasionData(fieldKey, e.target.value)}
+                                    placeholder={`Enter ${fieldLabel.toLowerCase()}`}
+                                  />
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="booking-popup-no-fields">
+                              <p>No additional details required for this occasion.</p>
                             </div>
                           )}
                         </div>
@@ -1684,7 +2559,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                           className={`booking-popup-item ${formData.selectedCakes.includes(cake.name) ? 'selected' : ''}`}
                         >
                           {cake.bestseller && <div className="booking-popup-badge">Bestseller</div>}
-                          <div className="booking-popup-item-image">{cake.image}</div>
+                          <div className="booking-popup-item-image" style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', background: '#0f0f10' }}>{renderItemImage(String(cake.image), cake.name)}</div>
                           <div className="booking-popup-item-content">
                             <h4>{cake.name}</h4>
                             <div className="booking-popup-rating">
@@ -1714,7 +2589,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                           className={`booking-popup-item ${formData.selectedDecorItems.includes(decor.name) ? 'selected' : ''}`}
                         >
                           <div className="booking-popup-category">{decor.category}</div>
-                          <div className="booking-popup-item-image">{decor.image}</div>
+                          <div className="booking-popup-item-image" style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', background: '#0f0f10' }}>{renderItemImage(String(decor.image), decor.name)}</div>
                           <div className="booking-popup-item-content">
                             <h4>{decor.name}</h4>
                             <div className="booking-popup-rating">
@@ -1744,7 +2619,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                           className={`booking-popup-item ${formData.selectedGifts.includes(gift.name) ? 'selected' : ''}`}
                         >
                           <div className="booking-popup-category">{gift.category}</div>
-                          <div className="booking-popup-item-image">{gift.image}</div>
+                          <div className="booking-popup-item-image" style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', background: '#0f0f10' }}>{renderItemImage(String(gift.image), gift.name)}</div>
                           <div className="booking-popup-item-content">
                             <h4>{gift.name}</h4>
                             <div className="booking-popup-rating">
@@ -1769,6 +2644,59 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                     </h3>
 
                     <div className="booking-popup-terms-container">
+                      {/* Coupon Code Input - Only show when decoration is Yes */}
+                      {(formData.wantDecorItems === 'Yes' || formData.wantGifts === 'Yes') && (
+                        <div className="booking-popup-terms-section">
+                          <h4 className="booking-popup-terms-title">Coupon Code</h4>
+                          <div className="booking-popup-terms-content">
+                            <div className="booking-popup-coupon-row">
+                              <input
+                                type="text"
+                                value={couponCode}
+                                onChange={(e) => setCouponCode(e.target.value)}
+                                placeholder="Enter coupon code"
+                                className="booking-popup-input"
+                                style={{ flex: 1 }}
+                                disabled={!!appliedCouponCode}
+                              />
+                              {!appliedCouponCode && (
+                                <button
+                                  onClick={applyCoupon}
+                                  disabled={couponApplying || !couponCode.trim()}
+                                  className="booking-popup-btn"
+                                  style={{ padding: '10px 16px' }}
+                                >
+                                  {couponApplying ? 'Applying...' : 'Apply'}
+                                </button>
+                              )}
+                            </div>
+                            {couponError && (
+                              <div className="booking-popup-error" style={{ marginTop: 8 }}>{couponError}</div>
+                            )}
+                            {/* Success feedback moved to toast – no inline success message */}
+                            {/* Price breakdown below coupon input */}
+                            <div className="booking-popup-price-breakdown" style={{ marginTop: 12 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Original Total</span>
+                                <span>₹{calculateTotal().toFixed(2)}</span>
+                              </div>
+                              {appliedCouponCode && appliedDiscount > 0 && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#10B981' }}>
+                                  <span>
+                                    Coupon {appliedDiscountType === 'percentage' && appliedDiscountValue !== null ? `${appliedDiscountValue}%` : appliedDiscountType === 'fixed' && appliedDiscountValue !== null ? `₹${appliedDiscountValue}` : 'Applied'}
+                                  </span>
+                                  <span>-₹{appliedDiscount.toFixed(2)}</span>
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                                <span>Final Total</span>
+                                <span>₹{getFinalTotal().toFixed(2)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="booking-popup-terms-section">
                         <h4 className="booking-popup-terms-title">Terms & Conditions</h4>
                         <div className="booking-popup-terms-content">
@@ -1822,14 +2750,14 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                     <button onClick={handleSkip} className="booking-popup-btn skip">
                       <span>Skip</span>
                     </button>
-                    <button onClick={handleNextStep} className="booking-popup-btn">
-                      <span>{activeTab === tabs[tabs.length - 1] ? 'Pay Now' : 'Continue'}</span>
+                    <button onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} className="booking-popup-btn">
+                      <span>{activeTab === tabs[tabs.length - 1] ? 'Confirm Booking' : 'Continue'}</span>
                       <ArrowLeft className="w-5 h-5" />
                     </button>
                   </div>
                 ) : (
-                  <button onClick={handleNextStep} className="booking-popup-btn">
-                    <span>{activeTab === tabs[tabs.length - 1] ? 'Pay Now' : 'Continue'}</span>
+                  <button onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} className="booking-popup-btn">
+                    <span>{activeTab === tabs[tabs.length - 1] ? 'Confirm Booking' : 'Continue'}</span>
                     <ArrowLeft className="w-5 h-5" />
                   </button>
                 )}
@@ -1881,25 +2809,13 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
               <div className="booking-popup-success-actions">
                 <button
                   onClick={() => {
-                    // Keep current form data and go back to booking for editing
-                    setIsBookingSuccessful(false);
-                    setBookingResult(null);
-                    setIsEditingBooking(true);
-                    setOriginalFormData({ ...formData }); // Store original data for comparison
-                    setEditingBookingId(bookingResult?.bookingId || null); // Store booking ID for updating
-                    setActiveTab('Overview');
-                  }}
-                  className="booking-popup-success-btn secondary"
-                >
-                  Edit Booking
-                </button>
-                <button
-                  onClick={() => {
+                    if (autoCloseTimerRef.current) {
+                      clearTimeout(autoCloseTimerRef.current);
+                      autoCloseTimerRef.current = null;
+                    }
                     onClose();
-                    // Open new booking popup
-                    setTimeout(() => {
-                      openBookingPopup();
-                    }, 100);
+                    // Open new booking popup immediately
+                    openBookingPopup();
                   }}
                   className="booking-popup-success-btn primary"
                 >
@@ -1907,6 +2823,13 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                 </button>
                 <button
                   onClick={() => {
+                    if (autoCloseTimerRef.current) {
+                      clearTimeout(autoCloseTimerRef.current);
+                      autoCloseTimerRef.current = null;
+                    }
+                    // Check editing state BEFORE resetting (resetForm will set isEditingBooking to false)
+                    const wasEditingBooking = isEditingBooking;
+                    
                     // Reset all booking states and close popup completely
                     setIsBookingSuccessful(false);
                     setBookingResult(null);
@@ -1915,8 +2838,10 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
                     // Close booking popup completely
                     onClose();
 
-                    // Navigate to theater page
-                    router.push('/theater');
+                    // Navigate to theater page (only if not editing from admin)
+                    if (!wasEditingBooking) {
+                      router.push('/theater');
+                    }
                   }}
                   className="booking-popup-success-btn secondary"
                 >
@@ -1944,7 +2869,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
               </p>
 
               <button
-                onClick={() => setShowValidationPopup(false)}
+                onClick={() => { setShowValidationPopup(false); setValidationMessage(''); setValidationErrorName(''); }}
                 className="booking-popup-validation-btn"
               >
                 OK
@@ -1953,24 +2878,171 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           </div>
         )}
 
+        {/* Edit Booking Options Popup */}
+        {showEditRequestPopup && (
+          <div className="booking-popup-edit-request">
+            <div className="booking-popup-edit-request-content">
+              <div className="booking-popup-edit-request-header">
+                <h3 className="booking-popup-edit-request-title">
+                  Edit Booking Options
+                </h3>
+                <button
+                  onClick={() => setShowEditRequestPopup(false)}
+                  className="booking-popup-edit-request-close"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
 
-        {/* Time Selection Popup */}
-        <TimeSelectionPopup
-          isOpen={isTimeSelectionOpen}
-          onClose={() => setIsTimeSelectionOpen(false)}
-          selectedTime={selectedTimeSlot}
-          onTimeSelected={(time) => {
-            setSelectedTimeSlot(time);
-            setIsTimeSelectionOpen(false);
-          }}
-          bookedSlots={bookedTimeSlots}
-          selectedDate={selectedDate || undefined}
-        />
-        {/* Debug: Log booked slots when time popup opens */}
-        {isTimeSelectionOpen && (() => {
-          console.log('🕐 Time popup opened with booked slots:', bookedTimeSlots);
-          return null;
-        })()}
+              <div className="booking-popup-edit-request-message">
+                <p>Contact the customer to edit this booking:</p>
+              </div>
+
+              {/* Animated tip above Call button */}
+              <div className="booking-popup-edit-request-tip">
+                <button
+                  className="booking-popup-edit-request-tip-btn"
+                  onClick={() => {
+                    const raw = (formData.whatsappNumber || '').trim();
+                    const digits = raw.replace(/[^\d]/g, '');
+                    let phone = digits;
+                    if (phone.startsWith('0')) phone = phone.slice(1);
+                    if (phone.length === 10) phone = `91${phone}`; // default to India code
+                    if (!phone) return;
+                    window.location.href = `tel:+${phone}`;
+                  }}
+                  disabled={!formData.whatsappNumber}
+                >
+                  Instant edit: Use Call option
+                </button>
+              </div>
+
+              <div className="booking-popup-edit-request-options">
+                <button
+                  onClick={() => {
+                    const raw = (formData.whatsappNumber || '').trim();
+                    const digits = raw.replace(/[^\d]/g, '');
+                    let phone = digits;
+                    if (phone.startsWith('0')) phone = phone.slice(1);
+                    if (phone.length === 10) phone = `91${phone}`; // default to India code
+                    if (!phone) return;
+                    window.location.href = `tel:+${phone}`;
+                  }}
+                  disabled={!formData.whatsappNumber}
+                  className="booking-popup-edit-request-btn call"
+                >
+                  <span className="phone-icon">
+                    <Phone className="w-6 h-6" />
+                  </span>
+                  <div className="booking-popup-edit-request-btn-content">
+                  <span className="booking-popup-edit-request-btn-title">Call</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    const raw = (formData.whatsappNumber || '').trim();
+                    const digits = raw.replace(/[^\d]/g, '');
+                    let phone = digits;
+                    if (phone.startsWith('0')) phone = phone.slice(1);
+                    if (phone.length === 10) phone = `91${phone}`; // default to India code
+                    if (!phone) return;
+                    const details = [
+                      `Booking ID: ${bookingResult?.bookingId || 'N/A'}`,
+                      `Theater: ${selectedTheater?.name || 'N/A'}`,
+                      `Date: ${selectedDate || 'N/A'}`,
+                      `Time: ${selectedTimeSlot || 'N/A'}`
+                    ].join('\n');
+                    const name = formData.bookingName ? `Hi ${formData.bookingName},` : 'Hi,';
+                    const message = `${name}\nWe’d like to edit your booking.\n${details}\nPlease reply to confirm.`;
+                    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                  }}
+                  disabled={!formData.whatsappNumber}
+                  className="booking-popup-edit-request-btn whatsapp"
+                >
+                  <span className="whatsapp-icon">
+                    <MessageCircle className="w-6 h-6" />
+                  </span>
+                  <div className="booking-popup-edit-request-btn-content">
+                    <span className="booking-popup-edit-request-btn-title">WhatsApp</span>
+                    <span className="booking-popup-edit-request-btn-subtitle">Click to Send Prefilled Message</span>
+                  </div>
+                </button>
+
+                {/* Send Edit Request to DB with full booking details */}
+                <button
+                  onClick={async () => {
+                    if (hasSentEditRequest || isSendingEditRequest) return;
+                    setIsSendingEditRequest(true);
+                    try {
+                      const payload = {
+                        bookingId: bookingResult?.bookingId || null,
+                        // Customer & contact
+                        customerName: formData.bookingName || null,
+                        customerPhone: formData.whatsappNumber || null,
+                        email: formData.emailAddress || null,
+                        numberOfPeople: formData.numberOfPeople || null,
+                        // Venue & schedule
+                        theaterName: selectedTheater?.name || null,
+                        theaterId: (selectedTheater as any)?._id || (selectedTheater as any)?.id || null,
+                        date: selectedDate || null,
+                        time: selectedTimeSlot || null,
+                        // Occasion & selections
+                        occasion: formData.occasion || null,
+                        selectedCakes: formData.selectedCakes || [],
+                        selectedDecorItems: formData.selectedDecorItems || [],
+                        selectedGifts: formData.selectedGifts || [],
+                        selectedMovies: formData.selectedMovies || [],
+                        wantCakes: formData.wantCakes || 'No',
+                        wantDecorItems: formData.wantDecorItems || 'No',
+                        wantGifts: formData.wantGifts || 'No',
+                        status: 'confirmed',
+                        source: 'BookingPopup'
+                      };
+
+                      const res = await fetch('/api/edit-booking-request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        showSuccess && showSuccess('Edit booking request saved');
+                        setHasSentEditRequest(true);
+                        setShowEditRequestPopup(false);
+                      } else {
+                        showError && showError(data.error || 'Failed to save edit request');
+                      }
+                    } catch (error) {
+                      showError && showError('Failed to save edit request');
+                    } finally {
+                      setIsSendingEditRequest(false);
+                    }
+                  }}
+                  disabled={isSendingEditRequest || hasSentEditRequest}
+                  className="booking-popup-edit-request-btn request"
+                >
+                  <span className="request-icon">
+                    <MessageCircle className="w-6 h-6" />
+                  </span>
+                  <div className="booking-popup-edit-request-btn-content">
+                    <span className="booking-popup-edit-request-btn-title">{hasSentEditRequest ? 'Request Sent' : 'Send Edit Request'}</span>
+                    <span className="booking-popup-edit-request-btn-subtitle">{hasSentEditRequest ? 'We will contact you soon' : 'responds in 2 to 3 hrs'}</span>
+                  </div>
+                </button>
+              </div>
+
+              <div className="booking-popup-edit-request-info">
+                <p className="text-sm text-gray-400">
+                  Use these options to coordinate changes directly with the customer.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+    
 
         {/* Date Selection Popup */}
         <GlobalDatePicker
@@ -2099,6 +3171,123 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             font-weight: 700;
             color: #ffffff;
             margin: 0;
+          }
+
+          /* Edit Booking tip animation */
+          .booking-popup-edit-request-tip {
+            display: flex;
+            justify-content: center;
+            margin: 0.5rem 0 1rem;
+          }
+
+          .booking-popup-edit-request-tip-btn {
+            padding: 0.4rem 0.8rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: linear-gradient(90deg, rgba(255, 0, 5, 0.2), rgba(255, 255, 255, 0.08));
+            color: #ffffff;
+            font-size: 0.9rem;
+            cursor: pointer;
+            animation: bookingPulse 1.8s ease-in-out infinite;
+          }
+
+          .booking-popup-edit-request-tip-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+
+          @keyframes bookingPulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 0, 5, 0.6); }
+            70% { box-shadow: 0 0 0 12px rgba(255, 0, 5, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 0, 5, 0); }
+          }
+
+          /* Request button subtle style (keeps consistent look) */
+          .booking-popup-edit-request-btn.request {
+            border-color: rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.08);
+            position: relative;
+            overflow: hidden;
+            animation: requestPulseBlue 1.8s ease-in-out infinite;
+            will-change: box-shadow;
+          }
+
+          .booking-popup-edit-request-btn.request:hover {
+            box-shadow: 0 8px 20px rgba(0, 122, 255, 0.28);
+            transform: translateY(-2px);
+          }
+
+          .booking-popup-edit-request-btn.request:disabled {
+            animation: none;
+          }
+
+          /* Sending shimmer overlay */
+          .booking-popup-edit-request-btn.request::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+            background-size: 200% 100%;
+            animation: shimmerMove 2.2s linear infinite;
+            pointer-events: none;
+          }
+
+          .booking-popup-edit-request-btn.request:disabled::before {
+            display: none;
+          }
+
+          /* Request icon sending motion + signal ring */
+          .booking-popup-edit-request-btn.request .request-icon {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transform-origin: 50% 50%;
+            animation: sendFly 1.6s ease-in-out infinite;
+          }
+
+          .booking-popup-edit-request-btn.request .request-icon::after {
+            content: '';
+            position: absolute;
+            left: -2px;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            border: 2px solid #007aff; /* iOS blue */
+            opacity: 0.7;
+            animation: pulseRingBlue 1.6s ease-out infinite;
+          }
+
+          .booking-popup-edit-request-btn.request:disabled .request-icon,
+          .booking-popup-edit-request-btn.request:disabled .request-icon::after {
+            animation: none;
+          }
+
+          /* Keyframes for request sending effect */
+          @keyframes requestPulseBlue {
+            0% { box-shadow: 0 0 0 0 rgba(0, 122, 255, 0.55); }
+            70% { box-shadow: 0 0 0 12px rgba(0, 122, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 122, 255, 0); }
+          }
+
+          @keyframes shimmerMove {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+          }
+
+          @keyframes sendFly {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(1px); }
+            50% { transform: translateX(3px); }
+            75% { transform: translateX(1px); }
+          }
+
+          @keyframes pulseRingBlue {
+            0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.7; }
+            60% { transform: translate(-50%, -50%) scale(1.4); opacity: 0.0; }
+            100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.0; }
           }
 
           .booking-popup-title-section {
@@ -3243,6 +4432,74 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             border: 1px solid rgba(255, 255, 255, 0.1);
           }
 
+          /* Coupon input row */
+          .booking-popup-coupon-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+          }
+
+          /* Coupon text input */
+          .booking-popup-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.06);
+            color: #ffffff;
+            outline: none;
+            transition: all 0.2s ease;
+            font-size: 0.95rem;
+          }
+
+          .booking-popup-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+          }
+
+          .booking-popup-input:focus {
+            border-color: #FF0005;
+            box-shadow: 0 0 0 3px rgba(255, 0, 5, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+          }
+
+          /* Outline button variant for coupon remove */
+          .booking-popup-btn.outline {
+            background: transparent;
+            color: #FF0005;
+            border: 1px solid #FF0005;
+            box-shadow: none;
+            max-width: none;
+            width: auto;
+          }
+
+          .booking-popup-btn.outline:hover {
+            background: rgba(255, 0, 5, 0.1);
+          }
+
+          /* Make coupon row buttons fit content */
+          .booking-popup-coupon-row .booking-popup-btn {
+            width: auto;
+            max-width: none;
+          }
+
+          /* Feedback messages */
+          .booking-popup-error {
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.12);
+            border: 1px solid rgba(255, 107, 107, 0.3);
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+          }
+
+          .booking-popup-success {
+            color: #4cd137;
+            background: rgba(76, 209, 55, 0.12);
+            border: 1px solid rgba(76, 209, 55, 0.3);
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+          }
+
           .booking-popup-terms-section {
             margin-bottom: 2rem;
           }
@@ -3799,7 +5056,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             align-items: center;
             justify-content: center;
             z-index: 1000;
-            animation: fadeIn 0.5s ease-in-out;
+            animation: fadeIn 0.2s ease-in-out;
           }
 
           .booking-popup-success-content {
@@ -3830,7 +5087,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             display: flex;
             align-items: center;
             justify-content: center;
-            animation: scaleIn 0.4s ease-out;
+            animation: scaleIn 0.2s ease-out;
             background: rgba(0, 255, 0, 0.1);
           }
 
@@ -3843,7 +5100,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
           .booking-popup-success-checkmark-path {
             stroke-dasharray: 20;
             stroke-dashoffset: 20;
-            animation: drawCheckmark 0.6s ease-out 0.4s forwards;
+            animation: drawCheckmark 0.3s ease-out 0.1s forwards;
           }
 
           .booking-popup-success-title {
@@ -3851,13 +5108,13 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             font-size: 1.5rem;
             font-weight: bold;
             margin-bottom: 1rem;
-            animation: slideUp 0.5s ease-out 0.8s both;
+            animation: slideUp 0.2s ease-out 0.2s both;
           }
 
           .booking-popup-success-message {
             color: #cccccc;
             margin-bottom: 2rem;
-            animation: slideUp 0.5s ease-out 1s both;
+            animation: slideUp 0.2s ease-out 0.3s both;
           }
 
           .booking-popup-success-message p {
@@ -3881,7 +5138,7 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             display: flex;
             gap: 0.75rem;
             justify-content: center;
-            animation: slideUp 0.5s ease-out 1.2s both;
+            animation: slideUp 0.2s ease-out 0.4s both;
             flex-wrap: wrap;
           }
 
@@ -4038,6 +5295,280 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             }
           }
 
+          /* Edit Request Popup Styles */
+          .booking-popup-edit-request {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            animation: fadeIn 0.3s ease-in-out;
+          }
+
+          .booking-popup-edit-request-content {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            border-radius: 20px;
+            padding: 2rem;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            animation: slideUp 0.4s ease-out;
+          }
+
+          .booking-popup-edit-request-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+          }
+
+          .booking-popup-edit-request-title {
+            color: #ffffff;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 0;
+          }
+
+          .booking-popup-edit-request-close {
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+          }
+
+          .booking-popup-edit-request-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+          }
+
+          .booking-popup-edit-request-message {
+            margin-bottom: 2rem;
+          }
+
+          .booking-popup-edit-request-message p {
+            color: #cccccc;
+            margin: 0;
+            text-align: center;
+            font-size: 1rem;
+          }
+
+          .booking-popup-edit-request-options {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+          }
+
+          .booking-popup-edit-request-btn {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem 1.5rem;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: left;
+            width: 100%;
+          }
+
+          .booking-popup-edit-request-btn.call {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            animation: callPulseGreen 1.8s ease-in-out infinite;
+            will-change: box-shadow;
+          }
+
+          .booking-popup-edit-request-btn.call:hover {
+            background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(76, 175, 80, 0.3);
+          }
+
+          .booking-popup-edit-request-btn.call:disabled {
+            animation: none;
+          }
+
+          /* Green pulse animation for Call button */
+          @keyframes callPulseGreen {
+            0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.6); }
+            70% { box-shadow: 0 0 0 12px rgba(76, 175, 80, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+          }
+
+          /* Call button ringing animation */
+          .booking-popup-edit-request-btn.call .phone-icon {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            animation: phoneSwing 1.2s ease-in-out infinite;
+            transform-origin: 50% 50%;
+          }
+
+          .booking-popup-edit-request-btn.call .phone-icon::after {
+            content: '';
+            position: absolute;
+            width: 36px;
+            height: 36px;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            animation: pulseRing 1.2s ease-out infinite;
+          }
+
+          @keyframes phoneSwing {
+            0%, 100% { transform: rotate(0deg); }
+            20% { transform: rotate(-12deg); }
+            40% { transform: rotate(12deg); }
+            60% { transform: rotate(-8deg); }
+            80% { transform: rotate(8deg); }
+          }
+
+          @keyframes pulseRing {
+            0% { transform: scale(0.8); opacity: 0.0; }
+            30% { transform: scale(1.0); opacity: 0.6; }
+            60% { transform: scale(1.2); opacity: 0.3; }
+            100% { transform: scale(1.4); opacity: 0.0; }
+          }
+
+          .booking-popup-edit-request-btn.call:disabled .phone-icon {
+            animation: none;
+          }
+
+          .booking-popup-edit-request-btn.call:disabled .phone-icon::after {
+            display: none;
+          }
+
+          .booking-popup-edit-request-btn.whatsapp {
+            background: linear-gradient(135deg, #25D366 0%, #20b358 100%);
+            color: white;
+            animation: whatsappPulse 1.8s ease-in-out infinite;
+            will-change: box-shadow;
+          }
+
+          .booking-popup-edit-request-btn.whatsapp:hover {
+            background: linear-gradient(135deg, #20b358 0%, #1ca049 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(37, 211, 102, 0.3);
+          }
+
+          .booking-popup-edit-request-btn.whatsapp:disabled {
+            animation: none;
+          }
+
+          /* WhatsApp notification-style animation */
+          .booking-popup-edit-request-btn.whatsapp .whatsapp-icon {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            animation: whatsappBounce 1.6s ease-in-out infinite;
+            transform-origin: 50% 50%;
+          }
+
+          .booking-popup-edit-request-btn.whatsapp .whatsapp-icon::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff3b30; /* iOS badge red */
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
+            animation: badgePop 1.6s ease-in-out infinite;
+          }
+
+          @keyframes whatsappPulse {
+            0% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.55); }
+            70% { box-shadow: 0 0 0 12px rgba(37, 211, 102, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0); }
+          }
+
+          @keyframes whatsappBounce {
+            0%, 100% { transform: translateY(0); }
+            25% { transform: translateY(-2px); }
+            50% { transform: translateY(2px); }
+            75% { transform: translateY(-1px); }
+          }
+
+          @keyframes badgePop {
+            0% { transform: scale(0.7); opacity: 0.0; }
+            30% { transform: scale(1.1); opacity: 1.0; }
+            60% { transform: scale(1.0); opacity: 0.8; }
+            100% { transform: scale(0.9); opacity: 0.0; }
+          }
+
+          .booking-popup-edit-request-btn.whatsapp:disabled .whatsapp-icon {
+            animation: none;
+          }
+
+          .booking-popup-edit-request-btn.whatsapp:disabled .whatsapp-icon::after {
+            display: none;
+          }
+
+          .booking-popup-edit-request-btn-content {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+          }
+
+          .booking-popup-edit-request-btn-title {
+            font-weight: bold;
+            font-size: 1rem;
+          }
+
+          .booking-popup-edit-request-btn-subtitle {
+            font-size: 0.875rem;
+            opacity: 0.9;
+          }
+
+          .booking-popup-edit-request-info {
+            text-align: center;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+          }
+
+          .booking-popup-edit-request-info p {
+            margin: 0;
+            color: #888;
+            font-size: 0.875rem;
+          }
+
+          /* Mobile Responsive for Edit Request */
+          @media (max-width: 768px) {
+            .booking-popup-edit-request-content {
+              padding: 1.5rem;
+              margin: 1rem;
+            }
+
+            .booking-popup-edit-request-title {
+              font-size: 1.25rem;
+            }
+
+            .booking-popup-edit-request-btn {
+              padding: 0.875rem 1.25rem;
+            }
+
+            .booking-popup-edit-request-btn-title {
+              font-size: 0.9rem;
+            }
+
+            .booking-popup-edit-request-btn-subtitle {
+              font-size: 0.8rem;
+            }
+          }
+
           /* Close Confirmation Popup Styles */
           .booking-popup-close-confirmation {
             position: fixed;
@@ -4175,6 +5706,140 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
             }
           }
 
+          /* Payment Confirmation Popup Styles */
+          .booking-popup-payment-confirmation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000000;
+            backdrop-filter: blur(4px);
+            animation: fadeIn 0.3s ease;
+          }
+
+          .booking-popup-payment-confirmation-content {
+            background: white;
+            border-radius: 16px;
+            padding: 2.5rem;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            text-align: center;
+            position: relative;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            z-index: 10000000;
+          }
+
+          .booking-popup-payment-confirmation-content::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #10b981, #059669);
+            border-radius: 16px 16px 0 0;
+          }
+
+          .booking-popup-payment-confirmation-icon {
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: center;
+            animation: bounce 0.6s ease;
+          }
+
+          .booking-popup-payment-confirmation-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 1rem;
+          }
+
+          .booking-popup-payment-details {
+            text-align: left;
+            margin-bottom: 2rem;
+          }
+
+          .booking-popup-payment-confirmation-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+          }
+
+          .booking-popup-payment-confirmation-btn {
+            border: none;
+            border-radius: 8px;
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+
+          .booking-popup-payment-confirmation-btn.cancel {
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+          }
+
+          .booking-popup-payment-confirmation-btn.cancel:hover:not(:disabled) {
+            background: #e5e7eb;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+          }
+
+          .booking-popup-payment-confirmation-btn.confirm {
+            background: #10b981;
+            color: white;
+            border: 1px solid #059669;
+          }
+
+          .booking-popup-payment-confirmation-btn.confirm:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+          }
+
+          .booking-popup-payment-confirmation-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+          }
+
+          @media (max-width: 640px) {
+            .booking-popup-payment-confirmation-content {
+              padding: 1.5rem;
+              margin: 1rem;
+            }
+
+            .booking-popup-payment-confirmation-title {
+              font-size: 1.125rem;
+            }
+
+            .booking-popup-payment-confirmation-btn {
+              padding: 0.625rem 1.25rem;
+              font-size: 0.875rem;
+            }
+
+            .booking-popup-payment-confirmation-actions {
+              flex-direction: column;
+              gap: 0.5rem;
+            }
+
+            .booking-popup-payment-confirmation-btn {
+              width: 100%;
+            }
+          }
+
           @keyframes bounceIn {
             0% { transform: scale(0); opacity: 0; }
             50% { transform: scale(1.2); opacity: 1; }
@@ -4246,18 +5911,94 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
         </div>
       )}
 
+      {/* Payment Confirmation Popup */}
+      {showPaymentConfirmation && (
+        <div className="booking-popup-payment-confirmation">
+          <div className="booking-popup-payment-confirmation-content">
+            <div className="booking-popup-payment-confirmation-icon">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                <span className="text-3xl">💳</span>
+              </div>
+            </div>
+
+            <h3 className="booking-popup-payment-confirmation-title">
+              Complete Payment
+            </h3>
+
+            <div className="booking-popup-payment-details">
+              <p className="text-gray-600 mb-4">
+                Please complete your payment to confirm the booking.
+              </p>
+              
+              <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium">Theater:</span>
+                  <span>{selectedTheater?.name || 'FeelME Town Theater'}</span>
+                </div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium">Date:</span>
+                  <span>{selectedDate}</span>
+                </div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium">Time:</span>
+                  <span>{selectedTimeSlot}</span>
+                </div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium">Occasion:</span>
+                  <span>{formData.occasion}</span>
+                </div>
+                <hr className="my-2" />
+                <div className="flex justify-between items-center font-bold text-lg">
+                  <span>Total Amount:</span>
+                  <span>₹{getFinalTotal()}</span>
+                </div>
+                <div className="flex justify-between items-center text-green-600">
+                  <span>Slot Booking Fee:</span>
+                  <span>₹{getPayableAmount()}</span>
+                </div>
+                <div className="flex justify-between items-center text-blue-600">
+                  <span>At Venue:</span>
+                  <span>₹{getBalanceAmount().toFixed(2)}</span>
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-500 mb-4">
+                💡 Complete your payment through any method (UPI, Card, Cash, etc.) and click "Payment Done" to confirm your booking.
+              </p>
+            </div>
+
+            <div className="booking-popup-payment-confirmation-actions">
+              <button
+                onClick={() => setShowPaymentConfirmation(false)}
+                className="booking-popup-payment-confirmation-btn cancel"
+                disabled={isProcessingPayment}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePaymentDone}
+                className="booking-popup-payment-confirmation-btn confirm"
+                disabled={isProcessingPayment}
+              >
+                {isProcessingPayment ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Processing...
+                  </>
+                ) : (
+                  '✅ Payment Done'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Movies Modal */}
-      {(() => {
-        console.log('🎬 Rendering MoviesModal with props:', {
-          isOpen: isMoviesModalOpen,
-          selectedMovies: formData.selectedMovies
-        });
-        return null;
-      })()}
       <MoviesModal
         isOpen={isMoviesModalOpen}
         onClose={() => {
-          console.log('🎬 Closing movies modal');
+          
           setIsMoviesModalOpen(false);
         }}
         onMovieSelect={handleMovieSelect}
@@ -4273,3 +6014,4 @@ export default function BookingPopup({ isOpen, onClose }: BookingPopupProps) {
 
   return popupContent;
 }
+

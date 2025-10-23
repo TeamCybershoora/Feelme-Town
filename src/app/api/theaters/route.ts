@@ -13,7 +13,7 @@ export async function GET() {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching theaters:', error);
+    
     return NextResponse.json(
       { 
         success: false, 
@@ -23,3 +23,4 @@ export async function GET() {
     );
   }
 }
+

@@ -53,13 +53,35 @@ const FeelMeTownFooter: React.FC = () => {
                 <div className="links-grid">
                   <ul className="links-list">
                     <li><a href="#" className="footer-link">Home</a></li>
-                    <li><a href="#" className="footer-link">About us</a></li>
-                    <li><a href="#" className="footer-link">Services</a></li>
-                    <li><a href="#" className="footer-link">Contact us</a></li>
-                    <li><a href="#" className="footer-link">FAQs</a></li>
+                    <li><a href="/about" className="footer-link">About us</a></li>
+                    <li><a href="/services" className="footer-link">Services</a></li>
+                    <li><a href="/contact" className="footer-link">Contact us</a></li>
+                    <li>
+                      <a
+                        href="/"
+                        className="footer-link"
+                        onClick={(e) => {
+                          // If already on the homepage, smooth-scroll to #faq instead of full navigation
+                          try {
+                            if (typeof window !== 'undefined' && window.location.pathname === '/') {
+                              e.preventDefault();
+                              const el = document.getElementById('faq');
+                              if (el) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              } else {
+                                // Fallback: navigate to anchor
+                                window.location.hash = '#faq';
+                              }
+                            }
+                          } catch {}
+                        }}
+                      >
+                        FAQs
+                      </a>
+                    </li>
                   </ul>
                   <ul className="links-list">
-                    <li><a href="#" className="footer-link">Theatre</a></li>
+                    <li><a href="/theater" className="footer-link">Theatre</a></li>
                     <li><a href="#" className="footer-link">Return & Refunds</a></li>
                     <li><a href="#" className="footer-link">Terms & Conditions</a></li>
                     <li><a href="#" className="footer-link">Privacy policy</a></li>

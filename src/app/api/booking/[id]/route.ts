@@ -89,7 +89,7 @@ export async function GET(
     }, { status: 200 });
 
   } catch (error) {
-    console.error('❌ Error getting booking:', error);
+    
     return NextResponse.json(
       { 
         success: false, 
@@ -109,7 +109,10 @@ export async function PUT(
     const { id: bookingId } = await params;
     const body = await request.json();
     
+    console.log('📝 PUT /api/booking/[id] - Received:', { bookingId, body });
+    
     if (!bookingId) {
+      console.error('❌ Missing booking ID');
       return NextResponse.json(
         { 
           success: false, 
@@ -124,6 +127,7 @@ export async function PUT(
     const missingFields = requiredFields.filter(field => !body[field]);
     
     if (missingFields.length > 0) {
+      console.error('❌ Missing required fields:', missingFields);
       return NextResponse.json(
         { 
           success: false, 
@@ -132,6 +136,8 @@ export async function PUT(
         { status: 400 }
       );
     }
+    
+    console.log('✅ All required fields present');
 
     // Calculate total amount
     let totalAmount = 0;
@@ -188,12 +194,13 @@ export async function PUT(
       });
     }
 
-    // Calculate payment breakdown
-    const advancePayment = 600; // Fixed advance payment
+    // Calculate payment breakdown - use pricing data from body if available
+    const slotBookingFee = body.pricingData?.slotBookingFee || 600; // Use slot booking fee from pricing data or default to 600
+    const advancePayment = slotBookingFee;
     const venuePayment = totalAmount - advancePayment; // Remaining amount to be paid at venue
 
     // Create updated booking data
-    const bookingData = {
+    const bookingData: any = {
       name: body.name.trim(),
       email: body.email.trim().toLowerCase(),
       phone: body.phone.trim(),
@@ -207,46 +214,76 @@ export async function PUT(
       selectedGifts: body.selectedGifts || [],
       selectedMovies: body.selectedMovies || [],
       totalAmount: totalAmount,
-      advancePayment: advancePayment, // Amount paid now (25%)
-      venuePayment: venuePayment, // Amount to be paid at venue
-      status: 'completed', // Booking status
-      // Occasion-specific data (only save relevant fields based on occasion)
-      occasionPersonName: body.occasionPersonName || '',
-      // Only save the relevant name field based on the selected occasion
-      ...(body.occasion === 'Birthday Party' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Anniversary' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Baby Shower' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Bride to be' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Congratulations' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Farewell' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Marriage Proposal' && { 
-        proposerName: body.proposerName,
-        proposalPartnerName: body.proposalPartnerName 
-      }),
-      ...(body.occasion === 'Romantic Date' && { 
-        partner1Name: body.partner1Name,
-        partner2Name: body.partner2Name 
-      }),
-      ...(body.occasion === "Valentine's Day" && { valentineName: body.valentineName }),
-      ...(body.occasion === 'Date Night' && { dateNightName: body.dateNightName })
+      advancePayment: advancePayment,
+      venuePayment: venuePayment,
+      status: body.status || 'confirmed', // Keep existing status or set to confirmed
+      // Store occasion data dynamically
+      occasionData: body.occasionData || {},
+      // Store pricing data if provided
+      pricingData: body.pricingData || {
+        slotBookingFee: slotBookingFee,
+        extraGuestFee: 400,
+        convenienceFee: 0
+      },
+      // Store extra guest charges
+      extraGuestCharges: extraGuestCharges,
+      extraGuestsCount: extraGuests,
+      // Store applied coupon info if exists
+      appliedCouponCode: body.appliedCouponCode || undefined,
+      couponDiscount: body.couponDiscount || 0,
     };
 
+    // Add all dynamic occasion fields from occasionData to root level for backward compatibility
+    if (body.occasionData && typeof body.occasionData === 'object') {
+      Object.keys(body.occasionData).forEach(key => {
+        if (body.occasionData[key]) {
+          bookingData[key] = body.occasionData[key];
+        }
+      });
+    }
+
+    // Legacy occasion fields (for backward compatibility)
+    if (body.birthdayName) bookingData.birthdayName = body.birthdayName;
+    if (body.birthdayGender) bookingData.birthdayGender = body.birthdayGender;
+    if (body.partner1Name) bookingData.partner1Name = body.partner1Name;
+    if (body.partner1Gender) bookingData.partner1Gender = body.partner1Gender;
+    if (body.partner2Name) bookingData.partner2Name = body.partner2Name;
+    if (body.partner2Gender) bookingData.partner2Gender = body.partner2Gender;
+    if (body.proposerName) bookingData.proposerName = body.proposerName;
+    if (body.proposalPartnerName) bookingData.proposalPartnerName = body.proposalPartnerName;
+    if (body.valentineName) bookingData.valentineName = body.valentineName;
+    if (body.dateNightName) bookingData.dateNightName = body.dateNightName;
+    if (body.occasionPersonName) bookingData.occasionPersonName = body.occasionPersonName;
+
     // Update booking in database
-    const result = await database.updateBooking(bookingId, bookingData);
+    console.log('💾 Updating booking in database:', { bookingId, bookingData });
+    // Provide aliases for manual booking updater
+    bookingData.theater = bookingData.theaterName;
+    bookingData.amount = bookingData.totalAmount;
+    bookingData.customerName = bookingData.name;
+
+    let result = await database.updateBooking(bookingId, bookingData);
+    console.log('📊 Database update result (booking):', result);
+
+    // Fallback: if not found in regular bookings, try manual bookings
+    if (!result.success && /not found/i.test(result.error || '')) {
+      console.log('↩️ Falling back to update manual booking collection');
+      // @ts-ignore - function exists in db-connect
+      const manualResult = await database.updateManualBooking(bookingId, bookingData);
+      console.log('📊 Database update result (manual):', manualResult);
+      if (manualResult.success && manualResult.booking) {
+        result = manualResult as any;
+      } else {
+        return NextResponse.json({ success: false, error: manualResult.error || 'Booking not found' }, { status: 404 });
+      }
+    }
 
     if (result.success && result.booking) {
-      console.log('✅ Booking updated in FeelME Town database:', {
-        id: result.booking.id,
-        name: result.booking.name,
-        theater: result.booking.theaterName,
-        date: result.booking.date,
-        time: result.booking.time,
-        total: result.booking.totalAmount
-      });
+      
 
-      // Send email in background (non-blocking for faster response)
-      emailService.sendBookingComplete(result.booking).catch(error => {
-        console.log('⚠️ Email service error (background):', error);
+      // Send confirmation email in background (no invoice attachment)
+      emailService.sendBookingConfirmed(result.booking).catch(error => {
+        // Email service error handled
       });
 
       return NextResponse.json({
@@ -262,11 +299,11 @@ export async function PUT(
     }
 
   } catch (error) {
-    console.error('❌ Error updating booking data:', error);
+    console.error('❌ PUT /api/booking/[id] Error:', error);
     return NextResponse.json(
       { 
         success: false, 
-        error: 'Failed to update booking data. Please try again.' 
+        error: error instanceof Error ? error.message : 'Failed to update booking data. Please try again.' 
       },
       { status: 500 }
     );

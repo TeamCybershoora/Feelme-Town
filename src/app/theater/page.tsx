@@ -1,10 +1,11 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useDatePicker } from '@/contexts/DatePickerContext';
 import { useBooking } from '@/contexts/BookingContext';
+// Removed getDefaultTimeSlots import - no hardcoded time slots
 
 export default function Theater() {
     const { openBookingPopup, setIncompleteBookingData, openCancelBookingPopup, resetPopupState } = useBooking();
@@ -25,13 +26,189 @@ export default function Theater() {
     const [isLoadingBookedSlots, setIsLoadingBookedSlots] = useState(false);
     const [isBookingInProgress, setIsBookingInProgress] = useState(false);
     const bookingClickRef = useRef(false);
+    
+    // Slideshow states
+    const [theaters, setTheaters] = useState<any[]>([]);
+    const [isLoadingTheaters, setIsLoadingTheaters] = useState(true);
+    // Selected theater image index for gallery
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
+    // Auto slideshow state - Always enabled by default
+    const [isAutoSlideshow, setIsAutoSlideshow] = useState(true);
+    // Theater card image indices for mini slideshows
+    const [theaterCardImageIndices, setTheaterCardImageIndices] = useState<{[key: number]: number}>({});
+    // Animation trigger state to force re-render
+    const [animationTrigger, setAnimationTrigger] = useState(0);
+
+    // Slideshow timing to match About page feel
+    const THEATER_SLIDE_DURATION_MS = 4000;
 
     // Use global date picker
     const { selectedDate, openDatePicker, setSelectedDate } = useDatePicker();
+
+    // Fetch theaters from database (optimized for speed)
+    const fetchTheaters = async (showLoading = true) => {
+        try {
+            if (showLoading) {
+                setIsLoadingTheaters(true);
+            }
+            
+            const response = await fetch('/api/admin/theaters', {
+                cache: 'no-cache',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
+            
+            
+            
+            
+            const data = await response.json();
+            
+            
+            if (data.success && data.theaters) {
+                
+                
+                // Deep database inspection for each theater with decompression
+                data.theaters.forEach((theater: any, index: number) => {
+                    
+                    
+                    
+                    
+                    
+                    
+                    // General images field analysis for all theaters
+                    
+                    
+                    
+                    
+                    
+                    
+                    if (theater.images) {
+                        if (typeof theater.images === 'string') {
+                            
+                            
+                            
+                            // Try to parse if it looks like JSON
+                            if (theater.images.startsWith('[') || theater.images.startsWith('{')) {
+                                try {
+                                    const parsed = JSON.parse(theater.images);
+                                    
+                                    
+                                    
+                                } catch (e) {
+                                    
+                                }
+                            }
+                        } else if (Array.isArray(theater.images)) {
+                            
+                            
+                        }
+                    }
+                    
+                    // Check single image field
+                    
+                    
+                    
+                    
+                    
+                });
+                // Transform database theaters to match frontend structure
+                const transformedTheaters = data.theaters.map((theater: any, index: number) => {
+                    return {
+                        id: index + 1,
+                        name: theater.name,
+                        image: theater.image || theater.images?.[0] || '/images/default-theater.jpg',
+                        capacity: (() => {
+                            const min = theater.capacity.min;
+                            const max = theater.capacity.max;
+                            
+                            if (min === max) {
+                                // Same min and max
+                                const result = `For ${max} or Less People`;
+                                
+                                return result;
+                            } else {
+                                // Different min and max
+                                const result = `For ${min} or Less People, Expandable upto ${max} People`;
+                                
+                                return result;
+                            }
+                        })(),
+                        capacityNumber: theater.capacity.max,
+                        type: theater.type || '', // No hardcoded type fallback
+                        price: `₹ ${theater.price.toLocaleString()}.00`,
+                        features: theater.whatsIncluded || [], // Only database features, no hardcoded fallback
+                        timeSlots: theater.timeSlots || [],
+                        rawTimeSlots: theater.timeSlots || [], // Keep original for processing
+                        images: (() => {
+                            // Handle compressed/string images from database
+                            let imageArray = [];
+                            
+                            if (theater.images) {
+                                if (Array.isArray(theater.images)) {
+                                    imageArray = theater.images.filter(Boolean);
+                                } else if (typeof theater.images === 'string') {
+                                    try {
+                                        // Try to parse JSON string
+                                        const parsed = JSON.parse(theater.images);
+                                        imageArray = Array.isArray(parsed) ? parsed.filter(Boolean) : [theater.images];
+                                    } catch {
+                                        // Not JSON, treat as single URL
+                                        imageArray = [theater.images];
+                                    }
+                                }
+                            }
+                            
+                            // Fallback to single image field
+                            if (imageArray.length === 0 && theater.image) {
+                                imageArray = [theater.image];
+                            }
+                            
+                            // Ensure we have at least one image (default fallback)
+                            if (imageArray.length === 0) {
+                                imageArray = ['/images/default-theater.jpg'];
+                            }
+                            
+                            return imageArray;
+                        })()
+                    };
+                });
+                
+                // Smart change detection for real-time updates
+                const theatersChanged = JSON.stringify(transformedTheaters) !== JSON.stringify(theaters);
+                if (theatersChanged || theaters.length === 0) {
+                    
+                    
+                    setTheaters(transformedTheaters);
+                    
+                    // Log what changed
+                    if (theaters.length > 0) {
+                        
+                    }
+                } else {
+                    
+                }
+            } else {
+                
+                
+                // No fallback - only database theaters
+            }
+        } catch (error) {
+            
+            
+            // No fallback - only database theaters
+        } finally {
+            if (showLoading) {
+                setIsLoadingTheaters(false);
+            }
+        }
+    };
+
+    // No hardcoded theaters - 100% database driven
     
     // Monitor popup state for debugging
     useEffect(() => {
-        console.log('🔍 Popup state changed:', { isBookingInProgress, bookingClickRef: bookingClickRef.current });
+        
     }, [isBookingInProgress]);
     
     // Reset booking button state when popup is closed
@@ -49,18 +226,35 @@ export default function Theater() {
         };
     }, []);
 
+    // Fetch theaters on component mount
+    useEffect(() => {
+        fetchTheaters();
+    }, []);
+
+
+    // Real-time theater updates every 5 seconds
+    useEffect(() => {
+        const interval = setInterval(() => {
+            
+            fetchTheaters(false); // Silent refresh without loading indicator
+        }, 5000); // 5 seconds for real-time updates
+
+        return () => clearInterval(interval);
+    }, []);
+
     useEffect(() => {
         const timer = setInterval(() => {
             setCurrentTime(new Date());
-        }, 1000);
+        }, 2000); // Update current time every 2 seconds
 
         return () => clearInterval(timer);
     }, []);
 
+
     const fetchIncompleteBooking = useCallback(async (bookingId: string, email: string) => {
         // Prevent multiple simultaneous fetches for the same booking
         if (isFetchingIncompleteBooking || fetchedBookingIds.has(bookingId)) {
-            console.log('⏸️ Fetch already in progress or already fetched for booking:', bookingId);
+            
             return;
         }
 
@@ -73,7 +267,7 @@ export default function Theater() {
         try {
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    console.log(`📞 Fetching incomplete booking data (attempt ${attempt}/${maxRetries}):`, { bookingId, email });
+                    
 
                     // Get all incomplete bookings with retry mechanism
                     const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
@@ -92,10 +286,10 @@ export default function Theater() {
 
                     const result = await response.json();
 
-                    console.log('📋 API Response:', result);
+                    
 
                     if (result.success) {
-                        console.log('📝 Available incomplete bookings:', result.incompleteBookings);
+                        
 
                         // Find the specific incomplete booking
                         const incompleteBooking = result.incompleteBookings.find((booking: { bookingId: string; email: string }) =>
@@ -103,7 +297,7 @@ export default function Theater() {
                         );
 
                         if (incompleteBooking) {
-                            console.log('✅ Found incomplete booking:', incompleteBooking);
+                            
 
                             // Set incomplete booking data in context
                             setIncompleteBookingData(incompleteBooking);
@@ -113,45 +307,42 @@ export default function Theater() {
 
                             // Open booking popup automatically with incomplete data
                             setTimeout(() => {
-                                console.log('🎯 Opening booking popup with incomplete data...');
+                                
                                 openBookingPopup(undefined, undefined, undefined, incompleteBooking);
                             }, 1000);
 
                             return; // Success, exit retry loop
                         } else {
-                            console.log('❌ Incomplete booking not found or expired');
-                            console.log('🔍 Searched for:', { bookingId, email });
-                            console.log('📋 Available bookings:', result.incompleteBookings.map((b: { bookingId: string; email: string }) => ({
-                                id: b.bookingId,
-                                email: b.email
-                            })));
+                            
+                            
+                            
                             return; // Not found, but no need to retry
                         }
                     } else {
-                        console.log('❌ API request failed:', result.error);
+                        
                         return; // API error, no need to retry
                     }
 
                 } catch (error) {
                     lastError = error instanceof Error ? error : new Error('Unknown error');
-                    console.error(`❌ Attempt ${attempt} failed:`, lastError.message);
+                    
 
                     if (attempt < maxRetries) {
-                        console.log(`⏳ Retrying in ${attempt * 1000}ms...`);
+                        
                         await new Promise(resolve => setTimeout(resolve, attempt * 1000));
                     }
                 }
             }
 
             // All retries failed
-            console.error('❌ All retry attempts failed for incomplete booking fetch');
+            
             if (lastError) {
                 if (lastError.message.includes('Failed to fetch')) {
-                    console.log('🌐 Network error - server might be down or unreachable');
+                    
                 } else if (lastError.message.includes('HTTP error')) {
-                    console.log('🔧 Server error - API endpoint issue');
+                    
                 } else {
-                    console.log('⚠️ Unexpected error:', lastError.message);
+                    
                 }
             }
         } finally {
@@ -160,32 +351,28 @@ export default function Theater() {
         }
     }, [setIncompleteBookingData, openBookingPopup, isFetchingIncompleteBooking, fetchedBookingIds]);
 
-    // Handle incomplete booking from email link
+    // Handle incomplete booking from email link and movie selection
     useEffect(() => {
         const bookingId = searchParams.get('bookingId');
         const email = searchParams.get('email');
         const newBooking = searchParams.get('newBooking');
         const cancelBookingId = searchParams.get('cancelBookingId');
         const reopenBooking = searchParams.get('reopenBooking');
+        const movieTitle = searchParams.get('movie');
 
-        console.log('🔍 URL Parameters check:', {
-            bookingId,
-            email,
-            newBooking,
-            cancelBookingId,
-            reopenBooking,
-            currentUrl: typeof window !== 'undefined' ? window.location.href : 'server-side',
-            allParams: Object.fromEntries(searchParams.entries()),
-            isFetching: isFetchingIncompleteBooking,
-            alreadyFetched: fetchedBookingIds.has(bookingId || '')
-        });
+        // Handle movie selection from movies page
+        if (movieTitle && !bookingId && !cancelBookingId) {
+            // Movie selected from movies page - just store it, don't auto-open popup
+            // User will manually select theater and click "Book Theater" button
+            console.log('🎬 Theater Page: Movie parameter detected:', movieTitle);
+        }
 
         if (reopenBooking === 'true') {
-            console.log('🎬 Reopening booking popup after movie selection');
+            
             // Get selected movie from sessionStorage (don't clear it yet)
             const selectedMovie = sessionStorage.getItem('selectedMovie');
             if (selectedMovie) {
-                console.log('🎬 Selected movie found:', selectedMovie);
+                
                 // Don't clear sessionStorage here - let the booking popup handle it
             }
 
@@ -195,58 +382,68 @@ export default function Theater() {
                 openBookingPopup(filteredTheaters[selectedTheater], selectedDate, selectedTimeSlot);
             }, 500);
         } else if (bookingId && email && !isFetchingIncompleteBooking && !fetchedBookingIds.has(bookingId)) {
-            console.log('🔗 Incomplete booking link detected:', { bookingId, email });
+            
             // Add small delay to ensure page is fully loaded
             setTimeout(() => {
                 fetchIncompleteBooking(bookingId, email);
             }, 100);
         } else if (newBooking === 'true') {
-            console.log('🆕 Fresh booking request detected - opening booking popup');
+            
             // Reset popup state and open fresh booking popup without any pre-filled data
             setTimeout(() => {
                 resetPopupState();
                 openBookingPopup();
             }, 500);
         } else if (cancelBookingId && email && !fetchedCancelBookingIds.has(cancelBookingId)) {
-            console.log('❌ Cancel booking link detected:', { cancelBookingId, email });
+            
             // Mark as fetched to prevent duplicate requests
             setFetchedCancelBookingIds(prev => new Set(prev).add(cancelBookingId));
             // Fetch booking data and open cancel popup
             setTimeout(async () => {
                 try {
-                    console.log('📞 Fetching cancel booking data:', { bookingId: cancelBookingId, email });
+                    
 
                     const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
                     const response = await fetch(`${baseUrl}/api/booking/${cancelBookingId}?email=${encodeURIComponent(email)}`);
                     const result = await response.json();
 
                     if (result.success && result.booking) {
-                        console.log('✅ Cancel booking data fetched successfully:', result.booking);
+                        
                         // Open cancel booking popup with the fetched data
                         openCancelBookingPopup(result.booking);
                     } else {
-                        console.log('ℹ️ Booking not found - may have been already cancelled:', result.error);
+                        
                         // Open cancel booking popup with null data to show "booking not found" message
                         openCancelBookingPopup(null);
                     }
                 } catch (error) {
-                    console.error('❌ Error fetching cancel booking data:', error);
+                    
                     // Open cancel booking popup with null data to show "booking not found" message
                     openCancelBookingPopup(null);
                 }
             }, 100);
         } else if (cancelBookingId && email) {
-            console.log('⏸️ Skipping cancel booking fetch - already processed for booking:', cancelBookingId);
+            
         } else if (bookingId && email) {
-            console.log('⏸️ Skipping fetch - already in progress or completed for booking:', bookingId);
+            
         } else {
-            console.log('❌ No special parameters detected');
+            
         }
     }, [searchParams, fetchIncompleteBooking, openBookingPopup, openCancelBookingPopup, isFetchingIncompleteBooking, fetchedBookingIds, fetchedCancelBookingIds, selectedTheater, selectedDate, selectedTimeSlot]);
 
     const handleTheaterSelection = (index: number) => {
         setSelectedTheater(index);
         setSelectedTimeSlot('');
+        // Reset gallery to first image when switching theater
+        setCurrentImageIndex(0);
+
+        // Scroll to theater details section
+        setTimeout(() => {
+            theaterDetailsRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start'
+            });
+        }, 100); // Small delay to ensure state update
 
         // Fetch booked slots for the new theater
         if (selectedDate && filteredTheaters[index]?.name) {
@@ -259,11 +456,11 @@ export default function Theater() {
                     if (data.success) {
                         setBookedTimeSlots(data.bookedTimeSlots);
                     } else {
-                        console.error('Failed to fetch booked slots:', data.error);
+                        
                         setBookedTimeSlots([]);
                     }
                 } catch (error) {
-                    console.error('Error fetching booked slots:', error);
+                    
                     setBookedTimeSlots([]);
                 } finally {
                     setIsLoadingBookedSlots(false);
@@ -272,107 +469,61 @@ export default function Theater() {
 
             fetchBookedSlots();
         }
-
-        // Auto-scroll to theater details section
-        setTimeout(() => {
-            if (theaterDetailsRef.current) {
-                theaterDetailsRef.current.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
-            }
-        }, 100);
     };
 
+    // Filter theaters based on search term, type, and member count (memoized)
+    const filteredTheaters = useMemo(() => {
+        return theaters.filter(theater => {
+            const matchesSearch = theater.name.toLowerCase().includes(searchTerm.toLowerCase());
+            const matchesType = filterType === 'all' || theater.type === filterType;
+            const matchesMemberCount = theater.capacityNumber >= memberCount;
+            return matchesSearch && matchesType && matchesMemberCount;
+        });
+    }, [theaters, searchTerm, filterType, memberCount]);
 
+    // Auto slideshow for main theater images - Matches About page timing
+    useEffect(() => {
+        if (!filteredTheaters.length) return;
 
-    const theaters = useMemo(() => [
-        {
-            id: 1,
-            name: "EROS (Couples ) (FMT-Hall-1)",
-            image: "/images/theater1.webp",
-            capacity: "For 2 or Less People",
-            capacityNumber: 2,
-            type: "couples",
-            price: "₹ 1399.00",
-            features: [
-                "Conferrable & Luxurious Recliners",
-                "Experience 152 inch Full HD Screen",
-                "Experience 5.1 Surround Sound System",
-                "Add cakes and gifts in next step",
-                "Food can be ordered at theater",
-                "₹ 750 Additional for Decoration",
-                "Free cancellation up to 72 hrs before slot"
-            ]
-        },
-        {
-            id: 2,
-            name: "PHILIA (FRIENDS) (FMT-Hall-2)",
-            image: "/images/theater2.webp",
-            capacity: "For 4 or Less People",
-            capacityNumber: 4,
-            type: "friends",
-            price: "₹ 1999.00",
-            features: [
-                "Comfortable & Luxurious Recliners",
-                "Experience 152 inch Full HD Screen",
-                "Experience 5.1 Surround Sound System",
-                "Add cakes and gifts in next step",
-                "Food can be ordered at theater",
-                "₹ 750 Additional for Decoration",
-                "Free cancellation up to 72 hrs before slot"
-            ]
-        },
-        {
-            id: 3,
-            name: "PRAGMA (LOVE) (FMT-Hall-3)",
-            image: "/images/theater3.webp",
-            capacity: "For 4 or Less People, Expandable upto 8 People",
-            capacityNumber: 8,
-            type: "love",
-            price: "₹ 2999.00",
-            features: [
-                "Conferrable & Luxurious Recliners",
-                "₹ 400 / extra person after 4 people",
-                "Experience 172 inch Full HD Screen",
-                "Experience 5.1 Surround Sound System",
-                "Add cakes and gifts in next step",
-                "Food can be ordered at theater",
-                "₹ 750 Additional for Decoration",
-                "Free cancellation up to 72 hrs before slot"
-            ]
-        },
-        {
-            id: 4,
-            name: "STORGE (FAMILY) (FMT-Hall-4)",
-            image: "/images/theater4.webp",
-            capacity: "For 4 or Less People, Expandable upto 12 People",
-            capacityNumber: 12,
-            type: "family",
-            price: "₹ 3999.00",
-            features: [
-                "Conferrable & Luxurious Recliners",
-                "₹ 400/extra person after 4 people",
-                "Experience 172 inch Full HD Screen",
-                "Experience 5.1 Surround Sound System",
-                "Add cakes and gifts in next step",
-                "Food can be ordered at theater",
-                "₹ 750 Additional for Decoration",
-                "Free cancellation up to 72 hrs before slot"
-            ]
-        }
-    ], []);
+        const currentTheater = filteredTheaters[selectedTheater] || filteredTheaters[0];
+        const imagesCount = currentTheater?.images?.length || 0;
+        
+        if (imagesCount <= 1) return; // No need for slideshow with single image
 
-    // Filter theaters based on search term, type, and member count
-    const filteredTheaters = theaters.filter(theater => {
-        const matchesSearch = theater.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const interval = setInterval(() => {
+            setCurrentImageIndex(prev => {
+                const nextIndex = (prev + 1) % imagesCount;
+                // Force animation trigger for smooth transitions
+                setAnimationTrigger(trigger => trigger + 1);
+                return nextIndex;
+            });
+        }, THEATER_SLIDE_DURATION_MS); // Change image based on About page cycle
 
-        const matchesType = filterType === 'all' || theater.type === filterType;
+        return () => clearInterval(interval);
+    }, [selectedTheater, filteredTheaters]);
 
-        const matchesMemberCount = theater.capacityNumber >= memberCount;
+    // Auto slideshow for theater cards - Always running, every 2 seconds
+    useEffect(() => {
+        const intervals: NodeJS.Timeout[] = [];
 
-        return matchesSearch && matchesType && matchesMemberCount;
-    });
+        filteredTheaters.forEach((theater, index) => {
+            const imagesCount = theater?.images?.length || 0;
+            if (imagesCount > 1) {
+                const interval = setInterval(() => {
+                    setTheaterCardImageIndices(prev => ({
+                        ...prev,
+                        [index]: ((prev[index] || 0) + 1) % imagesCount
+                    }));
+                }, 2000 + (index * 200)); // Stagger slightly, but faster - every 2 seconds
+
+                intervals.push(interval);
+            }
+        });
+
+        return () => {
+            intervals.forEach(interval => clearInterval(interval));
+        };
+    }, [filteredTheaters]);
 
     // Fetch booked time slots only when date changes
     useEffect(() => {
@@ -387,11 +538,11 @@ export default function Theater() {
                 if (data.success) {
                     setBookedTimeSlots(data.bookedTimeSlots);
                 } else {
-                    console.error('Failed to fetch booked slots:', data.error);
+                    
                     setBookedTimeSlots([]);
                 }
             } catch (error) {
-                console.error('Error fetching booked slots:', error);
+                
                 setBookedTimeSlots([]);
             } finally {
                 setIsLoadingBookedSlots(false);
@@ -403,22 +554,25 @@ export default function Theater() {
 
     // Listen for real-time slot refresh events
     useEffect(() => {
-        const handleRefreshBookedSlots = () => {
+        const handleRefreshBookedSlots = (event?: any) => {
+            console.log('🔄 Theater page received refreshBookedSlots event:', event?.detail);
             if (selectedDate && filteredTheaters[selectedTheater]?.name) {
                 const fetchBookedSlots = async () => {
+                    console.log('🔄 Theater page fetching booked slots after refresh event...');
                     setIsLoadingBookedSlots(true);
                     try {
                         const response = await fetch(`/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`);
                         const data = await response.json();
 
                         if (data.success) {
+                            console.log('🔄 Theater page updated booked slots:', data.bookedTimeSlots);
                             setBookedTimeSlots(data.bookedTimeSlots);
                         } else {
-                            console.error('Failed to fetch booked slots:', data.error);
+                            console.error('🔄 Theater page failed to fetch booked slots:', data.error);
                             setBookedTimeSlots([]);
                         }
                     } catch (error) {
-                        console.error('Error fetching booked slots:', error);
+                        console.error('🔄 Theater page error fetching booked slots:', error);
                         setBookedTimeSlots([]);
                     } finally {
                         setIsLoadingBookedSlots(false);
@@ -426,15 +580,181 @@ export default function Theater() {
                 };
 
                 fetchBookedSlots();
+                
+                // Also refresh theater data to ensure time slots are up to date
+                console.log('🔄 Theater page also refreshing theater data after booking change...');
+                fetchTheaters(false); // Silent refresh without loading indicator
+            } else {
+                console.log('🔄 Theater page refresh event ignored - missing date or theater:', {
+                    selectedDate,
+                    theaterName: filteredTheaters[selectedTheater]?.name
+                });
             }
         };
 
         window.addEventListener('refreshBookedSlots', handleRefreshBookedSlots);
 
+        // Also listen for the more specific force refresh event
+        const handleForceRefreshTheaterSlots = (event: any) => {
+            console.log('🔄 Theater page received forceRefreshTheaterSlots event:', event.detail);
+            const { date, theater, originalDate, originalTheater } = event.detail;
+            
+            // Check if this affects the current theater/date
+            const affectsCurrentTheater = theater === filteredTheaters[selectedTheater]?.name || 
+                                        originalTheater === filteredTheaters[selectedTheater]?.name;
+            const affectsCurrentDate = date === selectedDate || originalDate === selectedDate;
+            
+            if (affectsCurrentTheater && affectsCurrentDate) {
+                console.log('🔄 Force refreshing theater slots due to booking change...');
+                handleRefreshBookedSlots(event);
+                
+                // Also refresh theater data to ensure time slots are up to date
+                console.log('🔄 Force refresh also updating theater data...');
+                fetchTheaters(false); // Silent refresh without loading indicator
+                
+                // Also add a second refresh after a short delay to ensure data is updated
+                setTimeout(() => {
+                    console.log('🔄 Second refresh to ensure data is updated...');
+                    handleRefreshBookedSlots(event);
+                    // Second theater data refresh
+                    fetchTheaters(false);
+                }, 1000);
+            } else {
+                console.log('🔄 Force refresh event ignored - does not affect current theater/date');
+            }
+        };
+
+        window.addEventListener('forceRefreshTheaterSlots', handleForceRefreshTheaterSlots);
+
+        // Also listen for direct theater data refresh events
+        const handleDirectRefreshTheaterData = (event: any) => {
+            console.log('🔄 Theater page received directRefreshTheaterData event:', event.detail);
+            const { reason, date, theater, originalDate, originalTheater } = event.detail;
+            
+            if (reason === 'booking_updated') {
+                console.log('🔄 Direct refresh triggered by booking update...');
+                
+                // Force refresh both theater data and booked slots
+                fetchTheaters(false); // Silent refresh
+                
+                // Also refresh booked slots if we have the required data
+                if (selectedDate && filteredTheaters[selectedTheater]?.name) {
+                    const fetchBookedSlots = async () => {
+                        try {
+                            const response = await fetch(`/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`);
+                            const data = await response.json();
+                            
+                            if (data.success) {
+                                console.log('🔄 Direct refresh updated booked slots:', data.bookedTimeSlots);
+                                setBookedTimeSlots(data.bookedTimeSlots);
+                            }
+                        } catch (error) {
+                            console.error('🔄 Direct refresh error fetching booked slots:', error);
+                        }
+                    };
+                    
+                    fetchBookedSlots();
+                }
+            }
+        };
+
+        window.addEventListener('directRefreshTheaterData', handleDirectRefreshTheaterData);
+
         return () => {
             window.removeEventListener('refreshBookedSlots', handleRefreshBookedSlots);
+            window.removeEventListener('forceRefreshTheaterSlots', handleForceRefreshTheaterSlots);
+            window.removeEventListener('directRefreshTheaterData', handleDirectRefreshTheaterData);
         };
     }, [selectedDate, selectedTheater, filteredTheaters]);
+
+    // Real-time booked slots refresh - instant updates when database changes
+    useEffect(() => {
+        // Immediate fetch on component mount/change
+        if (selectedDate && filteredTheaters[selectedTheater]?.name) {
+            const fetchBookedSlotsImmediate = async () => {
+                try {
+                    const apiUrl = `/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`;
+                    
+                    
+                    const response = await fetch(apiUrl);
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        
+                        setBookedTimeSlots(data.bookedTimeSlots);
+                    }
+                } catch (error) {
+                    
+                }
+            };
+            
+            fetchBookedSlotsImmediate();
+        }
+        
+        const refreshTimer = setInterval(() => {
+            // Real-time refresh of booked slots for current theater
+            if (selectedDate && filteredTheaters[selectedTheater]?.name) {
+                const fetchBookedSlots = async () => {
+                    try {
+                        const apiUrl = `/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`;
+                        
+                        
+                        const response = await fetch(apiUrl);
+                        const data = await response.json();
+                        
+                        
+
+                        if (data.success) {
+                            // Real-time update of booked time slots from database booking collection
+                            const previousSlots = bookedTimeSlots;
+                            
+                            
+                            setBookedTimeSlots(data.bookedTimeSlots);
+                            
+                            // Real-time change detection for instant updates
+                            if (JSON.stringify(previousSlots) !== JSON.stringify(data.bookedTimeSlots)) {
+                                
+                                
+                                
+                                
+                                // Calculate what changed
+                                const newBookings = data.bookedTimeSlots.filter((slot: string) => !previousSlots.includes(slot));
+                                const cancelledBookings = previousSlots.filter((slot: string) => !data.bookedTimeSlots.includes(slot));
+                                
+                                if (newBookings.length > 0) {
+                                    
+                                }
+                                if (cancelledBookings.length > 0) {
+                                    
+                                }
+                                
+                                // Trigger visual update event for instant UI refresh
+                                const event = new CustomEvent('slotsUpdated', { 
+                                    detail: { newBookings, cancelledBookings } 
+                                });
+                                window.dispatchEvent(event);
+                            } else {
+                                
+                            }
+                        } else {
+                            
+                            
+                            setBookedTimeSlots([]);
+                        }
+                    } catch (error) {
+                        
+                        
+                    }
+                };
+
+                fetchBookedSlots();
+            }
+        }, 1000); // Real-time check every 1 second for instant booked slots updates
+
+        return () => clearInterval(refreshTimer);
+    }, [selectedDate, selectedTheater, filteredTheaters, bookedTimeSlots]);
+
+
 
     const preFillBookingData = useCallback((bookingData: { date?: string; numberOfPeople?: number; time?: string; theaterName?: string }) => {
         // Set date if available
@@ -462,12 +782,7 @@ export default function Theater() {
             }
         }
 
-        console.log('📝 Pre-filled booking data:', {
-            date: bookingData.date,
-            memberCount: bookingData.numberOfPeople,
-            timeSlot: bookingData.time,
-            theaterName: bookingData.theaterName
-        });
+        
     }, [setSelectedDate, setMemberCount, setSelectedTimeSlot, setSelectedTheater, theaters]);
 
     return (
@@ -509,6 +824,20 @@ export default function Theater() {
                                     second: '2-digit',
                                     hour12: true
                                 })}</span>
+                                <span style={{
+                                    marginLeft: '70px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    fontSize: '0.8em',
+                                    color: '#ff0000',
+                                    backgroundColor: '#ffffff',
+                                    padding: '4px 8px',
+                                    borderRadius: '20px',
+                                    border: '1px solid #ff0000'
+                                }}>
+                                    <span className="live-indicator-dot"></span>
+                                    LIVE
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -559,10 +888,12 @@ export default function Theater() {
                                     className={`filter-dropdown ${isTypeDropdownOpen ? 'open' : ''}`}
                                 >
                                     <option value="all">All Theaters</option>
-                                    <option value="couples">Couples</option>
-                                    <option value="friends">Friends</option>
-                                    <option value="love">Love</option>
-                                    <option value="family">Family</option>
+                                    {/* Dynamic theater types from database */}
+                                    {Array.from(new Set(theaters.map(t => t.type).filter(type => type && type.trim() !== ''))).map(type => (
+                                        <option key={type} value={type}>
+                                            {type.charAt(0).toUpperCase() + type.slice(1)}
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
 
@@ -577,18 +908,12 @@ export default function Theater() {
                                     onMouseDown={() => setIsMemberDropdownOpen(!isMemberDropdownOpen)}
                                     className={`filter-dropdown ${isMemberDropdownOpen ? 'open' : ''}`}
                                 >
-                                    <option value={1}>1 Member</option>
-                                    <option value={2}>2 Members</option>
-                                    <option value={3}>3 Members</option>
-                                    <option value={4}>4 Members</option>
-                                    <option value={5}>5 Members</option>
-                                    <option value={6}>6 Members</option>
-                                    <option value={7}>7 Members</option>
-                                    <option value={8}>8 Members</option>
-                                    <option value={9}>9 Members</option>
-                                    <option value={10}>10 Members</option>
-                                    <option value={11}>11 Members</option>
-                                    <option value={12}>12 Members</option>
+                                    {/* Dynamic member count based on max theater capacity */}
+                                    {Array.from({length: Math.max(...theaters.map(t => t.capacityNumber || 1), 1)}, (_, i) => i + 1).map(count => (
+                                        <option key={count} value={count}>
+                                            {count} {count === 1 ? 'Member' : 'Members'}
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
                         </div>
@@ -596,43 +921,123 @@ export default function Theater() {
                 </div>
             </section>
 
-            {/* Theater Grid Section */}
-            <section className="theater-grid-section">
+            {/* Theater Selection Section */}
+            <section className="theater-selection-section">
                 <div className="container">
-                    <div className="theater-grid">
-                        {filteredTheaters.map((theater, index) => (
+                    {/* Section Header */}
+                    <div className="selection-header">
+                        <h2 className="selection-title">Select Your Theater</h2>
+                        <p className="selection-subtitle">Choose from our premium private theaters</p>
+                        <div className="selection-divider"></div>
+                    </div>
+
+                    {/* Theater Cards Grid */}
+                    <div className="theater-cards-grid">
+                        {isLoadingTheaters ? (
+                            <div className="loading-theaters">
+                                <div className="loading-spinner"></div>
+                                <p>Loading theaters...</p>
+                            </div>
+                        ) : filteredTheaters.length === 0 ? (
+                            <div className="no-theaters">
+                                <p>No theaters found matching your criteria.</p>
+                            </div>
+                        ) : (
+                            filteredTheaters.map((theater, index) => (
                             <div
-                                key={theater.id}
-                                className={`theater-card ${selectedTheater === index ? 'active' : ''}`}
+                                key={`${theater.name}-${theater.id}`}
+                                className={`theater-selection-card ${selectedTheater === index ? 'selected' : ''}`}
                                 onClick={() => handleTheaterSelection(index)}
                             >
+                                {/* Selection Badge */}
                                 {selectedTheater === index && (
-                                    <div className="selected-tag">
+                                    <div className="selection-badge">
+                                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                                            <circle cx="10" cy="10" r="10" fill="#FF0005"/>
+                                            <path d="M6 10l2 2 6-6" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                        </svg>
                                         <span>Selected</span>
                                     </div>
                                 )}
-                                <div className="theater-image-container">
-                                    <div className="theater-glow"></div>
-                                    <Image
-                                        src={theater.image}
-                                        alt={theater.name}
-                                        width={400}
-                                        height={300}
-                                        className="theater-image"
-                                    />
-                                    <div className="theater-overlay">
-                                        <div className="theater-info">
-                                            <h3 className="theater-name">{theater.name}</h3>
-                                            <p className="theater-capacity">{theater.capacity}</p>
-                                        </div>
-                                        <div className="theater-instructions">
-                                            <p className="select-text">Select Your Theater</p>
-                                            <p className="scroll-text">Scroll Down to Next</p>
-                                        </div>
+
+                                {/* Theater Image */}
+                                <div className="card-image-container">
+                                    <div className="card-image-glow"></div>
+                                    {(() => {
+                                        // Get current image for this theater card
+                                        const currentCardImageIndex = theaterCardImageIndices[index] || 0;
+                                        const theaterImages = theater.images || [];
+                                        const displayImage = theaterImages.length > 0 
+                                            ? theaterImages[currentCardImageIndex] || theater.image
+                                            : theater.image;
+                                        
+                                        return (
+                                            <>
+                                                <Image
+                                                    key={`${theater.name}-card-${currentCardImageIndex}`}
+                                                    src={displayImage}
+                                                    alt={theater.name}
+                                                    width={400}
+                                                    height={280}
+                                                    className="card-theater-image"
+                                                />
+                                                {/* Image indicators for multiple images */}
+                                                {theaterImages.length > 1 && (
+                                                    <div className="card-image-indicators">
+                                                        {theaterImages.map((_: string, imgIndex: number) => (
+                                                            <div
+                                                                key={imgIndex}
+                                                                className={`indicator-dot ${imgIndex === currentCardImageIndex ? 'active' : ''}`}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {/* Image count badge */}
+                                                {theaterImages.length > 1 && (
+                                                    <div className="card-image-count">
+                                                        {currentCardImageIndex + 1}/{theaterImages.length}
+                                                    </div>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
+                                </div>
+
+                                {/* Theater Information */}
+                                <div className="card-content">
+                                    <h3 className="card-theater-name">{theater.name}</h3>
+                                    <div className="card-capacity">
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="capacity-icon">
+                                            <path d="M8 8a3 3 0 100-6 3 3 0 000 6zM8 10c-2.67 0-8 1.34-8 4v1a1 1 0 001 1h14a1 1 0 001-1v-1c0-2.66-5.33-4-8-4z" fill="currentColor"/>
+                                        </svg>
+                                        <span className="capacity-text">{theater.capacity}</span>
+                                    </div>
+                                    <div className="card-price">
+                                        <span className="price-label">Starting from</span>
+                                        <span className="price-value">{theater.price}</span>
+                                    </div>
+                                </div>
+
+                                {/* Hover Effect Overlay */}
+                                <div className="card-hover-overlay">
+                                    <div className="hover-content">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="select-icon">
+                                            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+                                            <path d="M8 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                        </svg>
+                                        <span>Click to Select</span>
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                        )))}
+                    </div>
+
+                    {/* Scroll Instruction */}
+                    <div className="scroll-instruction">
+                        <p>Scroll down to see theater details and book your slot</p>
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" className="scroll-arrow">
+                            <path d="M5 7.5l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
                     </div>
                 </div>
             </section>
@@ -644,41 +1049,152 @@ export default function Theater() {
                         {/* Left Panel - Theater Information */}
                         <div className="theater-info-panel">
                             <div className="theater-info-content">
-                                <h2 className="detail-title">{filteredTheaters[selectedTheater]?.name || theaters[0].name}</h2>
-                                <div className="detail-price">
-                                    <span className="price-amount">{filteredTheaters[selectedTheater]?.price || theaters[0].price}</span>
-                                </div>
-                                <div className="detail-specs">
-                                    <span className="spec-label">Capacity:</span>
-                                    <span className="spec-value">{filteredTheaters[selectedTheater]?.capacity || theaters[0].capacity}</span>
-                                </div>
+                                {!isLoadingTheaters && filteredTheaters.length > 0 ? (
+                                    <>
+                                        <h2 className="detail-title">{filteredTheaters[selectedTheater]?.name || filteredTheaters[0]?.name}</h2>
+                                        <div className="detail-price">
+                                            <span className="price-amount">{filteredTheaters[selectedTheater]?.price || filteredTheaters[0]?.price}</span>
+                                        </div>
+                                        <div className="detail-specs">
+                                            <span className="spec-label">Capacity:</span>
+                                            <span className="spec-value">{filteredTheaters[selectedTheater]?.capacity || filteredTheaters[0]?.capacity}</span>
+                                        </div>
 
-                                <div className="booking-features">
-                                    <h3 className="features-title">What&apos;s Included</h3>
-                                    <div className="features-list">
-                                        {(filteredTheaters[selectedTheater]?.features || theaters[0].features).map((feature, index) => (
-                                            <div key={index} className="feature-item">
-                                                <div className="feature-checkmark">✓</div>
-                                                <span className="feature-text">{feature}</span>
+                                        <div className="booking-features">
+                                            <h3 className="features-title">What&apos;s Included</h3>
+                                            <div className="features-list">
+                                                {(() => {
+                                                    const features = filteredTheaters[selectedTheater]?.features || filteredTheaters[0]?.features || [];
+                                                    
+                                                    if (!Array.isArray(features) || features.length === 0) {
+                                                        return (
+                                                            <div className="feature-item">
+                                                                <div className="feature-checkmark">ℹ️</div>
+                                                                <span className="feature-text">No features configured for this theater</span>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    
+                                                    return features.map((feature, index) => (
+                                                        <div key={index} className="feature-item">
+                                                            <div className="feature-checkmark">✓</div>
+                                                            <span className="feature-text">{feature}</span>
+                                                        </div>
+                                                    ));
+                                                })()}
                                             </div>
-                                        ))}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="loading-details">
+                                        <p>Loading theater details...</p>
                                     </div>
-                                </div>
+                                )}
                             </div>
                         </div>
 
-                        {/* Right Panel - Theater Image and Booking Controls */}
+                        {/* Right Panel - Theater Image Slideshow and Booking Controls */}
                         <div className="theater-booking-panel">
                             <div className="theater-detail-image">
                                 <div className="detail-glow"></div>
-                                <Image
-                                    src={filteredTheaters[selectedTheater]?.image || theaters[0].image}
-                                    alt={filteredTheaters[selectedTheater]?.name || theaters[0].name}
-                                    width={600}
-                                    height={400}
-                                    className="detail-image"
-                                />
+                                {!isLoadingTheaters && filteredTheaters.length > 0 && (() => {
+                                    const currentTheater = filteredTheaters[selectedTheater] || filteredTheaters[0];
+                                    
+                                    // Build images array strictly for selected theater
+                                    let imagesArray: string[] = [];
+                                    if (currentTheater?.images) {
+                                        if (Array.isArray(currentTheater.images)) {
+                                            imagesArray = currentTheater.images;
+                                        } else if (typeof currentTheater.images === 'string') {
+                                            try {
+                                                const parsed = JSON.parse(currentTheater.images);
+                                                imagesArray = Array.isArray(parsed) ? parsed : [currentTheater.images];
+                                            } catch {
+                                                imagesArray = [currentTheater.images];
+                                            }
+                                        }
+                                } else if (currentTheater?.image) {
+                                    imagesArray = [currentTheater.image];
+                                }
+
+                                // Normalize URLs (Cloudinary http->https) and ensure at least one valid image
+                                imagesArray = (imagesArray || [])
+                                    .filter(Boolean)
+                                    .map((url) => {
+                                        const u = typeof url === 'string' ? url.trim() : '';
+                                        if (u.startsWith('http://res.cloudinary.com')) return u.replace('http://', 'https://');
+                                        return u;
+                                    })
+                                    .filter(Boolean);
+
+                                
+
+                                
+
+                                const currentImage = imagesArray[currentImageIndex] || imagesArray[0];
+
+                                    return (
+                                        <div className="slideshow-container">
+                                            <div className="slideshow-wrapper">
+                                                <div className="slideshow-glow"></div>
+                                                <div className="slideshow-image-container">
+                                                    {imagesArray.map((img: string, i: number) => (
+                                                        <div
+                                                            key={`theater-slide-${i}`}
+                                                            className={`slideshow-image ${i === currentImageIndex ? 'active' : ''}`}
+                                                        >
+                                                            <Image
+                                                                src={img}
+                                                                alt={currentTheater?.name || 'Theater'}
+                                                                width={600}
+                                                                height={400}
+                                                                className="image-content"
+                                                                priority={i === currentImageIndex}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                    <div className="slideshow-overlay"></div>
+                                                    {imagesArray.length > 1 && (
+                                                        <div className="slideshow-progress">
+                                                            <div
+                                                                key={currentImageIndex}
+                                                                className="slideshow-progress-fill"
+                                                                style={{ animationDuration: `${THEATER_SLIDE_DURATION_MS}ms` }}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Navigation Dots (fixed 4 for About-style parity) */}
+                                                {imagesArray.length > 1 && (
+                                                    <div className="slideshow-dots">
+                                                        {Array.from({ length: 4 }).map((_, i) => (
+                                                            <button
+                                                                key={`theater-dot-${i}`}
+                                                                className={`dot ${i === (currentImageIndex % 4) ? 'active' : ''}`}
+                                                                onClick={() => setCurrentImageIndex(i)}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
+
+                            {/* Movie Selection Indicator */}
+                            {searchParams.get('movie') && (
+                                <div className="movie-selection-indicator">
+                                    <div className="movie-indicator-header">
+                                        <span className="movie-icon">🎬</span>
+                                        <span className="movie-label">Selected Movie</span>
+                                    </div>
+                                    <div className="movie-title">
+                                        {decodeURIComponent(searchParams.get('movie') || '')}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="booking-controls">
                                 <div className="date-selection">
@@ -698,112 +1214,189 @@ export default function Theater() {
                                         {isLoadingBookedSlots && <span className="loading-indicator">Checking availability...</span>}
                                     </label>
                                     <div className="time-slots-grid">
-                                        {(() => {
-                                            const allTimeSlots = ['9:00 am - 12:00 pm', '12:30 PM - 03:30 PM', '04:00 PM - 07:00 PM', '07:30 PM - 10:30 PM'];
+                                        {isLoadingBookedSlots ? (
+                                            <div className="loading-time-slots">
+                                                <div className="loading-spinner-small"></div>
+                                                <p>Loading available slots...</p>
+                                            </div>
+                                        ) : (() => {
+                                            // Get time slots from selected theater's database data only
+                                            const selectedTheaterData = filteredTheaters[selectedTheater];
+                                            const dbTimeSlots = selectedTheaterData?.rawTimeSlots || selectedTheaterData?.timeSlots || [];
                                             
-                                            // Function to check if time slot has passed (completely gone)
-                                            const isTimeSlotPassed = (timeSlot: string) => {
-                                                if (!selectedDate) return false;
-                                                
+                                            
+                                            
+                                            // Enhanced time slots processing with better logging
+                                            
+                                            
+                                            
+                                            
+                                            
+                                            // Enhanced helper function to convert 24-hour to 12-hour format
+                                            const formatTo12Hour = (time24: string) => {
                                                 try {
-                                                    const now = new Date();
-                                                    const selectedDateObj = new Date(selectedDate);
+                                                    const [hours, minutes] = time24.split(':');
+                                                    const hour = parseInt(hours);
+                                                    const min = minutes || '00';
                                                     
-                                                    // If selected date is not today, all time slots are available
-                                                    if (selectedDateObj.toDateString() !== now.toDateString()) {
-                                                        return false;
-                                                    }
+                                                    // Convert to 12-hour format
+                                                    const ampm = hour >= 12 ? 'PM' : 'AM';
+                                                    const hour12 = hour % 12 || 12;
                                                     
-                                                    // Parse the time slot to get start time
-                                                    const timeMatch = timeSlot.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
-                                                    if (!timeMatch) return false;
+                                                    const formatted = `${hour12}:${min} ${ampm}`;
                                                     
-                                                    const [, hours, minutes, period] = timeMatch;
-                                                    let hour24 = parseInt(hours);
-                                                    
-                                                    // Convert to 24-hour format
-                                                    if (period.toLowerCase() === 'pm' && hour24 !== 12) {
-                                                        hour24 += 12;
-                                                    } else if (period.toLowerCase() === 'am' && hour24 === 12) {
-                                                        hour24 = 0;
-                                                    }
-                                                    
-                                                    const slotStartTime = new Date(now);
-                                                    slotStartTime.setHours(hour24, parseInt(minutes), 0, 0);
-                                                    
-                                                    // Check if current time is past the slot start time (completely gone)
-                                                    return now.getTime() >= slotStartTime.getTime();
+                                                    return formatted;
                                                 } catch (error) {
-                                                    console.error('Error checking time slot:', error);
-                                                    return false;
+                                                    
+                                                    return time24; // Return original if conversion fails
                                                 }
                                             };
-                                            
-                                            // Function to check if time slot is within 1 hour (Time is going)
-                                            const isTimeSlotGoing = (timeSlot: string) => {
-                                                if (!selectedDate) return false;
+
+                                            // Debug each slot before filtering
+                                            dbTimeSlots.forEach((slot: any, index: number) => {
                                                 
-                                                try {
-                                                    const now = new Date();
-                                                    const selectedDateObj = new Date(selectedDate);
+                                                if (slot && typeof slot === 'object') {
                                                     
-                                                    // If selected date is not today, no slots are "going"
-                                                    if (selectedDateObj.toDateString() !== now.toDateString()) {
-                                                        return false;
-                                                    }
                                                     
-                                                    // Parse the time slot to get start time
-                                                    const timeMatch = timeSlot.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
-                                                    if (!timeMatch) return false;
                                                     
-                                                    const [, hours, minutes, period] = timeMatch;
-                                                    let hour24 = parseInt(hours);
-                                                    
-                                                    // Convert to 24-hour format
-                                                    if (period.toLowerCase() === 'pm' && hour24 !== 12) {
-                                                        hour24 += 12;
-                                                    } else if (period.toLowerCase() === 'am' && hour24 === 12) {
-                                                        hour24 = 0;
-                                                    }
-                                                    
-                                                    const slotStartTime = new Date(now);
-                                                    slotStartTime.setHours(hour24, parseInt(minutes), 0, 0);
-                                                    
-                                                    // Check if current time is within 1 hour of slot start time
-                                                    const oneHourBefore = new Date(slotStartTime.getTime() - (60 * 60 * 1000));
-                                                    return now.getTime() >= oneHourBefore.getTime() && now.getTime() < slotStartTime.getTime();
-                                                } catch (error) {
-                                                    console.error('Error checking time slot going:', error);
-                                                    return false;
                                                 }
-                                            };
+                                            });
+
+                                            // Process database time slots only - no fallback to hardcoded slots
+                                            const allTimeSlots = dbTimeSlots.length > 0 
+                                                ? dbTimeSlots
+                                                    .filter((slot: any) => {
+                                                        // Only filter out slots that are explicitly marked as inactive
+                                                        if (slot && typeof slot === 'object' && slot.hasOwnProperty('isActive')) {
+                                                            return slot.isActive !== false; // Include true, null, undefined, etc.
+                                                        }
+                                                        return true; // Include all other slots (strings, objects without isActive)
+                                                    })
+                                                    .map((slot: any) => {
+                                                        
+                                                        
+                                                        if (typeof slot === 'string') {
+                                                            // Check if string is already in 12-hour format or needs conversion
+                                                            if (slot.includes('AM') || slot.includes('PM') || slot.includes('am') || slot.includes('pm')) {
+                                                                return slot;
+                                                            } else {
+                                                                // Try to convert 24-hour format string to 12-hour
+                                                                const timeRangeMatch = slot.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+                                                                if (timeRangeMatch) {
+                                                                    const [, startHour, startMin, endHour, endMin] = timeRangeMatch;
+                                                                    const startTime12 = formatTo12Hour(`${startHour}:${startMin}`);
+                                                                    const endTime12 = formatTo12Hour(`${endHour}:${endMin}`);
+                                                                    return `${startTime12} - ${endTime12}`;
+                                                                }
+                                                                return slot;
+                                                            }
+                                                        } else if (slot && slot.timeRange) {
+                                                            // Use pre-formatted timeRange if available
+                                                            return slot.timeRange;
+                                                        } else if (slot && slot.startTime && slot.endTime) {
+                                                            // Convert database time slot object to display format
+                                                            try {
+                                                                const startTime12 = formatTo12Hour(slot.startTime);
+                                                                const endTime12 = formatTo12Hour(slot.endTime);
+                                                                const displayFormat = `${startTime12} - ${endTime12}`;
+                                                                
+                                                                return displayFormat;
+                                                            } catch (error) {
+                                                                
+                                                                return `${slot.startTime} - ${slot.endTime}`;
+                                                            }
+                                                        }
+                                                        
+                                                        return String(slot);
+                                                    })
+                                                : []; // Empty array if no database slots
                                             
-                                            // Filter available time slots
-                                            const availableTimeSlots = allTimeSlots.filter(slot => !isTimeSlotPassed(slot));
                                             
-                                            if (availableTimeSlots.length === 0) {
+                                            
+                                            
+                                            
+                                            // Show all time slots - no time-based filtering
+                                            
+                                            
+                                            // If no time slots available from database, show message
+                                            if (allTimeSlots.length === 0) {
                                                 return (
                                                     <div className="no-slots-message">
                                                         <span className="no-slots-icon">🕐</span>
-                                                        <p>Select other date because today time gone</p>
-                                                        <p className="text-sm">All time slots for today have passed</p>
+                                                        <p>No time slots configured for this theater</p>
+                                                        <p className="text-sm">Please contact admin to add time slots</p>
                                                     </div>
                                                 );
                                             }
                                             
-                                            return availableTimeSlots.map((timeSlot) => {
+                                            
+                                            
+                                            
+                                            return allTimeSlots.map((timeSlot: string) => {
                                                 const isBooked = bookedTimeSlots.includes(timeSlot);
                                                 const isSelected = selectedTimeSlot === timeSlot;
-                                                const isGoing = isTimeSlotGoing(timeSlot);
+                                                
+                                                // Debug logging for each slot
+                                                
+                                                
+                                                if (isBooked) {
+                                                    
+                                                }
+                                                
+                                                // Check if slot time is gone (1 hour before start time)
+                                                const isTimeGone = (() => {
+                                                    if (!selectedDate || !timeSlot) return false;
+                                                    
+                                                    try {
+                                                        const now = new Date();
+                                                        const selectedDateObj = new Date(selectedDate);
+                                                        
+                                                        // Only check for today's date
+                                                        if (selectedDateObj.toDateString() !== now.toDateString()) {
+                                                            return false;
+                                                        }
+                                                        
+                                                        // Parse time slot to get start time
+                                                        const timeMatch = timeSlot.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                                                        if (!timeMatch) return false;
+                                                        
+                                                        const [, hours, minutes, period] = timeMatch;
+                                                        let hour24 = parseInt(hours);
+                                                        
+                                                        // Convert to 24-hour format
+                                                        if (period.toUpperCase() === 'PM' && hour24 !== 12) {
+                                                            hour24 += 12;
+                                                        } else if (period.toUpperCase() === 'AM' && hour24 === 12) {
+                                                            hour24 = 0;
+                                                        }
+                                                        
+                                                        // Create slot start time
+                                                        const slotStartTime = new Date(now);
+                                                        slotStartTime.setHours(hour24, parseInt(minutes), 0, 0);
+                                                        
+                                                        // Check if current time is 1 hour or more before slot start time
+                                                        const oneHourBefore = new Date(slotStartTime.getTime() - (60 * 60 * 1000));
+                                                        const isGone = now.getTime() >= oneHourBefore.getTime();
+                                                        
+                                                        if (isGone) {
+                                                            
+                                                        }
+                                                        
+                                                        return isGone;
+                                                    } catch (error) {
+                                                        
+                                                        return false;
+                                                    }
+                                                })();
 
                                                 return (
                                                     <button
                                                         key={timeSlot}
-                                                        className={`time-slot ${isSelected ? 'selected' : ''} ${isBooked ? 'booked' : ''} ${isGoing ? 'going' : ''}`}
-                                                        onClick={() => !isBooked && !isGoing && setSelectedTimeSlot(timeSlot)}
-                                                        disabled={isBooked || isGoing}
+                                                        className={`time-slot ${isSelected ? 'selected' : ''} ${isBooked ? 'booked' : ''} ${isTimeGone ? 'time-gone' : ''}`}
+                                                        onClick={() => !isBooked && !isTimeGone && setSelectedTimeSlot(timeSlot)}
+                                                        disabled={isBooked || isTimeGone}
                                                     >
-                                                        {isBooked ? 'Slot Booked' : isGoing ? 'Time is going' : timeSlot}
+                                                        {isTimeGone ? 'Oops Slot Time Gone' : isBooked ? 'Slot Booked' : timeSlot}
                                                     </button>
                                                 );
                                             });
@@ -811,69 +1404,23 @@ export default function Theater() {
                                     </div>
                                 </div>
 
-                                {(() => {
-                                    // Check if booking time is within 1 hour
-                                    const isBookingTimeNear = () => {
-                                        if (!selectedDate || !selectedTimeSlot) return false;
+                                <button 
+                                    className={`book-button ${!selectedTimeSlot ? 'disabled' : ''}`}
+                                    disabled={!selectedTimeSlot}
+                                    onClick={() => {
+                                        if (!selectedTimeSlot) return; // Guard click when disabled
                                         
-                                        try {
-                                            const now = new Date();
-                                            const selectedDateObj = new Date(selectedDate);
-                                            
-                                            // If selected date is not today, booking is allowed
-                                            if (selectedDateObj.toDateString() !== now.toDateString()) {
-                                                return false;
-                                            }
-                                            
-                                            // Parse the time slot to get start time
-                                            const timeMatch = selectedTimeSlot.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
-                                            if (!timeMatch) return false;
-                                            
-                                            const [, hours, minutes, period] = timeMatch;
-                                            let hour24 = parseInt(hours);
-                                            
-                                            // Convert to 24-hour format
-                                            if (period.toLowerCase() === 'pm' && hour24 !== 12) {
-                                                hour24 += 12;
-                                            } else if (period.toLowerCase() === 'am' && hour24 === 12) {
-                                                hour24 = 0;
-                                            }
-                                            
-                                            const slotStartTime = new Date(now);
-                                            slotStartTime.setHours(hour24, parseInt(minutes), 0, 0);
-                                            
-                                            // Check if current time is within 1 hour of slot start time
-                                            const oneHourBefore = new Date(slotStartTime.getTime() - (60 * 60 * 1000));
-                                            return now.getTime() >= oneHourBefore.getTime();
-                                        } catch (error) {
-                                            console.error('Error checking booking time:', error);
-                                            return false;
-                                        }
-                                    };
-                                    
-                                    const isNear = isBookingTimeNear();
-                                    
-                                    return (
-                                        <button 
-                                            className={`book-button ${isNear ? 'disabled' : ''}`}
-                                            onClick={() => {
-                                                if (isNear) return; // Prevent click if disabled
-                                                
-                                                console.log('🎯 Button clicked!');
-                                                console.log('🎯 Theater:', filteredTheaters[selectedTheater]?.name);
-                                                console.log('🎯 Date:', selectedDate);
-                                                console.log('🎯 Time:', selectedTimeSlot);
-                                                
-                                                // Simple direct approach
-                                                resetPopupState();
-                                                openBookingPopup(filteredTheaters[selectedTheater], selectedDate, selectedTimeSlot);
-                                            }}
-                                            disabled={isNear}
-                                        >
-                                            Book This Theater
-                                        </button>
-                                    );
-                                })()}
+                                        
+                                        
+                                        
+                                        
+                                        // Simple direct approach - no time restrictions
+                                        resetPopupState();
+                                        openBookingPopup(filteredTheaters[selectedTheater], selectedDate, selectedTimeSlot);
+                                    }}
+                                >
+                                    Book This Theater
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1130,6 +1677,27 @@ export default function Theater() {
                     }
                 }
 
+                .live-indicator-dot {
+                    width: 8px;
+                    height: 8px;
+                    background-color: #ff0000;
+                    border-radius: 50%;
+                    margin-right: 5px;
+                    animation: livePulse 2s infinite;
+                }
+
+                @keyframes livePulse {
+                    0% { opacity: 1; }
+                    50% { opacity: 0.3; }
+                    100% { opacity: 1; }
+                }
+
+                @keyframes refreshBlink {
+                    0% { opacity: 0.5; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.5; }
+                }
+
                 @media (min-width: 768px) {
                     .date-value,
                     .time-value {
@@ -1304,56 +1872,420 @@ export default function Theater() {
                     font-weight: 600;
                 }
 
-                /* Theater Grid */
-                .theater-grid-section {
-                    padding: 2rem 0;
+                /* Theater Selection Section */
+                .theater-selection-section {
+                    padding: 3rem 0;
+                    background: transparent;
                 }
 
-                @media (min-width: 481px) {
-                    .theater-grid-section {
-                        padding: 3rem 0;
-                    }
-                }
-
-                @media (min-width: 769px) {
-                    .theater-grid-section {
+                @media (min-width: 768px) {
+                    .theater-selection-section {
                         padding: 4rem 0;
                     }
                 }
 
-                .theater-grid {
+                @media (min-width: 1024px) {
+                    .theater-selection-section {
+                        padding: 5rem 0;
+                    }
+                }
+
+                /* Section Header */
+                .selection-header {
+                    text-align: center;
+                    margin-bottom: 3rem;
+                }
+
+                .selection-title {
+                    font-size: 2.5rem;
+                    font-weight: bold;
+                    color: #ffffff;
+                    margin-bottom: 1rem;
+                    font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+                }
+
+                @media (min-width: 768px) {
+                    .selection-title {
+                        font-size: 3rem;
+                    }
+                }
+
+                .selection-subtitle {
+                    font-size: 1.125rem;
+                    color: #d1d5db;
+                    margin-bottom: 2rem;
+                    font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+                }
+
+                .selection-divider {
+                    width: 80px;
+                    height: 4px;
+                    background: linear-gradient(90deg, #FF0005, #ff4444);
+                    margin: 0 auto;
+                    border-radius: 2px;
+                }
+
+                /* Theater Cards Grid */
+                .theater-cards-grid {
                     display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
                     gap: 1.5rem;
+                    grid-template-columns: repeat(2, 1fr);
+                    max-width: 1200px;
+                    margin: 0 auto;
+                }
+
+                @media (min-width: 768px) {
+                    .theater-cards-grid {
+                        grid-template-columns: repeat(2, 1fr);
+                        gap: 2.5rem;
+                    }
+                }
+
+                @media (min-width: 1024px) {
+                    .theater-cards-grid {
+                        grid-template-columns: repeat(3, 1fr);
+                        gap: 3rem;
+                    }
+                }
+
+                /* Theater Selection Card */
+                .theater-selection-card {
+                    background: rgba(20, 20, 20, 0.8);
+                    border-radius: 1.5rem;
+                    overflow: hidden;
+                    cursor: pointer;
+                    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                    border: 2px solid rgba(255, 255, 255, 0.1);
+                    backdrop-filter: blur(10px);
+                    position: relative;
+                    min-height: 420px;
+                    display: flex;
+                    flex-direction: column;
+                }
+
+                .theater-selection-card:hover {
+                    transform: translateY(-8px) scale(1.02);
+                    border-color: rgba(255, 0, 5, 0.5);
+                    box-shadow: 0 20px 60px rgba(255, 0, 5, 0.2);
+                }
+
+                .theater-selection-card.selected {
+                    transform: translateY(-8px) scale(1.02);
+                    border-color:rgba(255, 0, 4, 0.13);
+                    box-shadow: 0 20px 60px rgba(255, 0, 5, 0.3);
+                    background: rgba(30, 30, 30, 0.9);
+                }
+
+                /* Selection Badge */
+                .selection-badge {
+                    position: absolute;
+                    top: 1rem;
+                    right: 1rem;
+                    background: rgba(255, 0, 5, 0.95);
+                    color: white;
+                    padding: 0.5rem 1rem;
+                    border-radius: 2rem;
+                    font-size: 0.875rem;
+                    font-weight: bold;
+                    font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    z-index: 10;
+                    box-shadow: 0 4px 20px rgba(255, 0, 5, 0.4);
+                    animation: badgePulse 2s ease-in-out infinite;
+                }
+
+                @keyframes badgePulse {
+                    0%, 100% {
+                        transform: scale(1);
+                        box-shadow: 0 4px 20px rgba(255, 0, 5, 0.4);
+                    }
+                    50% {
+                        transform: scale(1.05);
+                        box-shadow: 0 6px 25px rgba(255, 0, 5, 0.6);
+                    }
+                }
+
+                /* Card Image Container */
+                .card-image-container {
+                    position: relative;
+                    height: 180px;
+                    overflow: hidden;
+                }
+
+                .card-image-container::after {
+                    content: '';
+                    position: absolute;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                    height: 80px;
+                    background: linear-gradient(to top, 
+                        rgba(20, 20, 20, 0.98) 0%, 
+                        rgba(20, 20, 20, 0.85) 30%, 
+                        rgba(20, 20, 20, 0.5) 60%, 
+                        rgba(20, 20, 20, 0.2) 80%, 
+                        transparent 100%);
+                    z-index: 2;
+                    pointer-events: none;
+                }
+
+                @media (min-width: 480px) {
+                    .card-image-container {
+                        height: 220px;
+                    }
+                    
+                    .card-image-container::after {
+                        height: 100px;
+                    }
+                }
+
+                @media (min-width: 768px) {
+                    .card-image-container {
+                        height: 280px;
+                    }
+                    
+                    .card-image-container::after {
+                        height: 120px;
+                    }
+                }
+
+                
+
+                .card-theater-image {
                     width: 100%;
-                    box-sizing: border-box;
+                    height: 100%;
+                    object-fit: cover;
+                    transition: transform 0.4s ease;
+                    mask: linear-gradient(to bottom, 
+                        rgba(0, 0, 0, 1) 0%, 
+                        rgba(0, 0, 0, 1) 50%, 
+                        rgba(0, 0, 0, 0.8) 70%, 
+                        rgba(0, 0, 0, 0.4) 85%, 
+                        rgba(0, 0, 0, 0.1) 95%, 
+                        rgba(0, 0, 0, 0) 100%);
+                    -webkit-mask: linear-gradient(to bottom, 
+                        rgba(0, 0, 0, 1) 0%, 
+                        rgba(0, 0, 0, 1) 50%, 
+                        rgba(0, 0, 0, 0.8) 70%, 
+                        rgba(0, 0, 0, 0.4) 85%, 
+                        rgba(0, 0, 0, 0.1) 95%, 
+                        rgba(0, 0, 0, 0) 100%);
                 }
 
-                @media (max-width: 480px) {
-                    .theater-grid {
-                        grid-template-columns: 1fr;
-                        gap: 1rem;
+
+                .theater-selection-card:hover .card-theater-image {
+                    transform: scale(1.1);
+                }
+
+                /* Image Indicators */
+                .card-image-indicators {
+                    position: absolute;
+                    bottom: 1rem;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    display: flex;
+                    gap: 0.5rem;
+                    z-index: 5;
+                }
+
+                .indicator-dot {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    background: rgba(255, 255, 255, 0.5);
+                    transition: all 0.3s ease;
+                }
+
+                .indicator-dot.active {
+                    background: #FF0005;
+                    transform: scale(1.2);
+                }
+
+                .card-image-count {
+                    position: absolute;
+                    top: 1rem;
+                    left: 1rem;
+                    background: rgba(0, 0, 0, 0.7);
+                    color: white;
+                    padding: 0.25rem 0.75rem;
+                    border-radius: 1rem;
+                    font-size: 0.75rem;
+                    font-weight: bold;
+                    z-index: 5;
+                }
+
+                /* Card Content */
+                .card-content {
+                    padding: 1rem;
+                    background: linear-gradient(135deg, rgba(30, 30, 30, 0.95), rgba(20, 20, 20, 0.9));
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                }
+
+                @media (min-width: 480px) {
+                    .card-content {
+                        padding: 1.25rem;
                     }
                 }
 
-                @media (min-width: 481px) and (max-width: 768px) {
-                    .theater-grid {
-                        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                        gap: 1.25rem;
+                @media (min-width: 768px) {
+                    .card-content {
+                        padding: 1.5rem;
                     }
                 }
 
-                @media (min-width: 769px) and (max-width: 1024px) {
-                    .theater-grid {
-                        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                        gap: 1.75rem;
+                .card-theater-name {
+                    font-size: 1.125rem;
+                    font-weight: bold;
+                    color: #ffffff;
+                    margin-bottom: 0.75rem;
+                    font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+                    line-height: 1.2;
+                }
+
+                @media (min-width: 480px) {
+                    .card-theater-name {
+                        font-size: 1.25rem;
+                        margin-bottom: 0.875rem;
                     }
                 }
 
-                @media (min-width: 1025px) {
-                    .theater-grid {
-                        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-                        gap: 2rem;
+                @media (min-width: 768px) {
+                    .card-theater-name {
+                        font-size: 1.5rem;
+                        margin-bottom: 1rem;
+                    }
+                }
+
+                .card-capacity {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    margin-bottom: 1rem;
+                    color: #d1d5db;
+                }
+
+                .capacity-icon {
+                    color: #FF0005;
+                }
+
+                .capacity-text {
+                    font-size: 0.875rem;
+                    font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+                }
+
+                .card-price {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.25rem;
+                    background: rgba(255, 255, 255, 0.95);
+                    padding: 0.75rem 1rem;
+                    border-radius: 1rem;
+                    backdrop-filter: blur(5px);
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                }
+
+                .price-label {
+                    font-size: 0.75rem;
+                    color: #6b7280;
+                    font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                }
+
+                .price-value {
+                    font-size: 1.25rem;
+                    font-weight: bold;
+                    color: #FF0005;
+                    font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+                }
+
+                /* Hover Overlay */
+                .card-hover-overlay {
+                    position: absolute;
+                    inset: 0;
+                    background: rgba(0, 0, 0, 0.3);
+                    backdrop-filter: blur(10px);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    opacity: 0;
+                    transition: all 0.3s ease;
+                    z-index: 20;
+                }
+
+                .theater-selection-card:hover .card-hover-overlay {
+                    opacity: 1;
+                }
+
+                .theater-selection-card.selected .card-hover-overlay {
+                    opacity: 0;
+                }
+
+                .hover-content {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.75rem;
+                    color: #ffffff;
+                    text-align: center;
+                }
+
+                .select-icon {
+                    width: 3rem;
+                    height: 3rem;
+                    color: #ffffff;
+                    animation: selectIconPulse 2s ease-in-out infinite;
+                }
+
+                @keyframes selectIconPulse {
+                    0%, 100% {
+                        transform: scale(1);
+                    }
+                    50% {
+                        transform: scale(1.1);
+                    }
+                }
+
+                .hover-content span {
+                    font-size: 1.125rem;
+                    font-weight: bold;
+                    font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                }
+
+                /* Scroll Instruction */
+                .scroll-instruction {
+                    text-align: center;
+                    margin-top: 3rem;
+                    color: #d1d5db;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.75rem;
+                }
+
+                .scroll-instruction p {
+                    font-size: 1rem;
+                    font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+                }
+
+                .scroll-arrow {
+                    color: #FF0005;
+                    animation: scrollBounce 2s ease-in-out infinite;
+                }
+
+                @keyframes scrollBounce {
+                    0%, 100% {
+                        transform: translateY(0);
+                    }
+                    50% {
+                        transform: translateY(8px);
                     }
                 }
 
@@ -1709,6 +2641,63 @@ export default function Theater() {
                     }
                 }
 
+                .movie-selection-indicator {
+                    background: linear-gradient(135deg, rgba(255, 0, 5, 0.1), rgba(255, 68, 68, 0.1));
+                    border: 2px solid rgba(255, 0, 5, 0.3);
+                    border-radius: 12px;
+                    padding: 1rem;
+                    margin-bottom: 1.5rem;
+                    backdrop-filter: blur(10px);
+                }
+
+                .movie-indicator-header {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    margin-bottom: 0.5rem;
+                }
+
+                .movie-icon {
+                    font-size: 1.2rem;
+                }
+
+                .movie-label {
+                    font-size: 0.875rem;
+                    color: #FF0005;
+                    font-weight: 600;
+                    font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                }
+
+                .movie-title {
+                    font-size: 1rem;
+                    color: #ffffff;
+                    font-weight: 500;
+                    font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+                    line-height: 1.4;
+                }
+
+                @media (min-width: 481px) {
+                    .movie-label {
+                        font-size: 0.9375rem;
+                    }
+                    
+                    .movie-title {
+                        font-size: 1.125rem;
+                    }
+                }
+
+                @media (min-width: 769px) {
+                    .movie-label {
+                        font-size: 1rem;
+                    }
+                    
+                    .movie-title {
+                        font-size: 1.25rem;
+                    }
+                }
+
                 .booking-controls {
                     display: flex;
                     flex-direction: column;
@@ -1735,6 +2724,26 @@ export default function Theater() {
                     overflow: hidden;
                     width: 100%;
                     max-width: 100%;
+                  
+                    
+                }
+
+                .theater-detail-image::before {
+                    content: '';
+                    position: absolute;
+                    inset: -30px;
+                   
+                    );
+                    border-radius: inherit;
+                    filter: blur(25px);
+                    opacity: 0.7;
+                    animation: detailGlowRotate 6s linear infinite;
+                    z-index: -1;
+                }
+
+                @keyframes detailGlowRotate {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
                 }
 
                 @media (min-width: 481px) {
@@ -1765,6 +2774,7 @@ export default function Theater() {
                     position: relative;
                     z-index: 2;
                     display: block;
+                    transition: transform 0.4s ease;
                 }
 
                 @media (min-width: 481px) {
@@ -1786,6 +2796,61 @@ export default function Theater() {
                         height: 350px;
                     }
                 }
+
+                @keyframes detailSlideshow {
+                    0% {
+                        transform: scale(1) rotate(0deg);
+                        filter: brightness(1) contrast(1) saturate(1) blur(0px);
+                        opacity: 1;
+                    }
+                    20% {
+                        transform: scale(1.02) rotate(-0.3deg);
+                        filter: brightness(1.05) contrast(1.1) saturate(1.1) blur(0px);
+                        opacity: 1;
+                    }
+                    40% {
+                        transform: scale(1.04) rotate(0.2deg);
+                        filter: brightness(1.1) contrast(1.2) saturate(1.15) blur(0px);
+                        opacity: 1;
+                    }
+                    60% {
+                        transform: scale(1.06) rotate(-0.1deg);
+                        filter: brightness(1.15) contrast(1.5) saturate(1.2) blur(2px);
+                        opacity: 0.95;
+                    }
+                    75% {
+                        transform: scale(1.1) rotate(0.3deg);
+                        filter: brightness(0.9) contrast(2.0) saturate(0.9) blur(5px);
+                        opacity: 0.8;
+                    }
+                    85% {
+                        transform: scale(1.15) rotate(-0.2deg);
+                        filter: brightness(0.5) contrast(2.5) saturate(0.5) blur(10px);
+                        opacity: 0.5;
+                    }
+                    95% {
+                        transform: scale(1.2) rotate(0.1deg);
+                        filter: brightness(0.2) contrast(3.0) saturate(0.2) blur(15px);
+                        opacity: 0.2;
+                    }
+                    100% {
+                        transform: scale(1.25) rotate(0deg);
+                        filter: brightness(0.1) contrast(3.5) saturate(0.1) blur(20px);
+                        opacity: 0.1;
+                    }
+                }
+
+                /* Simple Theater Image Container */
+                .theater-image-container {
+                    position: relative;
+                    width: 100%;
+                    height: 100%;
+                    overflow: hidden;
+                    border-radius: 0.75rem;
+                    background: linear-gradient(135deg, #000 0%, #1a1a1a 100%);
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                }
+
 
                 .booking-features {
                     margin-top: 1.5rem;
@@ -2478,6 +3543,34 @@ export default function Theater() {
                     border-color: #f59e0b;
                 }
 
+                .time-slot.passed {
+                    background: rgba(107, 114, 128, 0.2);
+                    border-color: #6b7280;
+                    color: #6b7280;
+                    cursor: not-allowed;
+                    opacity: 0.5;
+                }
+
+                .time-slot.passed:hover {
+                    background: rgba(107, 114, 128, 0.2);
+                    border-color: #6b7280;
+                    transform: none;
+                }
+
+                .time-slot.time-gone {
+                    background: rgba(245, 158, 11, 0.2);
+                    border-color: #f59e0b;
+                    color: #f59e0b;
+                    cursor: not-allowed;
+                    opacity: 0.7;
+                }
+
+                .time-slot.time-gone:hover {
+                    background: rgba(245, 158, 11, 0.2);
+                    border-color: #f59e0b;
+                    transform: none;
+                }
+
                 .booked-badge {
                     position: absolute;
                     top: 0.25rem;
@@ -2815,6 +3908,75 @@ export default function Theater() {
                     box-shadow: 0 10px 20px rgba(251, 191, 36, 0.4);
                 }
 
+                /* Loading States */
+                .loading-theaters {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 3rem;
+                    color: #666;
+                }
+
+                .loading-spinner {
+                    width: 40px;
+                    height: 40px;
+                    border: 4px solid #f3f3f3;
+                    border-top: 4px solid #FF0005;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                    margin-bottom: 1rem;
+                }
+
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+
+                .no-theaters {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 3rem;
+                    color: #666;
+                    font-size: 1.125rem;
+                }
+
+                .loading-details {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 2rem;
+                    color: #666;
+                }
+
+                .loading-time-slots {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 2rem;
+                    color: #666;
+                    grid-column: 1 / -1;
+                }
+
+                .loading-spinner-small {
+                    width: 24px;
+                    height: 24px;
+                    border: 3px solid #f3f3f3;
+                    border-top: 3px solid #FF0005;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                    margin-bottom: 0.5rem;
+                }
+
+                .loading-indicator {
+                    font-size: 0.875rem;
+                    color: #666;
+                    margin-left: 0.5rem;
+                    font-style: italic;
+                }
+
                 @keyframes testPopupFadeIn {
                     from {
                         opacity: 0;
@@ -2833,6 +3995,343 @@ export default function Theater() {
                         opacity: 1;
                         transform: scale(1) translateY(0);
                     }
+                }
+
+                /* ===== Removed old Theater-specific slideshow styles to avoid conflicts ===== */
+
+                .dot.active {
+                    background: var(--accent-color, #ff0000);
+                    border-color: var(--accent-color, #ff0000);
+                }
+
+                /* Beautiful Slideshow Animation with DOF and Wiggle */
+                @keyframes beautifulSlideshow {
+                    0% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1) rotate(0deg);
+                        filter: blur(0px) brightness(1) contrast(1) saturate(1);
+                    }
+                    10% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1.01) rotate(0.3deg);
+                        filter: blur(0px) brightness(1.05) contrast(1.1) saturate(1.1);
+                    }
+                    20% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1.02) rotate(-0.2deg);
+                        filter: blur(0px) brightness(1.1) contrast(1.15) saturate(1.15);
+                    }
+                    30% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1.015) rotate(0.25deg);
+                        filter: blur(0px) brightness(1.08) contrast(1.12) saturate(1.12);
+                    }
+                    40% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1.025) rotate(-0.1deg);
+                        filter: blur(0px) brightness(1.12) contrast(1.18) saturate(1.18);
+                    }
+                    50% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1.03) rotate(0.2deg);
+                        filter: blur(0px) brightness(1.15) contrast(1.2) saturate(1.2);
+                    }
+                    60% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1.035) rotate(-0.15deg);
+                        filter: blur(0px) brightness(1.18) contrast(1.25) saturate(1.25);
+                    }
+                    70% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1.04) rotate(0.1deg);
+                        filter: blur(0px) brightness(1.2) contrast(1.3) saturate(1.3);
+                    }
+                    80% {
+                        opacity: 0.8;
+                        transform: translate(-50%, -50%) scale(1.06) rotate(-0.3deg);
+                        filter: blur(2px) brightness(0.9) contrast(1.4) saturate(0.8);
+                    }
+                    85% {
+                        opacity: 0.5;
+                        transform: translate(-50%, -50%) scale(1.09) rotate(0.4deg);
+                        filter: blur(5px) brightness(0.7) contrast(1.6) saturate(0.6);
+                    }
+                    90% {
+                        opacity: 0.2;
+                        transform: translate(-50%, -50%) scale(1.13) rotate(-0.5deg);
+                        filter: blur(8px) brightness(0.5) contrast(1.9) saturate(0.4);
+                    }
+                    95% {
+                        opacity: 0.05;
+                        transform: translate(-50%, -50%) scale(1.17) rotate(0.6deg);
+                        filter: blur(12px) brightness(0.3) contrast(2.2) saturate(0.2);
+                    }
+                    100% {
+                        opacity: 0;
+                        transform: translate(-50%, -50%) scale(1.2) rotate(-0.7deg);
+                        filter: blur(15px) brightness(0.1) contrast(2.5) saturate(0.1);
+                    }
+                }
+
+                /* Enhanced Image Container for Better Effects (legacy; kept for potential reuse) */
+                .main-image-wrapper {
+                    position: relative;
+                    width: 100%;
+                    height: 400px;
+                    overflow: hidden;
+                    border-radius: 12px;
+                    background: linear-gradient(135deg, #000000 0%, #1a1a1a 50%, #000000 100%);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    box-shadow: 
+                        0 20px 40px rgba(0, 0, 0, 0.8),
+                        inset 0 0 20px rgba(255, 255, 255, 0.05);
+                }
+
+                /* Subtle Background Animation */
+                .main-image-wrapper::before {
+                    content: '';
+                    position: absolute;
+                    top: -50%;
+                    left: -50%;
+                    width: 200%;
+                    height: 200%;
+                    background: radial-gradient(circle, 
+                        rgba(255, 0, 5, 0.1) 0%, 
+                        transparent 30%, 
+                        rgba(255, 0, 5, 0.05) 70%, 
+                        transparent 100%);
+                    animation: backgroundGlow 4s ease-in-out infinite;
+                    z-index: 0;
+                    pointer-events: none;
+                }
+
+                @keyframes backgroundGlow {
+                    0%, 100% {
+                        transform: rotate(0deg) scale(1);
+                        opacity: 0.3;
+                    }
+                    50% {
+                        transform: rotate(180deg) scale(1.1);
+                        opacity: 0.6;
+                    }
+                }
+                
+                /* ===== About-style slideshow (ported) ===== */
+                .slideshow-container {
+                    position: relative;
+                    width: 100%;
+                }
+
+                .slideshow-wrapper {
+                    position: relative;
+                    border-radius: 4rem;
+                    overflow: hidden;
+                }
+
+                .slideshow-glow {
+                    position: absolute;
+                    inset: 0;
+                    border-radius: 4rem;
+                    filter: blur(24px);
+                    background: linear-gradient(45deg, 
+                        rgba(251, 191, 36, 0.4), 
+                        rgba(239, 68, 68, 0.4), 
+                        rgba(147, 51, 234, 0.4), 
+                        rgba(34, 197, 94, 0.4),
+                        rgba(59, 130, 246, 0.4)
+                    );
+                    background-size: 500% 500%;
+                    animation: gradientShift 6s ease-in-out infinite;
+                    z-index: 1;
+                    opacity: 0.8;
+                }
+
+                @keyframes gradientShift {
+                    0% { 
+                        background-position: 0% 50%; 
+                        filter: blur(20px);
+                    }
+                    25% { 
+                        background-position: 100% 50%; 
+                        filter: blur(28px);
+                    }
+                    50% { 
+                        background-position: 50% 100%; 
+                        filter: blur(24px);
+                    }
+                    75% { 
+                        background-position: 50% 0%; 
+                        filter: blur(30px);
+                    }
+                    100% { 
+                        background-position: 0% 50%; 
+                        filter: blur(20px);
+                    }
+                }
+
+                .slideshow-image-container {
+                    position: relative;
+                    overflow: hidden;
+                    border-radius: 4rem;
+                    z-index: 2;
+                    height: 250px;
+                    width: 100%;
+                    max-width: 100%;
+                }
+
+                @media (min-width: 768px) {
+                    .slideshow-image-container {
+                        height: 350px;
+                    }
+                }
+
+                @media (min-width: 1024px) {
+                    .slideshow-image-container {
+                        height: 400px;
+                    }
+                }
+
+                .slideshow-image {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    opacity: 0;
+                    transform: scale(1.1);
+                    transition: all 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                    z-index: 1;
+                }
+
+                .slideshow-image.active {
+                    opacity: 1;
+                    transform: scale(1);
+                    z-index: 2;
+                }
+
+                .image-content {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                    border-radius: 4rem;
+                }
+
+                .slideshow-overlay {
+                    position: absolute;
+                    inset: 0;
+                    background: linear-gradient(
+                        to bottom,
+                        rgba(0, 0, 0, 0.1),
+                        rgba(0, 0, 0, 0.3)
+                    );
+                    border-radius: 4rem;
+                    z-index: 3;
+                }
+
+                .slideshow-dots {
+                    position: absolute;
+                    bottom: 1rem;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    display: flex;
+                    gap: 0.5rem;
+                    z-index: 4;
+                }
+
+                .dot {
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 50%;
+                    border: 2px solid rgba(255, 255, 255, 0.4);
+                    background: transparent;
+                    cursor: pointer;
+                    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                    position: relative;
+                }
+
+                .dot:hover {
+                    border-color: rgba(255, 255, 255, 0.8);
+                    transform: scale(1.3);
+                    background: rgba(255, 255, 255, 0.1);
+                }
+
+                .dot.active {
+                    background: #FF0005;
+                    border-color: #FF0005;
+                    box-shadow: 0 0 15px rgba(251, 191, 36, 0.6);
+                    transform: scale(1.2);
+                }
+
+                .dot.active::before {
+                    content: '';
+                    position: absolute;
+                    top: -4px;
+                    left: -4px;
+                    right: -4px;
+                    bottom: -4px;
+                    border-radius: 50%;
+                    border: 1px solid rgba(251, 191, 36, 0.3);
+                    animation: pulse 2s ease-in-out infinite;
+                }
+
+                @keyframes pulse {
+                    0% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.2); opacity: 0.5; }
+                    100% { transform: scale(1); opacity: 1; }
+                }
+
+                /* Progress bar for slideshow */
+                .slideshow-progress {
+                    position: absolute;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                    height: 4px;
+                    background: rgba(255, 255, 255, 0.2);
+                    border-radius: 999px;
+                    z-index: 4;
+                    overflow: hidden;
+                }
+
+                .slideshow-progress-fill {
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    bottom: 0;
+                    width: 0%;
+                    background: #FF0005;
+                    border-radius: 999px;
+                    animation-name: slideshowProgressFill;
+                    animation-timing-function: linear;
+                    animation-fill-mode: forwards;
+                }
+
+                @keyframes slideshowProgressFill {
+                    from { width: 0%; }
+                    to { width: 100%; }
+                }
+                
+                /* ===== Card-specific overrides to retain Theater list border radius ===== */
+                .theater-image-container .slideshow-image,
+                .theater-image-container .image-content,
+                .theater-image-container .slideshow-overlay,
+                .theater-image-container .slideshow-glow {
+                    border-radius: 1rem;
+                }
+
+                .theater-image-container .slideshow-dots {
+                    bottom: 0.75rem;
+                }
+
+                .theater-image-container .dot {
+                    width: 8px;
+                    height: 8px;
+                }
+
+                .theater-image-container .slideshow-progress {
+                    height: 3px;
                 }
             `}</style>
 

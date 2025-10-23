@@ -96,16 +96,7 @@ export const db = {
     // Save to 'booking' collection in FeelME Town database
     feelmeTownDatabase.booking.push(booking);
     
-    console.log('📝 New booking saved to FeelME Town database - booking collection:', {
-      database: 'FeelME Town',
-      collection: 'booking',
-      bookingId: booking.id,
-      customerName: booking.name,
-      theater: booking.theaterName,
-      date: booking.date,
-      time: booking.time,
-      totalAmount: booking.totalAmount
-    });
+    
     
     return booking;
   },
@@ -115,13 +106,13 @@ export const db = {
     return [...feelmeTownDatabase.booking];
   },
 
-  // Get theaters
+  // Get theaters - NOTE: This is mock data, real capacity comes from database
   getTheaters: () => {
     return [
-      { id: 'theater1', name: 'EROS (COUPLES) (FMT-Hall-1)', price: '₹1399', capacity: 2, type: 'Couples' },
-      { id: 'theater2', name: 'PHILIA (FRIENDS) (FMT-Hall-2)', price: '₹1999', capacity: 4, type: 'Friends' },
-      { id: 'theater3', name: 'PRAGMA (LOVE) (FMT-Hall-3)', price: '₹2999', capacity: 6, type: 'Love' },
-      { id: 'theater4', name: 'STORGE (FAMILY) (FMT-Hall-4)', price: '₹3999', capacity: 8, type: 'Family' }
+      { id: 'theater1', name: 'EROS (COUPLES) (FMT-Hall-1)', price: '₹1399', type: 'Couples' },
+      { id: 'theater2', name: 'PHILIA (FRIENDS) (FMT-Hall-2)', price: '₹1999', type: 'Friends' },
+      { id: 'theater3', name: 'PRAGMA (LOVE) (FMT-Hall-3)', price: '₹2999', type: 'Love' },
+      { id: 'theater4', name: 'STORGE (FAMILY) (FMT-Hall-4)', price: '₹3999', type: 'Family' }
     ];
   },
 
@@ -168,14 +159,7 @@ export const db = {
     // Save to 'incompleteBooking' collection
     feelmeTownDatabase.incompleteBooking.push(incompleteBooking);
     
-    console.log('📝 Incomplete booking saved to FeelME Town database:', {
-      database: 'FeelME Town',
-      collection: 'incompleteBooking',
-      bookingId: incompleteBooking.id,
-      customerEmail: incompleteBooking.email,
-      expiresAt: incompleteBooking.expiresAt,
-      status: incompleteBooking.status
-    });
+    
     
     return incompleteBooking;
   },
@@ -199,7 +183,7 @@ export const db = {
     const deletedCount = initialLength - feelmeTownDatabase.incompleteBooking.length;
     
     if (deletedCount > 0) {
-      console.log(`🗑️ Deleted ${deletedCount} expired incomplete bookings from FeelME Town database`);
+      
     }
     
     return deletedCount;

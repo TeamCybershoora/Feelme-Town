@@ -33,7 +33,6 @@ export async function GET(
     }
 
   } catch (error) {
-    console.error('❌ Error retrieving decompressed booking:', error);
     return NextResponse.json(
       { 
         success: false, 

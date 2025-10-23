@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import GoogleReviews from './GoogleReviews';
 
 interface Testimonial {
-  id: number;
+  id: string;
   name: string;
-  position: string;
+  position?: string;
   image: string;
   rating: number;
   text: string;
+  email?: string;
+  socialHandle?: string;
+  socialPlatform?: string;
+  submittedAt?: string;
 }
 
 // Animated Counter Component
@@ -80,58 +85,140 @@ const TestimonialPage = () => {
   const targetPosition = useRef({ x: 0, y: 0 });
   const currentPosition = useRef({ x: 0, y: 0 });
   const [showContactPopup, setShowContactPopup] = useState(false);
+  const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [googleReviews, setGoogleReviews] = useState<any[]>([]);
+  const [isLoadingGoogleReviews, setIsLoadingGoogleReviews] = useState(true);
+  const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
 
-  // Sample testimonial data
-  const testimonials = [
-    {
-      id: 1,
-      name: "Ahmed Khan",
-      position: "Regular Customer",
-      image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face",
-      rating: 5,
-      text: "FeelMe Town ka experience bilkul amazing hai! Picture quality aur sound system kaafi impressive hai. Highly recommended!"
-    },
-    {
-      id: 2,
-      name: "Fatima Ali",
-      position: "Movie Lover",
-      image: "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=100&h=100&fit=crop&crop=face",
-      rating: 5,
-      text: "Best theater experience! Staff bahut helpful hai aur seats comfortable hain. Main har kisi ko yeh recommend karti hun."
-    },
-    {
-      id: 3,
-      name: "Hassan Ahmed",
-      position: "Family Customer",
-      image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face",
-      rating: 4,
-      text: "Family ke saath movie dekhne ka perfect place hai. Kids ko bhi bahut pasand aaya. Clean aur well-maintained hai."
-    },
-    {
-      id: 4,
-      name: "Ayesha Malik",
-      position: "Frequent Visitor",
-      image: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop&crop=face",
-      rating: 5,
-      text: "Yahan ka atmosphere bilkul different hai! Movie watching experience kaafi enjoyable hai. Amazing place!"
-    },
-    {
-      id: 5,
-      name: "Usman Shah",
-      position: "Theater Enthusiast",
-      image: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop&crop=face",
-      rating: 5,
-      text: "Sound aur picture quality top-notch hai. Staff professional hai aur service excellent hai. Must visit!"
-    },
-    {
-      id: 6,
-      name: "Zara Khan",
-      position: "Movie Buff",
-      image: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=face",
-      rating: 4,
-      text: "Comfortable seats aur great screen quality. Price bhi reasonable hai. Perfect combination for movie lovers!"
+  // Fetch testimonials from database
+  useEffect(() => {
+    const fetchTestimonials = async () => {
+      try {
+        setIsLoading(true);
+        console.log('📝 Fetching testimonials from database...');
+        
+        const response = await fetch('/api/feedback');
+        const data = await response.json();
+        
+        if (data.success && data.feedback && data.feedback.length > 0) {
+          // Transform feedback data to testimonial format
+          const transformedTestimonials: Testimonial[] = data.feedback.map((feedback: any) => ({
+            id: feedback._id || feedback.feedbackId || Date.now().toString(),
+            name: feedback.name,
+            position: feedback.socialPlatform ? 
+              `${feedback.socialPlatform.charAt(0).toUpperCase() + feedback.socialPlatform.slice(1)} User` : 
+              'FeelME Town Customer',
+            image: feedback.avatar || '/images/Avatars/FMT.svg', // Use avatar or fallback
+            rating: feedback.rating,
+            text: feedback.message,
+            email: feedback.email,
+            socialHandle: feedback.socialHandle,
+            socialPlatform: feedback.socialPlatform,
+            submittedAt: feedback.submittedAt
+          }));
+          
+          setTestimonials(transformedTestimonials);
+          console.log(`✅ Loaded ${transformedTestimonials.length} testimonials from database`);
+        } else {
+          console.warn('⚠️ No testimonials found in database');
+          setTestimonials([]);
+          setError('No testimonials available in database');
+        }
+      } catch (error) {
+        console.error('❌ Error fetching testimonials:', error);
+        setError('Failed to load testimonials');
+        
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchTestimonials();
+  }, []);
+
+  // Fetch Google Maps Reviews
+  useEffect(() => {
+    const fetchGoogleReviews = async () => {
+      try {
+        setIsLoadingGoogleReviews(true);
+        console.log('🗺️ Fetching Google Maps reviews...');
+        
+        // Mock Google Reviews data (replace with actual Google Places API)
+        const mockGoogleReviews = [
+          {
+            id: 'google-1',
+            author_name: 'Sarah Ahmed',
+            author_url: 'https://maps.google.com',
+            profile_photo_url: '/images/Avatars/FMT.svg',
+            rating: 5,
+            relative_time_description: '2 weeks ago',
+            text: 'Amazing theater experience! The sound quality and seating comfort is top-notch. Staff is very professional and helpful. Highly recommend for movie lovers!',
+            time: Date.now()
+          },
+          {
+            id: 'google-2',
+            author_name: 'Muhammad Ali',
+            author_url: 'https://maps.google.com',
+            profile_photo_url: '/images/Avatars/FMT.svg',
+            rating: 5,
+            relative_time_description: '1 month ago',
+            text: 'Best cinema experience in town! Clean facility, comfortable seats, and excellent picture quality. Perfect for family outings.',
+            time: Date.now()
+          },
+          {
+            id: 'google-3',
+            author_name: 'Fatima Khan',
+            author_url: 'https://maps.google.com',
+            profile_photo_url: '/images/Avatars/FMT.svg',
+            rating: 4,
+            relative_time_description: '3 weeks ago',
+            text: 'Great movie theater with modern facilities. The booking process is smooth and staff is courteous. Will definitely visit again!',
+            time: Date.now()
+          },
+          {
+            id: 'google-4',
+            author_name: 'Ahmed Hassan',
+            author_url: 'https://maps.google.com',
+            profile_photo_url: '/images/Avatars/FMT.svg',
+            rating: 5,
+            relative_time_description: '1 week ago',
+            text: 'Excellent theater with premium experience. Sound system is incredible and seats are very comfortable. Loved the overall ambiance!',
+            time: Date.now()
+          }
+        ];
+
+        // Simulate API delay
+        setTimeout(() => {
+          setGoogleReviews(mockGoogleReviews);
+          setIsLoadingGoogleReviews(false);
+          console.log(`✅ Loaded ${mockGoogleReviews.length} Google reviews`);
+        }, 1500);
+
+      } catch (error) {
+        console.error('❌ Error fetching Google reviews:', error);
+        setIsLoadingGoogleReviews(false);
+      }
+    };
+
+    fetchGoogleReviews();
+  }, []);
+
+  // Auto-rotate Google Reviews every 4 seconds
+  useEffect(() => {
+    if (googleReviews.length > 1) {
+      const interval = setInterval(() => {
+        setCurrentReviewIndex((prevIndex) => 
+          (prevIndex + 1) % googleReviews.length
+        );
+      }, 4000); // Change every 4 seconds
+
+      return () => clearInterval(interval);
     }
-  ];
+  }, [googleReviews.length]);
+
+  
 
   // Triple testimonials for better infinite scroll effect
   const extendedTestimonials = [...testimonials, ...testimonials, ...testimonials];
@@ -297,6 +384,55 @@ const TestimonialPage = () => {
     </div>
   );
 
+  const GoogleReviewCard = ({ review, index }: { review: any, index: number }) => (
+    <div style={styles.googleReviewCard}>
+      {/* Google Reviews Header - Fixed */}
+      <div style={styles.googleCardTopHeader}>
+        <div style={styles.googleLogoContainer}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+          </svg>
+        </div>
+        <span style={styles.googleReviewsHeaderText}>Google Reviews</span>
+      </div>
+
+      {/* Main Content Area - Animated */}
+      <div style={styles.googleMainContent} key={`content-${review.id}`}>
+        {/* Customer Name - Animated */}
+        <h3 style={styles.googleCustomerName} key={`name-${review.id}`}>
+          {review.author_name}
+        </h3>
+        
+        {/* Review Message - Animated */}
+        <p style={styles.googleReviewMessage} key={`message-${review.id}`}>
+          {review.text}
+        </p>
+      </div>
+
+      {/* Rating Section - Animated */}
+      <div style={styles.googleRatingSection} key={`rating-${review.id}`}>
+        <div style={styles.googleStarsContainer}>
+          {[...Array(5)].map((_, i) => (
+            <span
+              key={`star-${review.id}-${i}`}
+              style={{
+                ...styles.googleStar,
+                color: i < review.rating ? '#FFD700' : '#E0E0E0',
+                animationDelay: `${i * 0.1}s`
+              }}
+            >
+              ★
+            </span>
+          ))}
+        </div>
+        <span style={styles.googleRatingText}>Rating</span>
+      </div>
+    </div>
+  );
+
   return (
     <>
       <style jsx>{`
@@ -352,6 +488,81 @@ const TestimonialPage = () => {
           100% { transform: rotate(0deg) scale(1); }
         }
 
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+          0% { 
+            opacity: 0; 
+            transform: translateY(20px); 
+          }
+          100% { 
+            opacity: 1; 
+            transform: translateY(0); 
+          }
+        }
+
+        @keyframes slideInContent {
+          0% { 
+            opacity: 0; 
+            transform: translateY(30px); 
+          }
+          100% { 
+            opacity: 1; 
+            transform: translateY(0); 
+          }
+        }
+
+        @keyframes slideInFromLeft {
+          0% { 
+            opacity: 0; 
+            transform: translateX(-50px); 
+          }
+          100% { 
+            opacity: 1; 
+            transform: translateX(0); 
+          }
+        }
+
+        @keyframes slideInFromRight {
+          0% { 
+            opacity: 0; 
+            transform: translateX(50px); 
+          }
+          100% { 
+            opacity: 1; 
+            transform: translateX(0); 
+          }
+        }
+
+        @keyframes slideInFromBottom {
+          0% { 
+            opacity: 0; 
+            transform: translateY(40px); 
+          }
+          100% { 
+            opacity: 1; 
+            transform: translateY(0); 
+          }
+        }
+
+        @keyframes starPop {
+          0% { 
+            transform: scale(0) rotate(0deg); 
+            opacity: 0; 
+          }
+          50% { 
+            transform: scale(1.2) rotate(180deg); 
+            opacity: 1; 
+          }
+          100% { 
+            transform: scale(1) rotate(360deg); 
+            opacity: 1; 
+          }
+        }
+
         .scrollRow:hover .scrollRowRTL,
         .scrollRow:hover .scrollRowLTR {
           animation-play-state: paused !important;
@@ -366,6 +577,26 @@ const TestimonialPage = () => {
           animation: phoneShake 1.5s ease-in-out infinite !important;
           transform-origin: center !important;
         }
+
+        @media (max-width: 768px) {
+          .googleReviewsHeader {
+            flex-direction: column !important;
+            text-align: center !important;
+          }
+          
+          .googleReviewsGrid {
+            grid-template-columns: 1fr !important;
+            gap: 1.5rem !important;
+          }
+          
+          .googleReviewCard {
+            padding: 1.5rem !important;
+          }
+          
+          .googleTitle {
+            font-size: 2rem !important;
+          }
+        }
       `}</style>
       <div style={styles.container}>
       {/* Header Section */}
@@ -374,8 +605,7 @@ const TestimonialPage = () => {
           Customer <span style={styles.titleAccent}>Reviews</span>
         </h1>
         <p style={styles.subtitle}>
-          Hamare customers ki real experiences sun kar jaaniye ki kyun FeelMe Town best movie experience
-          deta hai.
+          Hear our customers' real experiences and find out why FeelMe Town delivers the best movie experience.
         </p>
         <div style={styles.statsContainer}>
           <div style={styles.statItem}>
@@ -401,31 +631,45 @@ const TestimonialPage = () => {
 
       {/* Infinite Scroll Testimonials */}
       <div style={styles.testimonialsContainer}>
-        {/* Top Row - Right to Left */}
-        <div style={styles.scrollRow}>
-          <div style={{
-            ...styles.scrollRowRTL,
-            width: `${extendedTestimonials.length * 22}rem`,
-          }}>
-            {extendedTestimonials.map((testimonial, index) => (
-              <TestimonialCard key={`top-${index}`} testimonial={testimonial} index={index} />
-            ))}
+        {isLoading ? (
+          <div style={styles.loadingContainer}>
+            <div style={styles.loadingSpinner}></div>
+            <p style={styles.loadingText}>Loading testimonials from database...</p>
           </div>
-        </div>
+        ) : error ? (
+          <div style={styles.errorContainer}>
+            <p style={styles.errorText}>⚠️ {error}</p>
+            <p style={styles.errorSubtext}>Showing fallback testimonials</p>
+          </div>
+        ) : (
+          <>
+            {/* Top Row - Right to Left */}
+            <div style={styles.scrollRow}>
+              <div style={{
+                ...styles.scrollRowRTL,
+                width: `${extendedTestimonials.length * 22}rem`,
+              }}>
+                {extendedTestimonials.map((testimonial, index) => (
+                  <TestimonialCard key={`top-${index}`} testimonial={testimonial} index={index} />
+                ))}
+              </div>
+            </div>
 
-        {/* Bottom Row - Left to Right */}
-        <div style={styles.scrollRow}>
-          <div style={{
-            ...styles.scrollRowLTR,
-            width: `${extendedTestimonials.length * 22}rem`,
-          }}>
-            {[...extendedTestimonials].reverse().map((testimonial, index) => (
-              <TestimonialCard key={`bottom-${index}`} testimonial={testimonial} index={index} />
-            ))}
-          </div>
-        </div>
+            {/* Bottom Row - Left to Right */}
+            <div style={styles.scrollRow}>
+              <div style={{
+                ...styles.scrollRowLTR,
+                width: `${extendedTestimonials.length * 22}rem`,
+              }}>
+                {[...extendedTestimonials].reverse().map((testimonial, index) => (
+                  <TestimonialCard key={`bottom-${index}`} testimonial={testimonial} index={index} />
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
-
+      <GoogleReviews />
       {/* Call to Action Section */}
       <div style={styles.ctaSection}>
         {/* Shimmer Effect */}
@@ -439,7 +683,7 @@ const TestimonialPage = () => {
         
         <h2 style={styles.ctaTitle}>Ready to Experience FeelMe Town?</h2>
         <p style={styles.ctaSubtitle}>
-          Aap bhi enjoy kar sakte hain hamara amazing movie experience. Book your tickets today!
+        You too can enjoy our amazing movie experience. Book your tickets today!
         </p>
         <div style={styles.ctaButtons}>
           <button style={styles.primaryButton}>
@@ -759,6 +1003,309 @@ const styles = {
   contactSubtext: {
     fontSize: '0.9rem',
     opacity: 0.8,
+  },
+  loadingContainer: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '4rem 2rem',
+    textAlign: 'center' as const,
+  },
+  loadingSpinner: {
+    width: '50px',
+    height: '50px',
+    border: '4px solid rgba(255, 255, 255, 0.3)',
+    borderTop: '4px solid #ED2024',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    marginBottom: '1rem',
+  },
+  loadingText: {
+    fontSize: '1.2rem',
+    color: 'rgba(255, 255, 255, 0.8)',
+    margin: '0',
+  },
+  errorContainer: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '4rem 2rem',
+    textAlign: 'center' as const,
+  },
+  errorText: {
+    fontSize: '1.2rem',
+    color: '#ff6b6b',
+    margin: '0 0 0.5rem 0',
+    fontWeight: '600',
+  },
+  errorSubtext: {
+    fontSize: '1rem',
+    color: 'rgba(255, 255, 255, 0.7)',
+    margin: '0',
+  },
+  // Google Reviews Styles
+  googleReviewsSection: {
+    padding: '4rem 2rem',
+    background: 'rgba(255, 255, 255, 0.05)',
+    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+    position: 'relative' as const,
+    overflow: 'hidden',
+  },
+  googleReviewsImageContainer: {
+    position: 'absolute' as const,
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    zIndex: 0,
+    opacity: 0.08,
+    pointerEvents: 'none' as const,
+  },
+  googleReviewsBackgroundImage: {
+    width: '500px',
+    height: 'auto',
+    objectFit: 'contain' as const,
+    filter: 'grayscale(20%)',
+  },
+  googleReviewsHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '3rem',
+    flexWrap: 'wrap' as const,
+    gap: '2rem',
+    position: 'relative' as const,
+    zIndex: 1,
+  },
+  googleMapsLogo: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '60px',
+    height: '60px',
+    background: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: '12px',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+  },
+  googleReviewsTitle: {
+    flex: 1,
+    textAlign: 'center' as const,
+  },
+  googleTitle: {
+    fontSize: '2.5rem',
+    fontWeight: '700',
+    color: '#ffffff',
+    margin: '0 0 0.5rem 0',
+    fontFamily: "'Arial', sans-serif",
+  },
+  googleSubtitle: {
+    fontSize: '1.1rem',
+    color: 'rgba(255, 255, 255, 0.8)',
+    margin: '0',
+  },
+  googleRating: {
+    textAlign: 'center' as const,
+    background: 'rgba(255, 255, 255, 0.1)',
+    padding: '1.5rem',
+    borderRadius: '12px',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+  },
+  googleRatingNumber: {
+    fontSize: '2.5rem',
+    fontWeight: '700',
+    color: '#4285F4',
+    margin: '0 0 0.5rem 0',
+  },
+  googleStarsDisplay: {
+    marginBottom: '0.5rem',
+  },
+  googleReviewCount: {
+    fontSize: '0.9rem',
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  googleReviewsContainer: {
+    position: 'relative' as const,
+    zIndex: 1,
+  },
+  googleLoadingContainer: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '3rem 2rem',
+    textAlign: 'center' as const,
+  },
+  googleReviewsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '2rem',
+    maxWidth: '1200px',
+    margin: '0 auto',
+  },
+  googleReviewCard: {
+    background: '#2D2D2D',
+    borderRadius: '25px',
+    padding: '0',
+    border: 'none',
+    position: 'relative' as const,
+    overflow: 'hidden',
+    boxShadow: '0 6px 20px rgba(0, 0, 0, 0.4)',
+    width: '500px',
+    height: '450px',
+  },
+  googleCardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: '1rem',
+  },
+  googleProfileImage: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '50%',
+    objectFit: 'cover' as const,
+    marginRight: '1rem',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+  },
+  googleUserInfo: {
+    flex: 1,
+  },
+  googleUserName: {
+    fontSize: '1.1rem',
+    fontWeight: '600',
+    color: '#ffffff',
+    margin: '0 0 0.25rem 0',
+  },
+  googleReviewTime: {
+    fontSize: '0.85rem',
+    color: 'rgba(255, 255, 255, 0.6)',
+    margin: '0',
+  },
+  googleIcon: {
+    marginLeft: 'auto',
+  },
+  googleStarsContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '0.25rem',
+    marginBottom: '0',
+  },
+  googleStar: {
+    fontSize: '2rem',
+    marginRight: '0',
+    animation: 'starPop 0.3s ease-out forwards',
+    transform: 'scale(0)',
+  },
+  googleReviewText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    lineHeight: '1.6',
+    margin: '0 0 1rem 0',
+    fontSize: '0.95rem',
+    borderRadius: '25px',
+    
+  },
+  googleReviewFooter: {
+    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+    paddingTop: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  googleReviewSource: {
+    fontSize: '0.8rem',
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontWeight: '500',
+  },
+  // New Google Card Layout Styles
+  googleCardTopHeader: {
+    background: '#2D2D2D',
+    padding: '1.5rem 2rem',
+    borderTopLeftRadius: '25px',
+    borderTopRightRadius: '25px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '1rem',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+  },
+  googleLogoContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleReviewsHeaderText: {
+    fontSize: '1.1rem',
+    fontWeight: '600',
+    color: '#ffffff',
+    margin: '0',
+  },
+  googleMainContent: {
+    background: '#ffffff',
+    padding: '3rem 2rem',
+    minHeight: '280px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    justifyContent: 'center',
+    textAlign: 'center' as const,
+    animation: 'slideInContent 0.6s ease-out',
+  },
+  googleCustomerName: {
+    fontSize: '1.6rem',
+    fontWeight: '700',
+    color: '#333333',
+    margin: '0 0 1.5rem 0',
+    textAlign: 'center' as const,
+    animation: 'slideInFromLeft 0.5s ease-out',
+  },
+  googleReviewMessage: {
+    fontSize: '1.2rem',
+    color: '#666666',
+    lineHeight: '1.7',
+    margin: '0',
+    textAlign: 'center' as const,
+    animation: 'slideInFromRight 0.7s ease-out',
+  },
+  googleRatingSection: {
+    background: '#2D2D2D',
+    padding: '2rem',
+    borderBottomLeftRadius: '25px',
+    borderBottomRightRadius: '25px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    gap: '0.75rem',
+    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+    animation: 'slideInFromBottom 0.8s ease-out',
+  },
+  googleRatingText: {
+    fontSize: '1.2rem',
+    fontWeight: '600',
+    color: '#ffffff',
+    margin: '0',
+  },
+  // Single Card Container Styles
+  singleCardContainer: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    maxWidth: '550px',
+    margin: '0 auto',
+    gap: '2.5rem',
+  },
+  reviewDots: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '0.75rem',
+  },
+  reviewDot: {
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    outline: 'none',
   },
 };
 

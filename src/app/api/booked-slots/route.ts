@@ -37,20 +37,12 @@ export async function GET(request: NextRequest) {
     const bookedSlots = combinedBookings.filter((booking) => {
       const bookingData = booking as Record<string, unknown>;
       const matchesDate = bookingData.date === date;
-      const matchesStatus = ['completed', 'pending', 'incomplete', 'manual'].includes(bookingData.status as string);
+      const matchesStatus = ['completed', 'pending', 'incomplete', 'manual', 'confirmed'].includes(bookingData.status as string);
       const matchesTheater = !theaterName || bookingData.theaterName === theaterName;
       
       // Debug log for each booking being checked
       if (matchesDate && matchesTheater) {
-        console.log('🔍 Checking booking:', {
-          date: bookingData.date,
-          theater: bookingData.theaterName,
-          time: bookingData.time,
-          status: bookingData.status,
-          isManual: bookingData.isManualBooking,
-          bookingType: bookingData.bookingType,
-          matchesStatus
-        });
+        
       }
       
       return matchesDate && matchesStatus && matchesTheater;
@@ -59,15 +51,12 @@ export async function GET(request: NextRequest) {
     // Extract time slots from booked slots
     const bookedTimeSlots = bookedSlots.map((booking) => (booking as Record<string, unknown>).time);
 
-    console.log('📅 Retrieved booked slots from all collections:', {
-      date,
-      theaterName,
-      bookedTimeSlots,
-      totalBookings: bookedSlots.length,
-      mainBookings: allBookings.length,
-      incompleteBookings: incompleteBookings.length,
-      combinedBookings: combinedBookings.length
-    });
+    
+
+    // Debug: Show exact time format from database
+    if (bookedTimeSlots.length > 0) {
+      
+    }
 
     return NextResponse.json({
       success: true,
@@ -76,10 +65,11 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching booked slots:', error);
+    
     return NextResponse.json(
       { success: false, error: 'Failed to fetch booked slots' },
       { status: 500 }
     );
   }
 }
+

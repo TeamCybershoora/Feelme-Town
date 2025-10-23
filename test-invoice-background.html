@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Invoice Page Background</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: url('/images/bg7.png') center/cover fixed; color: white; }
+        .container { max-width: 600px; margin: 0 auto; background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 30px; border-radius: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); }
+        .test-button { 
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white; padding: 15px 30px; text-decoration: none; 
+            border-radius: 50px; display: inline-block; font-weight: 600;
+            margin: 10px; transition: all 0.3s ease; border: none; cursor: pointer;
+        }
+        .test-button:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
+        .info { background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px; margin: 20px 0; border-left: 4px solid #4ecdc4; backdrop-filter: blur(10px); }
+        .success { background: rgba(46, 204, 113, 0.2); padding: 20px; border-radius: 15px; margin: 20px 0; border-left: 4px solid #2ecc71; backdrop-filter: blur(10px); }
+        h1 { color: white; text-align: center; margin-bottom: 30px; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+        h3 { color: white; margin-bottom: 15px; }
+        ul { line-height: 1.8; }
+        .highlight { background: rgba(255, 235, 59, 0.3); padding: 4px 8px; border-radius: 6px; }
+        input { width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,0.3); border-radius: 10px; margin: 10px 0; background: rgba(255,255,255,0.1); color: white; backdrop-filter: blur(10px); }
+        input::placeholder { color: rgba(255,255,255,0.7); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Test Invoice Page Background</h1>
+        
+        <div class="info">
+            <h3>🆕 Updated Invoice Page Design:</h3>
+            <ul>
+                <li><strong>🎨 Custom Background:</strong> Uses bg7.png image background</li>
+                <li><strong>🚫 No Navbar/Footer:</strong> Clean invoice-only view</li>
+                <li><strong>✨ Glassmorphism:</strong> Transparent buttons with blur effects</li>
+                <li><strong>🎯 Professional Look:</strong> Enhanced shadows and borders</li>
+                <li><strong>📱 Responsive:</strong> Works on all devices</li>
+            </ul>
+        </div>
+
+        <div class="success">
+            <h3>🧪 Test the Updated Design:</h3>
+            <p>Enter a booking ID to test the new invoice page design:</p>
+            <input type="text" id="bookingId" placeholder="Enter Booking ID (e.g., FMT-2025-1023-001-123456-42)" value="FMT-2025-1023-001-123456-42">
+            <div style="text-align: center; margin: 20px 0;">
+                <button onclick="testInvoicePage()" class="test-button">
+                    🎨 Test New Invoice Design
+                </button>
+            </div>
+        </div>
+
+        <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px; margin: 20px 0; backdrop-filter: blur(10px);">
+            <h3>✅ What You Should See:</h3>
+            <ul>
+                <li><strong>Background:</strong> <span class="highlight">bg7.png image</span> as background</li>
+                <li><strong>No Navigation:</strong> No navbar or footer visible</li>
+                <li><strong>Action Bar:</strong> Transparent header with white text</li>
+                <li><strong>Invoice Card:</strong> White invoice with enhanced shadow</li>
+                <li><strong>Buttons:</strong> Glassmorphism style with blur effects</li>
+                <li><strong>Footer:</strong> Transparent footer with gradient buttons</li>
+            </ul>
+        </div>
+
+        <div style="background: rgba(46, 204, 113, 0.2); padding: 20px; border-radius: 15px; margin: 20px 0; border-left: 4px solid #2ecc71; backdrop-filter: blur(10px);">
+            <h3>🎯 Design Features:</h3>
+            <ul>
+                <li><strong>Custom Background:</strong> Uses your bg7.png image background</li>
+                <li><strong>Clean Interface:</strong> No distracting navigation elements</li>
+                <li><strong>Modern Effects:</strong> Backdrop blur and transparency</li>
+                <li><strong>Professional Invoice:</strong> White card with proper shadows</li>
+                <li><strong>Easy Actions:</strong> Clear print and download buttons</li>
+            </ul>
+        </div>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <p style="color: rgba(255,255,255,0.8); font-size: 14px;">
+                Perfect! Now the invoice page uses your custom bg7.png background! 🎬✨
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function testInvoicePage() {
+            const bookingId = document.getElementById('bookingId').value.trim();
+            if (!bookingId) {
+                alert('Please enter a booking ID');
+                return;
+            }
+            
+            const url = `http://localhost:3000/invoice/${encodeURIComponent(bookingId)}`;
+            window.open(url, '_blank');
+        }
+    </script>
+</body>
+</html>

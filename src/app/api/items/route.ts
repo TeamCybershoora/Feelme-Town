@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching items:', error);
+    
     return NextResponse.json(
       { 
         success: false, 
@@ -27,3 +27,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

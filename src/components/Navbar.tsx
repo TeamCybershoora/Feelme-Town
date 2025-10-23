@@ -73,7 +73,7 @@ const Navbar = () => {
     
     // If 5 clicks within 3 seconds, redirect to admin
     if (logoClickCount >= 4) { // 4 because we just incremented
-      console.log('🔐 Admin access granted!');
+      
       router.push('/Administrator');
       setLogoClickCount(0); // Reset counter
     }
@@ -2359,6 +2359,7 @@ const Navbar = () => {
 };
 
 export default Navbar;
+
 
 
 

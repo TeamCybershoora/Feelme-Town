@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import Image from 'next/image';
 import MoviePopup from './MoviePopup';
 
@@ -56,12 +56,12 @@ function mapIndustry(industry: Industry) {
 }
 
 // Card
-function MovieCard({ movie, onCardClick, isSelected = false }: { movie: Movie; onCardClick: (movie: Movie) => void; isSelected?: boolean }) {
+const MovieCard = memo(function MovieCard({ movie, onCardClick, isSelected = false }: { movie: Movie; onCardClick: (movie: Movie) => void; isSelected?: boolean }) {
   const [isHovered, setIsHovered] = useState(false);
 
-  const handleCardClick = () => {
+  const handleCardClick = useCallback(() => {
     onCardClick(movie);
-  };
+  }, [movie, onCardClick]);
 
   return (
     <div
@@ -75,6 +75,9 @@ function MovieCard({ movie, onCardClick, isSelected = false }: { movie: Movie; o
           src={movie.image}
           alt={movie.title}
           fill
+          priority={isSelected}
+          loading="eager"
+          sizes="(max-width: 768px) 33vw, (max-width: 1200px) 33vw, 25vw"
           className="card-image"
           style={{ objectFit: 'cover' }}
           onError={(e) => { (e.target as HTMLImageElement).src = '/bg.png'; }}
@@ -147,7 +150,7 @@ function MovieCard({ movie, onCardClick, isSelected = false }: { movie: Movie; o
       `}</style>
     </div>
   );
-}
+});
 
 export default function Movies({
   searchTerm = '',
@@ -168,9 +171,10 @@ export default function Movies({
   const [error, setError] = useState<string | null>(null);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
+  const [hasInitialLoad, setHasInitialLoad] = useState(false);
 
   const handleCardClick = (movie: Movie) => {
-    console.log('🎬 Movies: Card clicked:', movie.title);
+    
     setSelectedMovie(movie);
     setIsPopupOpen(true);
   };
@@ -181,97 +185,180 @@ export default function Movies({
   };
 
   const fetchMovies = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
+    const maxRetries = 3;
+    let retryCount = 0;
+    let success = false;
+    
+    while (retryCount < maxRetries && !success) {
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        if (retryCount > 0) {
+          
+        }
 
-      const map = mapIndustry(industry);
-      const params = new URLSearchParams({
-        page: String(currentPage),
-        language: language || map.language || 'en-US',
-      });
+        const map = mapIndustry(industry);
+        const params = new URLSearchParams({
+          page: String(currentPage),
+          language: language || map.language || 'en-US',
+          // Show newest movies first
+          sortBy: 'primary_release_date.desc',
+        });
 
-      // Industry-only filters when not searching
-      if (!searchTerm && map.region) params.set('region', map.region);
-      if (!searchTerm && map.wol) params.set('wol', map.wol); // server maps to with_original_language
+        // Industry-only filters when not searching
+        if (!searchTerm && map.region) params.set('region', map.region);
+        if (!searchTerm && map.wol) params.set('wol', map.wol); // server maps to with_original_language
 
-      // Search or Discover filters
-      if (searchTerm) params.set('query', searchTerm);
-      if (!searchTerm && selectedYear) params.set('year', selectedYear);
-      if (!searchTerm && selectedGenre) params.set('genre', selectedGenre);
+        // Search or Discover filters
+        if (searchTerm) params.set('query', searchTerm);
+        if (!searchTerm && selectedYear) params.set('year', selectedYear);
+        if (!searchTerm && selectedGenre) params.set('genre', selectedGenre);
 
-      const response = await fetch(`/api/tmdb?${params.toString()}`);
-      if (!response.ok) throw new Error('Failed to fetch movies');
+        // Add cache-busting parameter if retrying
+        if (retryCount > 0) {
+          params.set('_cb', Date.now().toString());
+        }
 
-      const data = await response.json();
+        const response = await fetch(`/api/tmdb?${params.toString()}`, {
+          // Increase timeout for more reliable fetching
+          signal: AbortSignal.timeout(10000 + (retryCount * 5000))
+        });
+        
+        if (!response.ok) throw new Error(`Failed to fetch movies: ${response.status}`);
 
-      const transformed: Movie[] = (data.results ?? []).map((m: unknown, index: number) => {
-        const movie = m as {
-          id: number;
-          title?: string;
-          name?: string;
-          release_date?: string;
-          first_air_date?: string;
-          vote_average?: number;
-          poster_path?: string;
-          overview?: string;
-          genre_ids?: number[];
-        };
-        return {
-          id: movie.id,
-          title: movie.title ?? movie.name ?? 'Untitled',
-          year: movie.release_date
-            ? new Date(movie.release_date).getFullYear()
-            : (movie.first_air_date ? new Date(movie.first_air_date).getFullYear() : 2023),
-          rating: parseFloat(((movie.vote_average ?? 0) / 2).toFixed(1)), // 10 -> 5 scale
-          image: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '/bg.png',
-          description: movie.overview || 'No description available',
-          isSubscription: Math.random() > 0.6,
-          isFollowing: index < 3,
-          genre: Array.isArray(movie.genre_ids) && movie.genre_ids.length ? String(movie.genre_ids) : 'Action',
-        };
-      });
+        const data = await response.json();
+        
+        if (!data.results || !Array.isArray(data.results)) {
+          throw new Error('Invalid API response format');
+        }
 
-      setMovies(transformed);
-    } catch {
-      setError('Failed to load movies. Please try again later.');
-      setMovies((prev) =>
-        prev.length
-          ? prev
-          : [{
-              id: 1, title: 'Fallback Movie', year: 2023, rating: 4.2,
-              image: '/bg.png', description: 'Fallback description.',
-              isSubscription: true, isFollowing: true,
-            }]
-      );
-    } finally {
-      setIsLoading(false);
+        const transformed: Movie[] = (data.results ?? []).map((m: unknown, index: number) => {
+          const movie = m as {
+            id: number;
+            title?: string;
+            name?: string;
+            release_date?: string;
+            first_air_date?: string;
+            vote_average?: number;
+            poster_path?: string;
+            overview?: string;
+            genre_ids?: number[];
+          };
+          return {
+            id: movie.id,
+            title: movie.title ?? movie.name ?? 'Untitled',
+            year: movie.release_date
+              ? new Date(movie.release_date).getFullYear()
+              : (movie.first_air_date ? new Date(movie.first_air_date).getFullYear() : 2023),
+            rating: parseFloat(((movie.vote_average ?? 0) / 2).toFixed(1)), // 10 -> 5 scale
+            image: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '/bg.png',
+            description: movie.overview || 'No description available',
+            isSubscription: Math.random() > 0.6,
+            isFollowing: index < 3,
+            genre: Array.isArray(movie.genre_ids) && movie.genre_ids.length ? String(movie.genre_ids) : 'Action',
+          };
+        });
+
+        setMovies(transformed);
+        setHasInitialLoad(true);
+        success = true;
+      } catch (err) {
+        
+        retryCount++;
+        
+        if (retryCount >= maxRetries) {
+          setError(`फिल्में लोड करने में समस्या हुई। कृपया कुछ देर बाद पुनः प्रयास करें।`);
+          setMovies((prev) =>
+            prev.length
+              ? prev
+              : [{
+                  id: 1, 
+                  title: 'Fallback Movie', 
+                  year: 2023, 
+                  rating: 4.2,
+                  image: '/bg.png', 
+                  description: 'Fallback description.',
+                  isSubscription: true, 
+                  isFollowing: true,
+                }]
+          );
+          setHasInitialLoad(true);
+        } else {
+          // Wait before retrying (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        }
+      } finally {
+        if (success || retryCount >= maxRetries) {
+          setIsLoading(false);
+        }
+      }
     }
   }, [currentPage, searchTerm, selectedYear, selectedGenre, industry, language]);
 
+  // Single useEffect to handle all movie fetching and filtering
   useEffect(() => {
     fetchMovies();
   }, [fetchMovies]);
-
-  // Client-side filter (optional redundancy)
+  
+  // Show loading indicator while fetching
   useEffect(() => {
+    if (isLoading) {
+      
+    }
+  }, [isLoading]);
+
+  // Memoized filtering logic for better performance
+  const filteredMoviesData = useMemo(() => {
+    // Get current year for filtering
+    const currentYear = new Date().getFullYear();
+    
+    // Log for debugging
+    
+    
     const filtered = movies.filter((movie) => {
-      const matchesSearch = movie.title.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesYear = !selectedYear || movie.year.toString() === selectedYear;
+      // Convert everything to lowercase for case-insensitive comparison
+      const titleLower = movie.title.toLowerCase();
+      const searchLower = searchTerm.toLowerCase();
+      
+      // Basic search - check if title contains search term
+      const matchesSearch = searchTerm === '' || titleLower.includes(searchLower);
+      
+      // Year filter - if "All Years" or empty, show all years
+      const matchesYear = !selectedYear || selectedYear === 'All Years' || movie.year.toString() === selectedYear;
+      
+      // Genre filter - if empty, show all genres
       const matchesGenre = !selectedGenre || movie.genre === selectedGenre;
-      return matchesSearch && matchesYear && matchesGenre;
+      
+      // Filter out future movies
+      const isNotFutureMovie = movie.year <= currentYear;
+      
+      // Debug log for first few movies
+      if (movies.indexOf(movie) < 5) {
+        
+      }
+      
+      return matchesSearch && matchesYear && matchesGenre && isNotFutureMovie;
     });
-    setFilteredMovies(filtered);
-  }, [movies, searchTerm, selectedYear, selectedGenre]);
-
-  useEffect(() => {
+    
+    
+    
+    // Sort by year (newest first) for better organization
+    filtered.sort((a, b) => b.year - a.year);
+    
+    // Only show what's needed for current view (virtual rendering)
     const startIndex = 0;
-    const endIndex = itemsPerPage;
-    const currentMovies = filteredMovies.slice(startIndex, endIndex);
-    setVisibleMovies([]);
-    const timer = setTimeout(() => setVisibleMovies(currentMovies), 300);
-    return () => clearTimeout(timer);
-  }, [filteredMovies, currentPage, itemsPerPage]);
+    const endIndex = Math.min(itemsPerPage, filtered.length);
+    const currentMovies = filtered.slice(startIndex, endIndex);
+    
+    return { filtered, currentMovies };
+  }, [movies, searchTerm, selectedYear, selectedGenre, itemsPerPage]);
+  
+  // Update state based on memoized calculations
+  useEffect(() => {
+    setFilteredMovies(filteredMoviesData.filtered);
+    setVisibleMovies(filteredMoviesData.currentMovies);
+  }, [filteredMoviesData]);
 
   // Calculate dynamic container height based on selected rows
   const getContainerHeight = () => {
@@ -293,14 +380,14 @@ export default function Movies({
     return (
        <div className="error-container">
          <div className="error-message">
-           <h3>Oops! Something went wrong</h3>
+           <h3>Oops! कुछ गलत हो गया</h3>
            <p>{error}</p>
-           <button onClick={() => fetchMovies()} className="retry-button">Try Again</button>
+           <button onClick={() => fetchMovies()} className="retry-button">पुनः प्रयास करें</button>
          </div>
          <style jsx>{`
            .error-container { display: flex; justify-content: center; align-items: center; min-height: 400px; padding: 2rem; }
-           .error-message { text-align: center; color: #ffffff; background: rgba(255, 69, 69, 0.1); padding: 2rem; border-radius: 16px; border: 1px solid rgba(255, 69, 69, 0.2); }
-           .error-message h3 { margin: 0 0 1rem 0; color: #ff4545; }
+           .error-message { text-align: center; color: #ffffff; background: rgba(255, 69, 69, 0.1); padding: 2rem; border-radius: 16px; border: 1px solid rgba(255, 69, 69, 0.2); max-width: 500px; }
+           .error-message h3 { margin: 0 0 1rem 0; color: #ff4545; font-size: 1.5rem; }
            .retry-button { background: linear-gradient(135deg, #8b45ff 0%, #6b2cff 100%); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; margin-top: 1rem; transition: all 0.3s ease; }
            .retry-button:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(139, 69, 255, 0.3); }
          `}</style>
@@ -308,9 +395,13 @@ export default function Movies({
     );
   }
 
-  if (isLoading) {
+  if (isLoading && !hasInitialLoad) {
     return (
        <div className="loading-grid" style={{ height: `${containerHeight.desktop}px` }}>
+         <div className="loading-center">
+           <div className="loading-spinner"></div>
+           <p className="loading-text">फिल्में लोड हो रही हैं...</p>
+         </div>
          {Array.from({ length: itemsPerPage }).map((_, index) => (
            <div key={index} className="loading-card">
              <div className="loading-shimmer"></div>
@@ -326,9 +417,41 @@ export default function Movies({
              padding: 0 1rem; 
              grid-template-rows: repeat(${selectedRows}, 280px);
              overflow: hidden;
+             position: relative;
            }
-           .loading-card { background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 16px; height: 280px; overflow: hidden; position: relative; }
-           .loading-shimmer { position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,69,69,0.1), transparent); animation: shimmer 2s infinite; }
+           .loading-center {
+             position: absolute;
+             top: 50%;
+             left: 50%;
+             transform: translate(-50%, -50%);
+             z-index: 10;
+             display: flex;
+             flex-direction: column;
+             align-items: center;
+             background: rgba(0,0,0,0.7);
+             padding: 2rem;
+             border-radius: 16px;
+             backdrop-filter: blur(10px);
+           }
+           .loading-spinner {
+             width: 50px;
+             height: 50px;
+             border: 4px solid rgba(139, 69, 255, 0.3);
+             border-top: 4px solid #8b45ff;
+             border-radius: 50%;
+             animation: spin 1s linear infinite;
+           }
+           .loading-text {
+             margin-top: 1rem;
+             color: white;
+             font-weight: 600;
+           }
+           @keyframes spin {
+             0% { transform: rotate(0deg); }
+             100% { transform: rotate(360deg); }
+           }
+           .loading-card { background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 16px; height: 280px; overflow: hidden; position: relative; opacity: 0.3; }
+           .loading-shimmer { position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(139,69,255,0.1), transparent); animation: shimmer 1s infinite; will-change: transform; }
            @keyframes shimmer { 0% { left: -100%; } 100% { left: 100%; } }
            @media (min-width: 1200px) { 
              .loading-grid { 
@@ -351,6 +474,13 @@ export default function Movies({
                height: ${containerHeight.mobile}px !important;
              }
              .loading-card { height: 10rem; }
+             .loading-center {
+               padding: 1rem;
+             }
+             .loading-spinner {
+               width: 30px;
+               height: 30px;
+             }
            }
          `}</style>
        </div>
@@ -371,9 +501,13 @@ export default function Movies({
               <div
                 key={movie.id}
                 className="movie-item"
-                style={{ 
-                  animationDelay: `${index * 0.1}s`, 
-                  animation: 'fadeInUp 0.6s ease-out forwards',
+                style={{
+                  // Faster animations with shorter delays
+                  animationName: 'fadeInUp',
+                  animationDuration: '0.3s',
+                  animationTimingFunction: 'ease-out',
+                  animationFillMode: 'forwards',
+                  animationDelay: `${index * 0.03}s`,
                   // Hide items beyond the selected rows
                   display: index >= (selectedRows * 4) ? 'none' : 'block'
                 }}
@@ -416,7 +550,10 @@ export default function Movies({
         
         .movie-item { 
           opacity: 0; 
-          transform: translateY(30px); 
+          transform: translateY(30px);
+          will-change: transform, opacity;
+          backface-visibility: hidden;
+          -webkit-font-smoothing: subpixel-antialiased;
         }
         
         @keyframes fadeInUp { 

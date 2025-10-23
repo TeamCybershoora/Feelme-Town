@@ -8,20 +8,20 @@
  * node scripts/cleanup-expired-bookings.js
  * 
  * Or add to cron job:
- * 0 */6 * * * node /path/to/scripts/cleanup-expired-bookings.js
+ * 0 6 * * * node /path/to/scripts/cleanup-expired-bookings.js
  */
 
-const fetch = require('node-fetch');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const BASE_URL = process.env.NEXTAUTH_URL || 'http://localhost:3000';
 
 async function cleanupExpiredBookings() {
   try {
-    console.log('🧹 Starting automatic cleanup of expired bookings...');
-    console.log(`📅 Current time: ${new Date().toISOString()}`);
     
-    // Call the cleanup API
-    const response = await fetch(`${BASE_URL}/api/cleanup-expired`, {
+    
+    
+    // Call the automatic cleanup API
+    const response = await fetch(`${BASE_URL}/api/auto-cleanup`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -35,24 +35,25 @@ async function cleanupExpiredBookings() {
     const result = await response.json();
     
     if (result.success) {
-      console.log('✅ Cleanup completed successfully!');
-      console.log(`📊 Results:`);
-      console.log(`   - Total bookings checked: ${result.totalBookings}`);
-      console.log(`   - Expired bookings deleted: ${result.deletedCount}`);
-      console.log(`   - Remaining valid bookings: ${result.remainingBookings}`);
       
-      if (result.expiredBookings && result.expiredBookings.length > 0) {
-        console.log(`🗑️ Deleted expired bookings:`);
-        result.expiredBookings.forEach(booking => {
-          console.log(`   - ${booking.name} (${booking.theaterName}) - ${booking.date} ${booking.time}`);
+      
+      
+      
+      
+      
+      
+      if (result.deletedBookings && result.deletedBookings.length > 0) {
+        
+        result.deletedBookings.forEach(booking => {
+          
         });
       }
     } else {
-      console.error('❌ Cleanup failed:', result.error);
+      
     }
     
   } catch (error) {
-    console.error('❌ Error during cleanup:', error);
+    
   }
 }
 

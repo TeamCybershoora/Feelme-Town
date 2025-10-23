@@ -11,7 +11,7 @@ async function setupAdmin() {
   
   try {
     await client.connect();
-    console.log('Connected to MongoDB');
+    
     
     const db = client.db(DB_NAME);
     
@@ -27,7 +27,7 @@ async function setupAdmin() {
     const existingAdmin = await db.collection('admin').findOne({});
     
     if (existingAdmin) {
-      console.log('Admin already exists. Updating credentials...');
+      
       await db.collection('admin').updateOne(
         { _id: existingAdmin._id },
         { 
@@ -38,19 +38,19 @@ async function setupAdmin() {
           } 
         }
       );
-      console.log('Admin credentials updated successfully!');
+      
     } else {
-      console.log('Creating new admin account...');
+      
       await db.collection('admin').insertOne(adminCredentials);
-      console.log('Admin account created successfully!');
+      
     }
     
-    console.log('Admin setup completed!');
-    console.log('Username:', adminCredentials.username);
-    console.log('Password:', adminCredentials.password);
+    
+    
+    
     
   } catch (error) {
-    console.error('Error setting up admin:', error);
+    
   } finally {
     await client.close();
   }

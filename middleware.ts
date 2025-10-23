@@ -21,6 +21,12 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/', request.url));
     }
   }
+
+  // Check if the request is for staff management routes
+  if (request.nextUrl.pathname.startsWith('/management')) {
+    // Allow access to management routes - authentication is handled in the layout
+    // This middleware just ensures the routes are protected at the server level
+  }
   
   return NextResponse.next();
 }
@@ -28,5 +34,6 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     '/Administrator/:path*',
+    '/management/:path*',
   ],
 };

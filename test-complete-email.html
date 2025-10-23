@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Complete Email with Attachment + Button</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .test-button { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 15px 30px; text-decoration: none; 
+            border-radius: 50px; display: inline-block; font-weight: 600;
+            margin: 10px; transition: all 0.3s ease;
+        }
+        .test-button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+        .info { background: #e8f5e8; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #28a745; }
+        .warning { background: #fff3cd; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #ffc107; }
+        .success { background: #d4edda; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #28a745; }
+        h1 { color: #333; text-align: center; margin-bottom: 30px; }
+        h3 { color: #555; margin-bottom: 15px; }
+        ul { line-height: 1.6; }
+        .highlight { background: #ffeb3b; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Test Complete Email Implementation</h1>
+        
+        <div class="info">
+            <h3>📧 What's New in Booking Confirmation Email:</h3>
+            <ul>
+                <li><strong>📎 PDF Attachment:</strong> Invoice PDF is automatically attached to email</li>
+                <li><strong>📄 Download Button:</strong> "Download Invoice (PDF)" button is also available</li>
+                <li><strong>✅ Both Options:</strong> Users can either use attachment or click button</li>
+                <li><strong>🔄 Fallback:</strong> If attachment fails, button still works</li>
+            </ul>
+        </div>
+
+        <div class="warning">
+            <h3>⚠️ Test Instructions:</h3>
+            <p>Go to the test page to send yourself a complete email with both attachment and button:</p>
+            <div style="text-align: center; margin: 20px 0;">
+                <a href="http://localhost:3000/test-email-attachment" class="test-button">
+                    🧪 Go to Test Page
+                </a>
+            </div>
+        </div>
+
+        <div class="success">
+            <h3>✅ Expected Email Content:</h3>
+            <ul>
+                <li><strong>Green Notice:</strong> "📎 Invoice Attached! Your booking invoice PDF is attached to this email. You can also download it using the button below."</li>
+                <li><strong>PDF Attachment:</strong> <span class="highlight">invoice-{bookingId}.pdf</span> file attached</li>
+                <li><strong>Download Button:</strong> "Download Invoice (PDF)" button</li>
+                <li><strong>Cancel Button:</strong> "Cancel Booking" button</li>
+                <li><strong>No Payment Breakdown:</strong> Only booking details in email body</li>
+            </ul>
+        </div>
+
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
+            <h3>🎯 User Experience:</h3>
+            <ul>
+                <li><strong>Option 1:</strong> Open PDF attachment directly from email</li>
+                <li><strong>Option 2:</strong> Click "Download Invoice (PDF)" button</li>
+                <li><strong>Both work:</strong> Same PDF content with all booking details</li>
+                <li><strong>Convenience:</strong> Users can choose their preferred method</li>
+            </ul>
+        </div>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <p style="color: #666; font-size: 14px;">
+                This gives users maximum flexibility - they can use the attachment or the button to get their invoice PDF!
+            </p>
+        </div>
+    </div>
+</body>
+</html>

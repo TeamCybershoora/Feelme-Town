@@ -1,7 +1,54 @@
 'use client';
 
+import React, { useEffect, useState } from 'react';
+
+type ServiceItem = {
+  id?: string;
+  name: string;
+  price?: number | string;
+  image?: string;
+  imageUrl?: string;
+};
+
+type ServiceDoc = {
+  _id: string;
+  serviceId: string;
+  name: string;
+  items: ServiceItem[];
+};
 
 export default function Services() {
+    const [services, setServices] = useState<ServiceDoc[]>([]);
+    const [loading, setLoading] = useState<boolean>(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchServices = async () => {
+            try {
+                setLoading(true);
+                setError(null);
+                const res = await fetch('/api/admin/services');
+                const data = await res.json();
+                if (data.success && Array.isArray(data.services)) {
+                    setServices(data.services);
+                } else {
+                    setServices([]);
+                    setError(data.error || 'Failed to load services');
+                }
+            } catch (e) {
+                setError('Failed to load services');
+                setServices([]);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchServices();
+    }, []);
+
+    const foodService = services.find(s => /food|beverage|cake|snack/i.test(s.name));
+    const giftService = services.find(s => /gift/i.test(s.name));
+const decorService = services.find(s => /(decor|decoration|party|patry|place)/i.test(s.name));
     return (
         <div className="services-page">
             <style jsx>{`
@@ -368,7 +415,7 @@ export default function Services() {
                 </div>
             </section>
 
-            {/* Food & Beverages Section */}
+            {/* Food & Beverages Section (dynamic from services collection) */}
             <section className="services-section">
                 <div className="container">
                     <h2 className="section-title">Food & Beverages</h2>
@@ -376,77 +423,29 @@ export default function Services() {
                         Savor our delectable food offerings and carefully chosen drink options, which are designed to entice your palate and enhance your eating experience.
                     </p>
                     <div className="items-grid">
-                        <div className="item-card">
+                      {loading ? (
+                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#d1d5db' }}>Loading...</div>
+                      ) : !foodService || foodService.items.length === 0 ? (
+                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#9ca3af' }}>No items available.</div>
+                      ) : (
+                        foodService.items.map((item, idx) => (
+                          <div className="item-card" key={`food-${idx}`}>
                             <div className="item-image">
-                                <img src="/images/cakes/cake1.webp" alt="Black Forest Cake" />
+                              {item.imageUrl ? (
+                                <img src={item.imageUrl as string} alt={item.name} />
+                              ) : item.image ? (
+                                <img src={item.image} alt={item.name} />
+                              ) : null}
                             </div>
-                            <div className="item-label">Black Forest Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake2.webp" alt="Blueberry Cake" />
-                            </div>
-                            <div className="item-label">Blueberry Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake3.webp" alt="Butterscotch Cake" />
-                            </div>
-                            <div className="item-label">Butterscotch Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake4.webp" alt="Choco Brownie Cake" />
-                            </div>
-                            <div className="item-label">Choco Brownie Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake5.webp" alt="Chocolate Chocochip Cake" />
-                            </div>
-                            <div className="item-label">Chocolate Chocochip Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake6.webp" alt="Chocolate Truffle Cake" />
-                            </div>
-                            <div className="item-label">Chocolate Truffle Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake7.webp" alt="Pineapple Cake" />
-                            </div>
-                            <div className="item-label">Pineapple Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake8.webp" alt="Rasmalai Cake" />
-                            </div>
-                            <div className="item-label">Rasmalai Cake Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake9.webp" alt="Red Velvet Cake" />
-                            </div>
-                            <div className="item-label">Red Velvet Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake10.webp" alt="Strawberry Cake" />
-                            </div>
-                            <div className="item-label">Strawberry Half Kg</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/cakes/cake11.webp" alt="White Forest Cake" />
-                            </div>
-                            <div className="item-label">White Forest Half Kg</div>
-                        </div>
+                            <div className="item-label">{item.name}</div>
+                          </div>
+                        ))
+                      )}
                     </div>
                 </div>
             </section>
 
-            {/* Gifts Section */}
+            {/* Gifts Section (dynamic) */}
             <section className="services-section">
                 <div className="container">
                     <h2 className="section-title">Gifts</h2>
@@ -454,53 +453,29 @@ export default function Services() {
                         Explore our carefully chosen assortment of presents, appropriate for any celebration. Choose the ideal gift from our selection of opulent candies to personalized priceless items.
                     </p>
                     <div className="items-grid">
-                        <div className="item-card">
+                      {loading ? (
+                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#d1d5db' }}>Loading...</div>
+                      ) : !giftService || giftService.items.length === 0 ? (
+                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#9ca3af' }}>No items available.</div>
+                      ) : (
+                        giftService.items.map((item, idx) => (
+                          <div className="item-card" key={`gift-${idx}`}>
                             <div className="item-image">
-                                <img src="/images/gifts/gift1.webp" alt="Big Teddy" />
+                              {item.imageUrl ? (
+                                <img src={item.imageUrl as string} alt={item.name} />
+                              ) : item.image ? (
+                                <img src={item.image} alt={item.name} />
+                              ) : null}
                             </div>
-                            <div className="item-label">Big Teddy</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/gifts/gift2.webp" alt="Flower Bouquet" />
-                            </div>
-                            <div className="item-label">Flower Bouquet</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/gifts/gift3.webp" alt="Premium Rose Bouquet" />
-                            </div>
-                            <div className="item-label">Premium Rose Bouquet</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/gifts/gift4.webp" alt="Rose Bouquet" />
-                            </div>
-                            <div className="item-label">Rose Bouquet</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/gifts/gift5.webp" alt="Small Teddy Bear" />
-                            </div>
-                            <div className="item-label">Small Teddy Bear</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/gifts/gift6.webp" alt="Small Heart Pillow" />
-                            </div>
-                            <div className="item-label">Small Heart Pillow</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/gifts/gift7.webp" alt="Small Rose Bouquet" />
-                            </div>
-                            <div className="item-label">Small Rose Bouquet</div>
-                        </div>
+                            <div className="item-label">{item.name}</div>
+                          </div>
+                        ))
+                      )}
                     </div>
                 </div>
             </section>
 
-            {/* Party Place Section */}
+            {/* Decoration / Party Place Section (dynamic) */}
             <section className="services-section">
                 <div className="container">
                     <h2 className="section-title">Party Place</h2>
@@ -508,42 +483,24 @@ export default function Services() {
                         Elevate your festivities with our versatile party room. Featuring modern facilities and configurable layouts, create unforgettable parties according to your needs.
                     </p>
                     <div className="items-grid">
-                        <div className="item-card">
+                      {loading ? (
+                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#d1d5db' }}>Loading...</div>
+                      ) : !decorService || decorService.items.length === 0 ? (
+                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#9ca3af' }}>No items available.</div>
+                      ) : (
+                        decorService.items.map((item, idx) => (
+                          <div className="item-card" key={`decor-${idx}`}>
                             <div className="item-image">
-                                <img src="/images/party/party1.webp" alt="Candle Path" />
+                              {item.imageUrl ? (
+                                <img src={item.imageUrl as string} alt={item.name} />
+                              ) : item.image ? (
+                                <img src={item.image} alt={item.name} />
+                              ) : null}
                             </div>
-                            <div className="item-label">Candle Path</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/party/party2.webp" alt="Deluxe Fog Entry" />
-                            </div>
-                            <div className="item-label">Deluxe Fog Entry</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/party/party3.webp" alt="LED Numbers" />
-                            </div>
-                            <div className="item-label">LED Numbers</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/party/party4.webp" alt="LUXE Fog Entry" />
-                            </div>
-                            <div className="item-label">LUXE Fog Entry</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/party/party5.webp" alt="Rose Heart & Rose Petals" />
-                            </div>
-                            <div className="item-label">Rose Heart & Rose Petals</div>
-                        </div>
-                        <div className="item-card">
-                            <div className="item-image">
-                                <img src="/images/party/party6.webp" alt="Super LUXE Fog Entry" />
-                            </div>
-                            <div className="item-label">Super LUXE Fog Entry</div>
-                        </div>
+                            <div className="item-label">{item.name}</div>
+                          </div>
+                        ))
+                      )}
                     </div>
                 </div>
             </section>

@@ -29,10 +29,10 @@ export default function AdminLogin() {
       });
 
       const data = await response.json();
-      console.log('API Response:', data);
+      
 
       if (data.success) {
-        console.log('Authentication successful, storing session...');
+        
         // Store admin session
         localStorage.setItem('adminToken', 'authenticated');
         localStorage.setItem('adminLoginTime', Date.now().toString());
@@ -47,7 +47,7 @@ export default function AdminLogin() {
         setIsLoading(false);
       }
     } catch (error) {
-      console.error('Login error:', error);
+      
       setError('Connection error. Please try again.');
       setPassword('');
       setIsLoading(false);
@@ -214,7 +214,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+       
           animation: coloredSlideHorizontal 4s infinite ease-in-out;
           animation-delay: 0s;
         }
@@ -229,7 +229,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+         
           animation: coloredSlideHorizontalReverse 4.5s infinite ease-in-out;
           animation-delay: 1s;
         }
@@ -244,7 +244,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+         
           animation: coloredSlideHorizontal 5s infinite ease-in-out;
           animation-delay: 2s;
         }
@@ -259,7 +259,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+         
           animation: coloredSlideHorizontalReverse 3.5s infinite ease-in-out;
           animation-delay: 3s;
         }
@@ -274,7 +274,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+        
           animation: coloredSlideHorizontal 4.2s infinite ease-in-out;
           animation-delay: 4s;
         }
@@ -289,7 +289,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+          
           animation: coloredSlideHorizontalReverse 4.8s infinite ease-in-out;
           animation-delay: 5s;
         }
@@ -305,7 +305,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+          
           animation: coloredSlideVertical 4.5s infinite ease-in-out;
           animation-delay: 0.5s;
         }
@@ -320,7 +320,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+          
           animation: coloredSlideVerticalReverse 5s infinite ease-in-out;
           animation-delay: 1.5s;
         }
@@ -335,7 +335,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+          
           animation: coloredSlideVertical 4.2s infinite ease-in-out;
           animation-delay: 2.5s;
         }
@@ -350,7 +350,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+          
           animation: coloredSlideVerticalReverse 3.8s infinite ease-in-out;
           animation-delay: 3.5s;
         }
@@ -365,7 +365,7 @@ export default function AdminLogin() {
             rgb(255, 255, 255) 30%, 
             rgb(255, 255, 255) 70%, 
             transparent 100%);
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+        
           animation: coloredSlideVertical 4.7s infinite ease-in-out;
           animation-delay: 4.5s;
         }

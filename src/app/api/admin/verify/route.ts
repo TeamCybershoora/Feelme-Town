@@ -1,70 +1,129 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 
+// POST /api/admin/verify - Verify admin password from database
 export async function POST(request: NextRequest) {
   try {
-    const { password } = await request.json();
+    const body = await request.json();
+    const { password } = body;
 
     if (!password) {
       return NextResponse.json(
-        { success: false, message: 'Password is required' },
+        {
+          success: false,
+          error: 'Password is required'
+        },
         { status: 400 }
       );
     }
 
-    // Connect to database
-    const connectionResult = await database.connect();
-    
-    if (!connectionResult.success) {
-      return NextResponse.json(
-        { success: false, message: 'Database connection failed' },
-        { status: 500 }
-      );
+    // Ensure database connection (null-safe)
+    let dbInstance = database.db();
+    if (!dbInstance) {
+      const connectionResult = await database.connect();
+      if (!connectionResult.success) {
+        return NextResponse.json(
+          { success: false, error: 'Database connection failed' },
+          { status: 500 }
+        );
+      }
+      dbInstance = database.db();
+      if (!dbInstance) {
+        return NextResponse.json(
+          { success: false, error: 'Database instance not available' },
+          { status: 500 }
+        );
+      }
     }
 
-    // Get MongoDB client and database
-    const { MongoClient } = await import('mongodb');
-    const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://teamcybershoora_db_user:zO9NCrGjjQG2MsVv@feelmetown.e1vu4ht.mongodb.net/?retryWrites=true&w=majority&appName=feelmetown";
-    const DB_NAME = 'feelmetown';
-    
-    const client = new MongoClient(MONGODB_URI);
-    await client.connect();
-    const db = client.db(DB_NAME);
-    
-    // Fetch admin credentials from admin collection
-    const admin = await db.collection('admin').findOne({});
-    
-    await client.close();
-    
-    if (!admin) {
+    // Get settings for max login attempts
+    const settings = await database.getSettings();
+    const maxAttempts = Number(settings?.maxLoginAttempts) || 5;
+
+    // Fetch admin by fixed id and verify password manually to track attempts
+    const adminUser = await database.getAdminById('ADM0001');
+    if (!adminUser) {
       return NextResponse.json(
-        { success: false, message: 'Admin not found' },
+        { success: false, error: 'Admin not found' },
         { status: 404 }
       );
     }
 
-    // Verify password
-    if (admin.password === password) {
-      return NextResponse.json({
-        success: true,
-        message: 'Authentication successful',
-        admin: {
-          id: admin._id,
-          username: admin.username || 'admin'
-        }
-      });
-    } else {
+    // Check if account is locked
+    if (adminUser.isLocked) {
       return NextResponse.json(
-        { success: false, message: 'Invalid password' },
-        { status: 401 }
+        {
+          success: false,
+          error: 'Account locked due to too many failed attempts. Contact support.'
+        },
+        { status: 423 }
       );
     }
 
+    // Compare password
+    const isValid = adminUser.password === password;
+
+    const db = database.db();
+    if (!db) {
+      return NextResponse.json(
+        { success: false, error: 'Database instance not available' },
+        { status: 500 }
+      );
+    }
+    const adminsCollection = db.collection('admin');
+    const adminId = adminUser.adminId || adminUser._id;
+
+    if (!isValid) {
+      const currentAttempts = Number(adminUser.failedLoginAttempts || 0) + 1;
+      const shouldLock = currentAttempts >= maxAttempts;
+
+      await adminsCollection.updateOne(
+        { adminId: adminUser.adminId || adminUser._id },
+        {
+          $set: {
+            failedLoginAttempts: currentAttempts,
+            isLocked: shouldLock
+          }
+        }
+      );
+
+      const remaining = Math.max(0, maxAttempts - currentAttempts);
+      return NextResponse.json(
+        {
+          success: false,
+          error: shouldLock
+            ? 'Too many failed attempts. Account locked.'
+            : `Invalid admin password. ${remaining} attempt(s) remaining.`
+        },
+        { status: shouldLock ? 423 : 401 }
+      );
+    }
+
+    // Reset attempts on successful login
+    await adminsCollection.updateOne(
+      { adminId: adminUser.adminId || adminUser._id },
+      { $set: { failedLoginAttempts: 0, isLocked: false, lastLogin: new Date() } }
+    );
+
+    const { password: _, ...adminInfo } = adminUser;
+    return NextResponse.json({
+      success: true,
+      message: 'Admin authentication successful',
+      admin: {
+        id: adminId,
+        name: adminInfo.fullName,
+        email: adminInfo.email,
+        role: adminInfo.role
+      }
+    });
   } catch (error) {
-    console.error('Admin verification error:', error);
     return NextResponse.json(
-      { success: false, message: 'Internal server error' },
+      {
+        success: false,
+        error: 'Failed to verify admin password'
+      },
       { status: 500 }
     );
   }
 }
+

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Updated Invoice</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .test-button { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 15px 30px; text-decoration: none; 
+            border-radius: 50px; display: inline-block; font-weight: 600;
+            margin: 10px; transition: all 0.3s ease;
+        }
+        .test-button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+        .info { background: #e8f5e8; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #28a745; }
+        .warning { background: #fff3cd; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #ffc107; }
+        .success { background: #d4edda; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #28a745; }
+        h1 { color: #333; text-align: center; margin-bottom: 30px; }
+        h3 { color: #555; margin-bottom: 15px; }
+        ul { line-height: 1.6; }
+        .highlight { background: #ffeb3b; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📄 Test Updated Invoice Design</h1>
+        
+        <div class="info">
+            <h3>🆕 Updated Invoice Features:</h3>
+            <ul>
+                <li><strong>🎯 Occasion & Date Section:</strong> Orange section with Occasion, Date & Time</li>
+                <li><strong>🏛️ Full Theater Name:</strong> Shows complete theater name in table</li>
+                <li><strong>🎨 Decoration Items:</strong> Shows each decoration with quantity and price</li>
+                <li><strong>🎂 Cake Items:</strong> Shows selected cakes with details</li>
+                <li><strong>🎁 Gift Items:</strong> Shows selected gifts with details</li>
+                <li><strong>💰 Total Amount:</strong> Highlighted total row in table</li>
+                <li><strong>💳 Payable Amount:</strong> Shows balance due (not advance payment)</li>
+            </ul>
+        </div>
+
+        <div class="warning">
+            <h3>🧪 Test the Updated Invoice:</h3>
+            <p>Test the invoice page with the new design:</p>
+            <div style="text-align: center; margin: 20px 0;">
+                <a href="http://localhost:3000/invoice/FMT-2025-1023-001-123456-42" class="test-button" target="_blank">
+                    📄 Test Invoice Page
+                </a>
+                <a href="http://localhost:3000/test-email-attachment" class="test-button" target="_blank">
+                    📧 Test Email with Invoice
+                </a>
+            </div>
+        </div>
+
+        <div class="success">
+            <h3>✅ What You Should See:</h3>
+            <ul>
+                <li><strong>Orange Section:</strong> <span class="highlight">Occasion & Date/Time</span> in orange box</li>
+                <li><strong>Table Items:</strong>
+                    <ul>
+                        <li>Full theater name (e.g., "EROS (COUPLES) (FMT-Hall-1)")</li>
+                        <li>Extra guests (if any) with quantity</li>
+                        <li>Decoration items with individual pricing</li>
+                        <li>Cake items with individual pricing</li>
+                        <li>Gift items with individual pricing</li>
+                        <li>Slot booking fee</li>
+                        <li>Balance due</li>
+                        <li><strong>Total Amount</strong> in highlighted row</li>
+                    </ul>
+                </li>
+                <li><strong>Payable Amount:</strong> Shows balance due amount</li>
+            </ul>
+        </div>
+
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
+            <h3>📋 Invoice Structure:</h3>
+            <ol>
+                <li><strong>Header:</strong> Invoice title and company badge</li>
+                <li><strong>Bill To:</strong> Customer information</li>
+                <li><strong>Occasion & Date:</strong> Orange section with occasion and date/time</li>
+                <li><strong>Items Table:</strong> All booking items with pricing</li>
+                <li><strong>Footer:</strong> Stars and payable amount (balance due)</li>
+                <li><strong>Terms:</strong> Payment terms and contact info</li>
+            </ol>
+        </div>
+
+        <div style="background: #e3f2fd; padding: 20px; border-radius: 10px; margin: 20px 0;">
+            <h3>🎯 Key Improvements:</h3>
+            <ul>
+                <li><strong>Cleaner Design:</strong> Removed detailed booking section, kept essential info</li>
+                <li><strong>Better Table:</strong> Shows all items with proper pricing breakdown</li>
+                <li><strong>Correct Payable:</strong> Shows balance due instead of advance payment</li>
+                <li><strong>Item Details:</strong> Decorations, cakes, gifts shown individually</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

@@ -22,7 +22,7 @@ export default function Contact() {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         // Handle form submission here
-        console.log('Form submitted:', formData);
+        
         setIsSubmitted(true);
     };
 
@@ -602,3 +602,4 @@ export default function Contact() {
         </div>
     );
 }
+

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Shield } from 'lucide-react';
 import AdminSidebar from '@/components/AdminSidebar';
 import AdminHeader from '@/components/AdminHeader';
+import ToastManager from '@/components/ToastManager';
 
 export default function AdminLayout({
   children,
@@ -25,28 +26,45 @@ export default function AdminLayout({
     // Immediate authentication check - no loading state
     const adminToken = localStorage.getItem('adminToken');
     const loginTime = localStorage.getItem('adminLoginTime');
-    
-    console.log('Auth check - Token:', adminToken, 'LoginTime:', loginTime);
-    
+
+    const checkSession = async () => {
       if (adminToken === 'authenticated' && loginTime) {
-        // Check if session is still valid (30 days)
-        const currentTime = Date.now();
-        const sessionDuration = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
-      
-        if (currentTime - parseInt(loginTime) < sessionDuration) {
-          console.log('Session valid (30 days), setting authenticated to true');
-          setIsAuthenticated(true);
-        } else {
-          // Session expired after 30 days, clear storage
-          console.log('Session expired after 30 days, clearing storage');
-          localStorage.removeItem('adminToken');
-          localStorage.removeItem('adminLoginTime');
-          localStorage.removeItem('adminUser');
-          setIsAuthenticated(false);
+        try {
+          // Fetch settings to get configurable session lifetime (days)
+          const res = await fetch('/api/admin/settings');
+          const data = await res.json();
+          const sessionTimeoutDays = Number(data?.settings?.sessionTimeout) || 30; // default 30 days
+          const sessionDuration = sessionTimeoutDays * 24 * 60 * 60 * 1000;
+
+          const currentTime = Date.now();
+          if (currentTime - parseInt(loginTime) < sessionDuration) {
+            setIsAuthenticated(true);
+          } else {
+            // Session expired, clear storage
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminLoginTime');
+            localStorage.removeItem('adminUser');
+            setIsAuthenticated(false);
+          }
+        } catch (e) {
+          // Fallback to 30 days if settings fetch fails
+          const currentTime = Date.now();
+          const sessionDuration = 30 * 24 * 60 * 60 * 1000;
+          if (currentTime - parseInt(loginTime) < sessionDuration) {
+            setIsAuthenticated(true);
+          } else {
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminLoginTime');
+            localStorage.removeItem('adminUser');
+            setIsAuthenticated(false);
+          }
         }
-    } else {
-      setIsAuthenticated(false);
-    }
+      } else {
+        setIsAuthenticated(false);
+      }
+    };
+
+    checkSession();
   }, []);
 
   const toggleSidebar = () => {
@@ -69,10 +87,10 @@ export default function AdminLayout({
       });
 
       const data = await response.json();
-      console.log('API Response:', data);
+      
 
       if (data.success) {
-        console.log('Authentication successful, storing session...');
+        
         // Store admin session
         localStorage.setItem('adminToken', 'authenticated');
         localStorage.setItem('adminLoginTime', Date.now().toString());
@@ -87,7 +105,7 @@ export default function AdminLayout({
         setIsLoading(false);
       }
     } catch (error) {
-      console.error('Login error:', error);
+      
       setError('Connection error. Please try again.');
       setPassword('');
       setIsLoading(false);
@@ -193,6 +211,8 @@ export default function AdminLayout({
           {children}
         </main>
       </div>
+      <ToastManager />
     </div>
   );
 }
+

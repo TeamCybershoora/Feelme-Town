@@ -35,7 +35,7 @@ export default function AdminProfileSettings({ isOpen, onClose }: AdminProfileSe
         const parsed = JSON.parse(adminUser);
         setProfileData(prev => ({ ...prev, ...parsed }));
       } catch (error) {
-        console.error('Error parsing admin user:', error);
+        
       }
     }
     
@@ -52,7 +52,7 @@ export default function AdminProfileSettings({ isOpen, onClose }: AdminProfileSe
         setProfileData(prev => ({ ...prev, ...data.admin }));
       }
     } catch (error) {
-      console.error('Error fetching admin profile:', error);
+      
     }
   };
 
@@ -96,7 +96,7 @@ export default function AdminProfileSettings({ isOpen, onClose }: AdminProfileSe
         setMessage(data.message || 'Failed to update password');
       }
     } catch (error) {
-      console.error('Password update error:', error);
+      
       setMessage('Connection error. Please try again.');
     }
 
@@ -127,7 +127,7 @@ export default function AdminProfileSettings({ isOpen, onClose }: AdminProfileSe
         setMessage(data.message || 'Failed to update profile');
       }
     } catch (error) {
-      console.error('Profile update error:', error);
+      
       setMessage('Connection error. Please try again.');
     }
 
@@ -661,3 +661,4 @@ export default function AdminProfileSettings({ isOpen, onClose }: AdminProfileSe
     </div>
   );
 }
+

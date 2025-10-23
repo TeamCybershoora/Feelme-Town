@@ -255,7 +255,7 @@ export default function AiInput() {
 
           if (!apiResponse.ok) {
             const errorData = await apiResponse.json();
-            console.error('API Error Data:', errorData);
+            
             throw new Error(errorData.userMessage || 'Sorry! Our AI models are currently being updated for future improvements. Please wait a moment and try again. Our AI is the fastest AI in the world!');
           }
 
@@ -275,7 +275,7 @@ export default function AiInput() {
           };
           setChatHistory(prev => [...prev, aiMessage]);
         } catch (error) {
-          console.error('Gemma API failed:', error);
+          
           // Fallback response if Gemma fails
           response = "Sorry! Our AI models are currently being updated for future improvements. Please wait a moment and try again. Our AI is the fastest AI in the world!";
           const aiMessage: ChatMessage = {
@@ -302,7 +302,7 @@ export default function AiInput() {
 
           if (!apiResponse.ok) {
             const errorData = await apiResponse.json();
-            console.error('API Error Data:', errorData);
+            
             throw new Error(errorData.userMessage || 'Sorry! Our AI models are currently being updated for future improvements. Please wait a moment and try again. Our AI is the fastest AI in the world!');
           }
 
@@ -322,7 +322,7 @@ export default function AiInput() {
           };
           setChatHistory(prev => [...prev, aiMessage]);
         } catch (error) {
-          console.error('Mistral API failed:', error);
+          
           // Fallback response if Mistral fails
           response = "Sorry! Our AI models are currently being updated for future improvements. Please wait a moment and try again. Our AI is the fastest AI in the world!";
           const aiMessage: ChatMessage = {
@@ -349,7 +349,7 @@ export default function AiInput() {
 
           if (!apiResponse.ok) {
             const errorData = await apiResponse.json();
-            console.error('API Error Data:', errorData);
+            
             throw new Error(errorData.userMessage || 'Sorry! Our AI models are currently being updated for future improvements. Please wait a moment and try again. Our AI is the fastest AI in the world!');
           }
 
@@ -369,7 +369,7 @@ export default function AiInput() {
           };
           setChatHistory(prev => [...prev, aiMessage]);
         } catch (error) {
-          console.error('Mistral 7B API failed:', error);
+          
           // Fallback response if Mistral 7B fails
           response = "Sorry! Our AI models are currently being updated for future improvements. Please wait a moment and try again. Our AI is the fastest AI in the world!";
           const aiMessage: ChatMessage = {

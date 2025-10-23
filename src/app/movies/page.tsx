@@ -69,7 +69,7 @@ export default function MoviesPage() {
   }, []);
 
   const handleBackClick = () => {
-    console.log('Back button clicked, fromAdminBooking:', fromAdminBooking);
+    
     
     // Ensure body scroll is enabled before navigation
     document.body.style.overflow = '';
@@ -84,7 +84,7 @@ export default function MoviesPage() {
       router.push('/theater?reopenBooking=true');
     } else if (fromAdminBooking) {
       // Set flag to reopen admin booking popup
-      console.log('Setting reopen flag for admin booking popup (back button)');
+      
       sessionStorage.setItem('reopenAdminBookingPopup', 'true');
       router.push('/Administrator/bookings');
     } else {
@@ -95,8 +95,8 @@ export default function MoviesPage() {
   const handleMovieSelect = (movieTitle: string) => {
     // Store selected movie in sessionStorage
     sessionStorage.setItem('selectedMovie', movieTitle);
-    console.log('Movie selected:', movieTitle);
-    console.log('From admin booking:', fromAdminBooking);
+    
+    
     
     // Ensure body scroll is enabled before navigation
     document.body.style.overflow = '';
@@ -112,7 +112,7 @@ export default function MoviesPage() {
       router.push('/theater?reopenBooking=true');
     } else if (fromAdminBooking) {
       // Set flag to reopen admin booking popup
-      console.log('Setting reopen flag for admin booking popup');
+      
       sessionStorage.setItem('reopenAdminBookingPopup', 'true');
       router.push('/Administrator/bookings');
     } else {
@@ -517,3 +517,4 @@ export default function MoviesPage() {
     </>
   );
 }
+

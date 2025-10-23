@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useBooking } from '@/contexts/BookingContext';
 
 const FloatingNavigation = () => {
@@ -20,10 +20,45 @@ const FloatingNavigation = () => {
     const [feedbackForm, setFeedbackForm] = useState({ name: '', email: '', phone: '', avatar: '', socialHandle: '', message: '', rating: 0 });
     const [selectedAvatar, setSelectedAvatar] = useState<string>('');
     const [uploadedFileName, setUploadedFileName] = useState<string>('');
-    const [chatMessages, setChatMessages] = useState([
-        { id: 1, text: "Hello! I'm your AI assistant. How can I help you today?", isBot: true }
+    const [chatMessages, setChatMessages] = useState<Array<{id: number, text: string, isBot: boolean, isTyping?: boolean}>>([
+        { id: 1, text: "Heyy! 👋 Main Ankit hun, FeelME Town ka receptionist! Yaar, aaj kya plan hai? Theater booking karna hai kya? I'm super excited to help you! 😊✨", isBot: true }
     ]);
   const [newMessage, setNewMessage] = useState('');
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages are added (only if user is near bottom)
+  useEffect(() => {
+    if (chatMessagesRef.current) {
+      const container = chatMessagesRef.current;
+      const isNearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 100;
+      
+      // Only auto-scroll if user is near the bottom or it's a new conversation
+      if (isNearBottom || chatMessages.length <= 2) {
+        setTimeout(() => {
+          container.scrollTop = container.scrollHeight;
+        }, 100);
+      }
+    }
+  }, [chatMessages]);
+
+  // Disable body scroll when AI popup is open
+  useEffect(() => {
+    if (showAIPopup) {
+      // Disable scrolling
+      document.body.style.overflow = 'hidden';
+      document.body.style.paddingRight = '15px'; // Prevent layout shift
+    } else {
+      // Enable scrolling
+      document.body.style.overflow = 'unset';
+      document.body.style.paddingRight = '0px';
+    }
+
+    // Cleanup function to restore scrolling when component unmounts
+    return () => {
+      document.body.style.overflow = 'unset';
+      document.body.style.paddingRight = '0px';
+    };
+  }, [showAIPopup]);
 
   const toggleMenu = () => {
     setIsOpen(!isOpen);
@@ -41,7 +76,7 @@ const FloatingNavigation = () => {
       case 'AI':
         // Clear chat history when opening AI popup
         setChatMessages([
-          { id: 1, text: "Hello! I'm your AI assistant. How can I help you today?", isBot: true }
+          { id: 1, text: "Heyy! 👋 Main Ankit hun, FeelME Town ka receptionist! Yaar, aaj kya plan hai? Theater booking karna hai kya? I'm super excited to help you! 😊✨", isBot: true }
         ]);
         setShowAIPopup(true);
         break;
@@ -146,17 +181,146 @@ const FloatingNavigation = () => {
         setShowAvatarSelectionPopup(false);
     };
 
-  const handleChatSend = () => {
+  const handleChatSend = async () => {
     if (newMessage.trim()) {
       const userMessage = { id: Date.now(), text: newMessage, isBot: false };
       setChatMessages(prev => [...prev, userMessage]);
+      const currentMessage = newMessage;
       setNewMessage('');
       
-      // Simulate bot response
-      setTimeout(() => {
-        const botResponse = { id: Date.now() + 1, text: "Thank you for your message! I'm here to help you with any questions about FeelMe Town theater.", isBot: true };
-        setChatMessages(prev => [...prev, botResponse]);
-      }, 1000);
+      // Add typing indicator
+      const typingMessage = { id: Date.now() + 1, text: "Ankit is typing...", isBot: true, isTyping: true };
+      setChatMessages(prev => [...prev, typingMessage]);
+      
+      try {
+        console.log('🤖 Sending message to AI:', currentMessage);
+        
+        // Call OpenRouter API
+        const response = await fetch('/api/ai-assistant/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: currentMessage,
+            conversationHistory: chatMessages.filter(msg => !msg.isTyping).map(msg => ({
+              role: msg.isBot ? 'assistant' : 'user',
+              content: msg.text
+            }))
+          }),
+        });
+
+        if (!response.ok) {
+          console.error('❌ AI API Response not ok:', response.status, response.statusText);
+          const errorText = await response.text().catch(() => 'Unknown error');
+          console.error('❌ Error details:', errorText);
+          throw new Error(`AI API Error: ${response.status} - ${errorText}`);
+        }
+
+        // Remove typing indicator
+        setChatMessages(prev => prev.filter(msg => !msg.isTyping));
+
+        // Handle streaming response
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let displayText = '';
+        
+        // Add initial AI message
+        const aiMessageId = Date.now() + 2;
+        setChatMessages(prev => [...prev, { id: aiMessageId, text: '', isBot: true }]);
+
+        if (reader) {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              const chunk = decoder.decode(value, { stream: true });
+              buffer += chunk;
+
+              // Process complete SSE events separated by double newlines
+              let sepIndex;
+              while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+                const eventBlock = buffer.slice(0, sepIndex).trim();
+                buffer = buffer.slice(sepIndex + 2);
+
+                const lines = eventBlock.split('\n');
+                for (const line of lines) {
+                  if (!line.startsWith('data:')) continue;
+                  const dataStr = line.slice(5).trim();
+
+                  if (dataStr === '[DONE]') {
+                    setChatMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+                      )
+                    );
+                    return;
+                  }
+
+                  try {
+                    const parsed = JSON.parse(dataStr);
+                    const delta = parsed?.choices?.[0]?.delta?.content ?? parsed?.content;
+                    if (delta) {
+                      displayText += delta;
+                      setChatMessages(prev =>
+                        prev.map(msg =>
+                          msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+                        )
+                      );
+                    }
+                  } catch {
+                    // Ignore non-JSON or keep-alive events
+                  }
+                }
+              }
+            }
+
+            // Flush any remaining buffered content
+            if (buffer.trim()) {
+              const lines = buffer.trim().split('\n').filter(l => l.startsWith('data:'));
+              for (const line of lines) {
+                const dataStr = line.slice(5).trim();
+                try {
+                  const parsed = JSON.parse(dataStr);
+                  const delta = parsed?.choices?.[0]?.delta?.content ?? parsed?.content;
+                  if (delta) {
+                    displayText += delta;
+                  }
+                } catch {}
+              }
+              setChatMessages(prev =>
+                prev.map(msg =>
+                  msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+                )
+              );
+            }
+          } catch (streamError) {
+            console.error('Streaming error:', streamError);
+            // If streaming fails, show a fallback message
+            setChatMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiMessageId 
+                  ? { ...msg, text: "Sorry yaar, thoda technical issue aa gaya. Main help kar sakta hun - call karo: +91 9870691784 ya WhatsApp: +91 9520936655" }
+                  : msg
+              )
+            );
+          }
+        }
+      } catch (error) {
+        console.error('AI Chat Error:', error);
+        // Remove typing indicator
+        setChatMessages(prev => prev.filter(msg => !msg.isTyping));
+        
+        // Add error message
+        const errorMessage = { 
+          id: Date.now() + 3, 
+          text: "Arre yaar, sorry! 😅 Abhi thoda technical issue aa raha hai. But don't worry, main Ankit hun na - main manually help kar sakta hun! Theater booking ke liye direct call kar sakte ho: +91 9870691784 ya WhatsApp: +91 9520936655. Main personally dekh lunga! 💪", 
+          isBot: true 
+        };
+        setChatMessages(prev => [...prev, errorMessage]);
+      }
     }
   };
 
@@ -401,10 +565,10 @@ const FloatingNavigation = () => {
                             <button className="close-btn" onClick={() => setShowAIPopup(false)}>×</button>
                         </div>
             <div className="chat-container">
-              <div className="chat-messages">
+              <div className="chat-messages" ref={chatMessagesRef}>
                 {chatMessages.map((message) => (
                   <div key={message.id} className={`message ${message.isBot ? 'bot' : 'user'}`}>
-                    <div className="message-content">
+                    <div className={`message-content ${message.isTyping ? 'typing' : ''}`}>
                       {message.text}
                     </div>
                   </div>
@@ -1135,7 +1299,8 @@ const FloatingNavigation = () => {
         /* AI Chatbot Styles */
         .ai-popup {
           width: 400px;
-          height: 500px;
+          height: 600px;
+          max-height: 80vh;
           display: flex;
           flex-direction: column;
         }
@@ -1177,10 +1342,32 @@ const FloatingNavigation = () => {
         .chat-messages {
           flex: 1;
           overflow-y: auto;
+          overflow-x: hidden;
           padding: 1rem 0;
           display: flex;
           flex-direction: column;
           gap: 1rem;
+          height: 100%;
+          min-height: 300px;
+          scroll-behavior: smooth;
+        }
+
+        .chat-messages::-webkit-scrollbar {
+          width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+          background: #c1c1c1;
+          border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+          background: #a8a8a8;
         }
 
         .message {
@@ -1214,6 +1401,18 @@ const FloatingNavigation = () => {
           background: #f0f0f0;
           color: #333;
           border-bottom-left-radius: 4px;
+        }
+
+        .message.bot .message-content.typing {
+          background: #e8f5e8;
+          color: #666;
+          font-style: italic;
+          animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
         }
 
         .chat-input {

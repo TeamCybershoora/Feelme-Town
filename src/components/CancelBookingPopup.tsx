@@ -32,6 +32,9 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
   const [isCancelling, setIsCancelling] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
   const [cancellationResult, setCancellationResult] = useState<{ success: boolean; message: string; refundAmount?: number } | null>(null);
+  const [reasons, setReasons] = useState<string[]>([]);
+  const [selectedReason, setSelectedReason] = useState<string>('');
+  const [customReason, setCustomReason] = useState<string>('');
 
   useEffect(() => {
     if (isOpen) {
@@ -40,6 +43,8 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
       setIsCancelling(false);
       setIsCancelled(false);
       setCancellationResult(null);
+      setSelectedReason('');
+      setCustomReason('');
       
       // Store original styles
       const originalOverflow = document.body.style.overflow;
@@ -84,6 +89,20 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/cancel-reasons.json', { cache: 'no-cache' });
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setReasons(data);
+        } else if (Array.isArray((data as any)?.records)) {
+          setReasons((data as any).records);
+        }
+      } catch {}
+    })();
+  }, []);
+
   const calculateRefundAmount = () => {
     if (!bookingData) return 0;
     const bookingDate = new Date(bookingData.date);
@@ -113,6 +132,7 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
     setIsCancelling(true);
     
     try {
+      const reasonToSend = selectedReason === 'Other' ? (customReason || '').trim() : selectedReason;
       const response = await fetch('/api/cancel-booking', {
         method: 'POST',
         headers: {
@@ -120,29 +140,30 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
         },
         body: JSON.stringify({
           bookingId: bookingData.id,
-          email: bookingData.email
+          email: bookingData.email,
+          reason: reasonToSend
         })
       });
 
       const result = await response.json();
 
       if (result.success) {
-        console.log('✅ Booking cancelled successfully:', result);
-        console.log('🎯 Showing success animation...');
-        console.log(`Booking Cancelled - ${result.refundAmount > 0 ? `Refund of ₹${result.refundAmount} will be processed` : 'No refund applicable'}`);
+        
+        
+        
         
         // Show success animation
         setCancellationResult(result);
         setIsCancelled(true);
       } else {
-        console.error('❌ Booking cancellation failed:', result.error);
-        console.log('🎯 Showing error toast...');
-        console.log(`❌ ${result.error}`);
+        
+        
+        
       }
     } catch (error) {
-      console.error('❌ Error cancelling booking:', error);
-      console.log('🎯 Showing network error toast...');
-      console.log('❌ Network error. Please try again.');
+      
+      
+      
     } finally {
       setIsCancelling(false);
     }
@@ -332,6 +353,45 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
             </div>
           </div>
 
+          {/* Cancellation Reason */}
+          <div className="cancel-booking-popup-section">
+            <h3 className="cancel-booking-popup-section-title">
+              <AlertTriangle className="w-5 h-5" />
+              Cancellation Reason
+            </h3>
+            <div style={{ padding: '1.5rem' }}>
+              {reasons.length > 0 ? (
+                <div style={{ display: 'grid', gap: '0.5rem' }}>
+                  {reasons.map((r, idx) => (
+                    <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ffffff' }}>
+                      <input
+                        type="radio"
+                        name="cancel-reason"
+                        value={r}
+                        checked={selectedReason === r}
+                        onChange={() => setSelectedReason(r)}
+                      />
+                      <span>{r}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: 'rgba(255, 255, 255, 0.7)' }}>Loading reasons...</div>
+              )}
+              {selectedReason === 'Other' && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <input
+                    type="text"
+                    value={customReason}
+                    onChange={(e) => setCustomReason(e.target.value)}
+                    placeholder="Enter custom reason"
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Terms & Conditions */}
           <div className="cancel-booking-popup-section">
             <h3 className="cancel-booking-popup-section-title">
@@ -374,8 +434,8 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
             <div className="cancel-booking-popup-action">
               <button 
                 onClick={handleCancelBooking} 
-                className={`cancel-booking-popup-btn ${!agreeToTerms || isCancelling ? 'disabled' : ''}`}
-                disabled={!agreeToTerms || isCancelling}
+                className={`cancel-booking-popup-btn ${(!agreeToTerms || isCancelling || !selectedReason || (selectedReason === 'Other' && !(customReason || '').trim())) ? 'disabled' : ''}`}
+                disabled={!agreeToTerms || isCancelling || !selectedReason || (selectedReason === 'Other' && !(customReason || '').trim())}
               >
                 <span>{isCancelling ? 'Cancelling...' : 'Confirm Cancellation'}</span>
               </button>
@@ -1237,3 +1297,4 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
   
   return popupContent;
 }
+

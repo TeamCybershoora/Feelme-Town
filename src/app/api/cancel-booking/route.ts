@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     
     // Validate required fields
-    const { bookingId, email } = body;
+    const { bookingId, email, reason } = body;
     
     if (!bookingId || !email) {
       return NextResponse.json(
@@ -70,37 +70,64 @@ export async function POST(request: NextRequest) {
       refundStatus = 'refundable';
     }
 
-    // Move booking to cancelled collection instead of deleting
-    const moveResult = await database.moveBookingToCancelled(bookingId, {
-      cancelledAt: new Date(),
-      refundAmount: refundAmount,
-      refundStatus: refundStatus,
-      cancellationReason: 'Customer requested cancellation'
-    });
-    
-    if (!moveResult.success) {
+    // Update status in booking collection, then delete the booking
+    const statusResult = await database.updateBookingStatus(bookingId, 'cancelled');
+    if (!statusResult.success) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: moveResult.error || 'Failed to cancel booking' 
+        {
+          success: false,
+          error: statusResult.error || 'Failed to update booking status'
         },
         { status: 500 }
       );
     }
 
-    // Log cancellation
-    console.log('✅ Booking cancelled and moved to cancelled collection:', {
-      bookingId: booking.id,
-      customerName: booking.name,
-      theater: booking.theaterName,
-      date: booking.date,
-      time: booking.time,
-      totalAmount: booking.totalAmount,
-      refundAmount: refundAmount,
-      refundStatus: refundStatus,
-      hoursUntilBooking: Math.round(hoursUntilBooking),
-      cancelledAt: new Date().toISOString()
-    });
+    try {
+      const fs = require('fs').promises;
+      const path = require('path');
+      const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'cancelled-bookings.json');
+      let records: any[] = [];
+      try {
+        const raw = await fs.readFile(jsonFilePath, 'utf8');
+        const trimmed = (raw || '').trim();
+        if (trimmed) {
+          const parsed = JSON.parse(trimmed);
+          records = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.records) ? parsed.records : []);
+        }
+      } catch {}
+      const record = {
+        bookingId: booking.bookingId || booking.id || booking._id,
+        name: booking.name,
+        email: booking.email,
+        phone: booking.phone,
+        theaterName: booking.theaterName,
+        date: booking.date,
+        time: booking.time,
+        occasion: booking.occasion,
+        numberOfPeople: booking.numberOfPeople,
+        advancePayment: Math.round((booking.totalAmount || 0) * 0.25),
+        venuePayment: Math.round((booking.totalAmount || 0) * 0.75),
+        totalAmount: booking.totalAmount,
+        status: 'cancelled',
+        cancelledAt: new Date().toISOString(),
+        cancelReason: (typeof reason === 'string' && reason.trim()) ? reason.trim() : 'Cancelled by Customer'
+      };
+      await fs.mkdir(path.dirname(jsonFilePath), { recursive: true });
+      records.push(record);
+      await fs.writeFile(jsonFilePath, JSON.stringify(records, null, 2), 'utf8');
+    } catch {}
+
+    const deleteResult = await database.deleteBooking(bookingId);
+    if (!deleteResult.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: deleteResult.error || 'Failed to delete booking'
+        },
+        { status: 500 }
+      );
+    }
+
 
     // Send cancellation email
     try {
@@ -120,27 +147,34 @@ export async function POST(request: NextRequest) {
         refundStatus: refundStatus,
         cancelledAt: new Date()
       });
-      console.log('📧 Cancellation email sent successfully');
+      
     } catch (emailError) {
-      console.log('⚠️ Failed to send cancellation email:', emailError);
+      
     }
 
     // TODO: Integrate with payment gateway for actual refund processing
     // For now, we'll just log the refund details
     if (refundAmount > 0) {
-      console.log('💰 Refund to be processed:', {
-        bookingId: booking.id,
-        customerEmail: booking.email,
-        refundAmount: refundAmount,
-        refundMethod: 'Original payment method',
-        processingTime: '5-7 business days'
+      
+    }
+
+    // Refresh excelRecords metadata for cancelled type
+    try {
+      await fetch(`${request.nextUrl.origin}/api/admin/refresh-excel-data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'cancelled' })
       });
+      console.log('✅ Excel records refreshed for cancelled bookings');
+    } catch (syncError) {
+      console.error('⚠️ Failed to refresh Excel records:', syncError);
+      // Don't fail the cancellation if refresh fails
     }
 
     return NextResponse.json({
       success: true,
       message: 'Booking cancelled successfully',
-      bookingId: booking.id,
+      bookingId: booking.bookingId || booking._id || booking.id,
       refundAmount: refundAmount,
       refundStatus: refundStatus,
       refundMessage: refundAmount > 0 
@@ -149,11 +183,11 @@ export async function POST(request: NextRequest) {
       hoursUntilBooking: Math.round(hoursUntilBooking),
       cancelledAt: new Date().toISOString(),
       database: 'FeelME Town',
-      collection: 'cancelled_booking'
+      collection: 'booking'
     }, { status: 200 });
 
   } catch (error) {
-    console.error('❌ Error cancelling booking:', error);
+    
     return NextResponse.json(
       { 
         success: false, 
@@ -163,3 +197,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

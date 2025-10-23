@@ -4,6 +4,7 @@ import "./globals.css";
 import LoadingWrapper from "@/components/LoadingWrapper";
 import AdminLayoutWrapper from "@/components/AdminLayoutWrapper";
 
+
 // MongoDB TTL indexes handle automatic deletion now
 
 

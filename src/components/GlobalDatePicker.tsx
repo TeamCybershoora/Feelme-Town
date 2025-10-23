@@ -7,9 +7,10 @@ interface GlobalDatePickerProps {
   onClose: () => void;
   onDateSelect: (date: string) => void;
   selectedDate: string;
+  allowPastDates?: boolean; // New prop to allow past dates
 }
 
-export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, selectedDate }: GlobalDatePickerProps) {
+export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, selectedDate, allowPastDates = false }: GlobalDatePickerProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   
   // Get current date for highlighting
@@ -63,6 +64,7 @@ export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, select
       month: 'long',
       day: 'numeric'
     });
+    
     onDateSelect(formattedDate);
     onClose();
   };
@@ -392,6 +394,7 @@ export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, select
                   month: 'long',
                   day: 'numeric'
                 });
+                
                 onDateSelect(todayString);
               }}
             >
@@ -440,7 +443,7 @@ export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, select
 
                 const isCurrentDate = dayDateString === currentDateString;
                 const isSelectedDate = dayDateString === selectedDate;
-                const isPastDate = day < currentDate && !isCurrentDate;
+                const isPastDate = !allowPastDates && day < currentDate && !isCurrentDate;
 
                 return (
                   <button
@@ -461,3 +464,4 @@ export default function GlobalDatePicker({ isOpen, onClose, onDateSelect, select
     </>
   );
 }
+

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 
 interface Movie {
@@ -25,6 +26,7 @@ interface MoviePopupProps {
 
 export default function MoviePopup({ movie, isOpen, onClose, onMovieSelect, isFromBooking = false }: MoviePopupProps) {
   const [isVisible, setIsVisible] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (isOpen) {
@@ -53,11 +55,26 @@ export default function MoviePopup({ movie, isOpen, onClose, onMovieSelect, isFr
   }, [onClose]);
 
   const handleMovieSelect = () => {
-    console.log('🎬 MoviePopup: Movie selection triggered', { movie: movie?.title, onMovieSelect: !!onMovieSelect });
     if (movie && onMovieSelect) {
-      console.log('🎬 MoviePopup: Calling onMovieSelect with:', movie.title);
-      onMovieSelect(movie.title);
+      // Ensure we pass the complete movie title
+      const fullMovieTitle = movie.title || 'Unknown Movie';
+      console.log('🎬 MoviePopup: Selecting movie with full title:', fullMovieTitle);
+      onMovieSelect(fullMovieTitle);
       onClose();
+    }
+  };
+
+  const handleBookYourShow = () => {
+    if (movie) {
+      // Ensure we store the complete movie title
+      const fullMovieTitle = movie.title || 'Unknown Movie';
+      console.log('🎬 MoviePopup: Storing full movie title in sessionStorage:', fullMovieTitle);
+      // Store selected movie in sessionStorage
+      sessionStorage.setItem('selectedMovie', fullMovieTitle);
+      console.log('🎬 MoviePopup: Redirecting to theater page with full movie title:', fullMovieTitle);
+      // Close popup and redirect to theater page
+      onClose();
+      router.push('/theater?movie=' + encodeURIComponent(fullMovieTitle));
     }
   };
 
@@ -175,17 +192,17 @@ export default function MoviePopup({ movie, isOpen, onClose, onMovieSelect, isFr
                   <span>Select Movie</span>
                 </button>
               ) : (
-                <button className="add-button">
+                <button className="book-show-button" onClick={handleBookYourShow}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                     <path
-                      d="M12 5V19M5 12H19"
+                      d="M9 11H15M9 15H15M17 21L12 16L7 21V5C7 4.46957 7.21071 3.96086 7.58579 3.58579C7.96086 3.21071 8.46957 3 9 3H15C15.5304 3 16.0391 3.21071 16.4142 3.58579C16.7893 3.96086 17 4.46957 17 5V21Z"
                       stroke="currentColor"
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
                   </svg>
-                  <span>Add to List</span>
+                  <span>Book Your Show</span>
                 </button>
               )}
 
@@ -561,6 +578,41 @@ export default function MoviePopup({ movie, isOpen, onClose, onMovieSelect, isFr
       .play-button:hover {
         transform: translateY(-3px) scale(1.05);
         box-shadow: 0 15px 40px rgba(255, 69, 69, 0.6);
+      }
+
+      .book-show-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        padding: 0.875rem 1.25rem;
+        background:rgba(255, 255, 255, 0.28);
+        border: none;
+        border-radius: 12px;
+        color: white;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(10px);
+        height: 50px;
+        flex: 1;
+        
+      }
+
+      @media (min-width: 768px) {
+        .book-show-button {
+          padding: 1rem 1.5rem;
+          font-size: 1rem;
+          height: 60px;
+        }
+      }
+
+      .book-show-button:hover {
+        background:rgba(255, 255, 255, 0.56);
+        border-color: #ffffff;
+        transform: translateY(-3px);
+        
       }
 
       .add-button {

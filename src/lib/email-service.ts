@@ -2,6 +2,51 @@
 // Professional email templates like Netflix
 
 import nodemailer from 'nodemailer';
+import database from '@/lib/db-connect';
+
+// Helper: Render Occasion Details from dynamic fields present in bookingData
+const renderOccasionDetails = (bookingData: Record<string, any>) => {
+  try {
+    if (!bookingData) return '';
+    const keys = Object.keys(bookingData);
+    const labelKeys = keys.filter(k => k.endsWith('_label'));
+    if (labelKeys.length === 0) return '';
+
+    const itemsHtml = labelKeys
+      .map(labelKey => {
+        const baseKey = labelKey.replace(/_label$/, '');
+        const label = bookingData[labelKey];
+        const value = bookingData[baseKey] ?? bookingData[`${baseKey}_value`] ?? '';
+        const safeLabel = String(label || '').trim();
+        const safeValue = String(value || '').trim();
+        if (!safeLabel || !safeValue) return '';
+        return `
+          <div class="detail-item">
+            <div class="detail-label">${safeLabel}</div>
+            <div class="detail-value">${safeValue}</div>
+          </div>
+        `;
+      })
+      .filter(Boolean)
+      .join('');
+
+    if (!itemsHtml) return '';
+
+    return `
+      <div class="booking-card">
+        <div class="booking-header">
+          <div class="booking-icon">🎪</div>
+          <div class="booking-title">Occasion Details</div>
+        </div>
+        <div class="detail-grid">
+          ${itemsHtml}
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    return '';
+  }
+};
 
 interface BookingData {
   id: string;
@@ -16,18 +61,45 @@ interface BookingData {
   totalAmount?: number;
 }
 
-// Email configuration
-const EMAIL_CONFIG = {
-  // Using Gmail SMTP (you can change this to your email provider)
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER || 'feelmetown@gmail.com',
-    pass: process.env.EMAIL_PASS || 'your-app-password'
+// Helper: Get settings for SMTP and notification gating
+const getSettingsOrDefault = async () => {
+  try {
+    const settings = await database.getSettings();
+    return settings || {};
+  } catch (e) {
+    return {} as any;
   }
 };
 
-// Create transporter
-const transporter = nodemailer.createTransport(EMAIL_CONFIG);
+// Helper: Create transporter strictly from database settings
+const createTransporter = async () => {
+  const settings = await getSettingsOrDefault();
+
+  const user = (settings.emailUser || '').toString().trim();
+  const pass = (settings.emailPass || '').toString().trim();
+
+  if (!user || !pass) {
+    throw new Error('Email credentials not configured in database');
+  }
+
+  const host = (settings.smtpHost || '').toString().trim();
+  const portRaw = (settings.smtpPort || '').toString().trim();
+  const port = portRaw ? parseInt(portRaw, 10) : undefined;
+
+  if (host && port) {
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass }
+    });
+  }
+
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user, pass }
+  });
+};
 
 // Email templates
 const emailTemplates = {
@@ -280,7 +352,7 @@ const emailTemplates = {
           <div class="header">
             <img
               class="brand-logo"
-              src="https://res.cloudinary.com/dr8razrcd/image/upload/v1758321248/FMT_logo_irtnlr.svg"
+              src="${process.env.NEXT_PUBLIC_EMAIL_LOGO_URL || 'https://via.placeholder.com/120x40?text=FeelME+Town'}"
               alt="FeelME Town logo"
               loading="lazy"
               decoding="async"
@@ -841,7 +913,7 @@ const emailTemplates = {
           <div class="header">
             <img
               class="brand-logo"
-              src="https://res.cloudinary.com/dr8razrcd/image/upload/v1758321248/FMT_logo_irtnlr.svg"
+              src="${process.env.NEXT_PUBLIC_EMAIL_LOGO_URL || 'https://via.placeholder.com/120x40?text=FeelME+Town'}"
               alt="FeelME Town logo"
               loading="lazy"
               decoding="async"
@@ -896,47 +968,16 @@ const emailTemplates = {
                   </div>
                 </div>
               </div>
-              
-              <div class="total-section">
-                <div class="total-label">Total Amount</div>
-                <div class="total-amount">₹${bookingData.totalAmount}</div>
-              </div>
-              
-              <!-- Payment Breakdown Section -->
-              <div class="pricing-section">
-                <div class="pricing-header">
-                  <div class="pricing-icon">💳</div>
-                  <div class="pricing-title">Payment Breakdown</div>
-                </div>
-                
-                <div class="pricing-grid">
-                  <div class="pricing-item">
-                    <div class="pricing-label">Theater Base Price</div>
-                    <div class="pricing-value">₹1,399</div>
-                  </div>
-                  ${bookingData.numberOfPeople > 2 ? `
-                  <div class="pricing-item">
-                    <div class="pricing-label">Extra Guests (${bookingData.numberOfPeople - 2} × ₹400)</div>
-                    <div class="pricing-value">₹${(bookingData.numberOfPeople - 2) * 400}</div>
-                  </div>
-                  ` : ''}
-                  <div class="pricing-item total">
-                    <div class="pricing-label">Total Amount</div>
-                    <div class="pricing-value">₹${bookingData.totalAmount}</div>
-                  </div>
-                  <div class="pricing-item discount">
-                    <div class="pricing-label">Online Payment (25%)</div>
-                    <div class="pricing-value">₹${Math.round((bookingData.totalAmount || 0) * 0.25)}</div>
-                  </div>
-                  <div class="pricing-item final">
-                    <div class="pricing-label">Remaining Amount (At Venue)</div>
-                    <div class="pricing-value">₹${Math.round((bookingData.totalAmount || 0) * 0.75)}</div>
-                  </div>
-                </div>
-              </div>
+              ${renderOccasionDetails(bookingData)}
               
               <div class="cta-section">
-                <a href="#" class="cta-button">View Complete Details</a>
+                <div style="text-align: center; margin-bottom: 20px; padding: 15px; background: #e8f5e8; border-radius: 10px; border-left: 4px solid #28a745;">
+                  <p style="color: #155724; font-size: 16px; margin: 0; font-family: 'Paralucent-Medium', sans-serif;">
+                    <strong>📎 Invoice Attached!</strong><br>
+                    Your booking invoice PDF is attached to this email. You can also view and download it using the button below.
+                  </p>
+                </div>
+                <a href="${(process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000')}/invoice/${encodeURIComponent(bookingData.id || (bookingData as any).bookingId || '')}" class="cta-button">View & Download Invoice</a>
                 <a href="${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/theater?cancelBookingId=${bookingData.id}&email=${encodeURIComponent(bookingData.email)}" class="cta-button cancel-button">Cancel Booking</a>
               </div>
               
@@ -1616,7 +1657,7 @@ const emailTemplates = {
           <div class="header">
             <img
               class="brand-logo"
-              src="https://res.cloudinary.com/dr8razrcd/image/upload/v1758321248/FMT_logo_irtnlr.svg"
+              src="${process.env.NEXT_PUBLIC_EMAIL_LOGO_URL || 'https://via.placeholder.com/120x40?text=FeelME+Town'}"
               alt="FeelME Town logo"
               loading="lazy"
               decoding="async"
@@ -1877,76 +1918,271 @@ const emailTemplates = {
 };
 
 // Send email function
-const sendEmail = async (to: string, templateType: 'bookingComplete' | 'bookingIncomplete' | 'bookingCancelled', bookingData: BookingData | (Partial<BookingData> & { email?: string; bookingId?: string; selectedCakes?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedDecorItems?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedGifts?: Array<{ id: string; name: string; price: number; quantity: number }> }) | (BookingData & { refundAmount: number; refundStatus: string; cancelledAt: Date })) => {
+const sendEmail = async (to: string, subject: string, html: string, attachments?: any[]) => {
   try {
-    // Check if email credentials are configured
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || 
-        process.env.EMAIL_PASS === 'your-app-password') {
-      console.log('⚠️ Email credentials not configured. Skipping email send.');
-      return {
-        success: false,
-        error: 'Email credentials not configured'
-      };
+    const settings = await getSettingsOrDefault();
+    
+    if (!settings.enableEmailNotifications) {
+      console.log('📧 Email notifications are disabled in settings');
+      return { success: false, error: 'Email notifications disabled' };
     }
 
-    // @ts-expect-error - Type mismatch due to complex email template types
-    const template = emailTemplates[templateType](bookingData);
+    const transporter = await createTransporter();
     
-    const mailOptions = {
-      from: `"FeelME Town" <${EMAIL_CONFIG.auth.user}>`,
-      to: to,
-      subject: template.subject,
-      html: template.html
-    };
-
-    const result = await transporter.sendMail(mailOptions);
-    
-    console.log('📧 Email sent successfully:', {
-      to: to,
-      type: templateType,
-      messageId: result.messageId
+    const result = await transporter.sendMail({
+      from: settings.emailUser || 'noreply@feelme-town.com',
+      to,
+      subject,
+      html,
+      attachments: attachments || []
     });
-    
-    return {
-      success: true,
-      messageId: result.messageId
-    };
-    
+
+    console.log('✅ Email sent successfully:', result.messageId);
+    return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error('❌ Email sending failed:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
+    console.error('❌ Failed to send email:', error);
+    return { success: false, error: String(error) };
   }
 };
 
 // Email service functions
 const emailService = {
+  // Send support mail to Cybershoora
+  sendSupportToCybershoora: async ({ subject, message, from }: { subject: string; message: string; from?: string }) => {
+    const safeSubject = (subject || 'Support Mail from Administrator').toString().trim();
+    const safeMessage = (message || '').toString().trim();
+
+    if (!safeMessage) {
+      return { success: false, error: 'Message is required' };
+    }
+
+    const customTemplate = {
+      subject: safeSubject,
+      html: `
+        <div style="font-family: Arial, sans-serif; background:#0b0b0b; color:#fff; padding:20px;">
+          <h2 style="margin-top:0;">Support Mail</h2>
+          <p style="color:#bbb;">This message was sent from Administrator Support Mail page${from ? ` by <strong>${String(from).trim()}</strong>` : ''}.</p>
+          <div style="background:#141414; padding:16px; border-radius:8px; border:1px solid #222;">
+            <div style="margin-bottom:8px; color:#eee;"><strong>Subject:</strong> ${safeSubject}</div>
+            <div style="white-space:pre-wrap; line-height:1.6; color:#ddd;">${safeMessage}</div>
+          </div>
+          <div style="margin-top:16px; font-size:12px; color:#888;">
+            <a href="https://www.cybershoora.com/" target="_blank" rel="noopener noreferrer" style="color:#E50914; text-decoration:none;">Visit Cybershoora</a>
+          </div>
+        </div>
+      `
+    };
+
+    // Use custom template to send to team Cybershoora
+    return await sendEmail('teamcybershoora@gmail.com', customTemplate.subject, customTemplate.html);
+  },
+  // Send invoice ready email (no attachment, link to invoice page)
+  sendBookingInvoiceReady: async (bookingData: BookingData) => {
+    if (!bookingData.email) {
+      return { success: false, error: 'No email provided' };
+    }
+    const siteUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000');
+    const template = {
+      subject: 'Your Invoice is Ready - FeelME Town 🧾',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Invoice Ready - FeelME Town</title>
+          <style>
+            body { margin:0; padding:0; background:#0b0b0b; color:#fff; font-family: Arial, sans-serif; }
+            .container { max-width:650px; margin:0 auto; background:#141414; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.35); }
+            .header { background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%); padding:40px 24px; text-align:center; }
+            .title { font-size:28px; font-weight:800; }
+            .content { padding:28px; }
+            .cta { display:inline-block; margin-top:16px; background:#E50914; color:#fff !important; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:700; }
+            .card { background:#0f0f0f; border:1px solid #1f1f1f; border-radius:16px; padding:20px; margin:12px 0; }
+            .label { color:#bbb; font-size:12px; text-transform:uppercase; }
+            .value { color:#fff; font-size:16px; font-weight:600; margin-top:6px; }
+            .footer { text-align:center; color:#aaa; font-size:12px; padding:20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="title">Your Invoice is Ready</div>
+              <div style="color:#bbb; margin-top:6px;">Hi ${bookingData.name || 'Customer'}, your show is completed. Download your invoice now.</div>
+            </div>
+            <div class="content">
+              <div class="card">
+                <div class="label">Booking Reference</div>
+                <div class="value">${bookingData.id}</div>
+              </div>
+              <a class="cta" href="${siteUrl}/invoice/${encodeURIComponent(bookingData.id || (bookingData as any).bookingId || '')}" target="_blank">View & Download Invoice</a>
+            </div>
+            <div class="footer">© 2024 FeelME Town • Delhi, Dwarka • feelmetown@gmail.com</div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+    return await sendEmail(bookingData.email, template.subject, template.html);
+  },
+  // Send booking confirmed email (no invoice attachment)
+  sendBookingConfirmed: async (bookingData: BookingData) => {
+    if (!bookingData.email) {
+      return { success: false, error: 'No email provided' };
+    }
+    const siteUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000');
+    const template = {
+      subject: 'Booking Confirmed - FeelME Town 🎉',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Booking Confirmed - FeelME Town</title>
+          <style>
+            @font-face { font-family: 'Paralucent-DemiBold'; src: url('https://ik.imagekit.io/cybershoora/fonts/Paralucent-DemiBold.ttf?updatedAt=1758320830457') format('truetype'); }
+            @font-face { font-family: 'Paralucent-Medium'; src: url('https://ik.imagekit.io/cybershoora/fonts/Paralucent-Medium.ttf?updatedAt=1758320830502') format('truetype'); }
+            body { margin:0; padding:0; background:#0b0b0b; color:#fff; font-family: 'Paralucent-Medium', Arial, sans-serif; }
+            .container { max-width:650px; margin:0 auto; background:#141414; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.35); }
+            .header { background: linear-gradient(135deg, #E50914 0%, #b20710 100%); padding:40px 24px; text-align:center; }
+            .logo { font-size:32px; font-weight:800; }
+            .tagline { color: rgba(255,255,255,0.85); margin-top:6px; }
+            .badge { display:inline-block; margin-top:16px; background:#16a34a; color:#fff; padding:8px 14px; border-radius:999px; font-weight:700; font-size:14px; }
+            .content { padding:28px; }
+            .card { background:#0f0f0f; border:1px solid #1f1f1f; border-radius:16px; padding:20px; margin:12px 0; }
+            .label { color:#bbb; font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+            .value { color:#fff; font-size:16px; font-weight:600; margin-top:6px; }
+            .note { margin-top:18px; background:#1a1a1a; border-left:4px solid #eab308; padding:14px; border-radius:10px; color:#fef08a; }
+            .footer { text-align:center; color:#aaa; font-size:12px; padding:24px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="logo">FeelME Town</div>
+              <div class="tagline">Creating Unforgettable Memories</div>
+              <div class="badge">Booking Confirmed</div>
+            </div>
+            <div class="content">
+              <div style="margin-bottom:12px; font-size:18px;">Hi ${bookingData.name || 'Customer'},</div>
+              <div style="color:#ddd; line-height:1.6;">Your booking has been confirmed. We are excited to host you!</div>
+
+              <div class="card">
+                <div class="label">Booking Reference</div>
+                <div class="value">${bookingData.id}</div>
+              </div>
+              <div class="card" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div>
+                  <div class="label">Theater</div>
+                  <div class="value">${bookingData.theaterName || ''}</div>
+                </div>
+                <div>
+                  <div class="label">Guests</div>
+                  <div class="value">${bookingData.numberOfPeople || 2}</div>
+                </div>
+                <div>
+                  <div class="label">Date</div>
+                  <div class="value">${bookingData.date || ''}</div>
+                </div>
+                <div>
+                  <div class="label">Time</div>
+                  <div class="value">${bookingData.time || ''}</div>
+                </div>
+              </div>
+
+              <div class="note">
+                <strong>🧾 Invoice Notice:</strong> Your invoice will be generated after your booking is <strong>completed</strong>. You'll receive an email to download it once the show ends.
+              </div>
+              <div style="margin-top:16px; text-align:center;">
+                <a href="${siteUrl}/invoice/${encodeURIComponent(bookingData.id || (bookingData as any).bookingId || '')}" style="display:inline-block; background:#E50914; color:#fff; text-decoration:none; padding:12px 18px; border-radius:10px; font-weight:700;">Open Invoice Page</a>
+              </div>
+            </div>
+            <div class="footer">© 2024 FeelME Town • Delhi, Dwarka • feelmetown@gmail.com</div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+    return await sendEmail(bookingData.email, template.subject, template.html);
+  },
   // Send booking completion email
   sendBookingComplete: async (bookingData: BookingData) => {
     if (!bookingData.email) {
-      console.log('⚠️ No email provided for booking completion notification');
+      console.log('❌ No email provided for booking completion');
       return { success: false, error: 'No email provided' };
     }
     
-    return await sendEmail(bookingData.email, 'bookingComplete', bookingData);
+    try {
+      // Generate email template
+      const template = emailTemplates.bookingComplete(bookingData);
+      
+      // Generate PDF invoice
+      console.log('📄 Generating PDF invoice for email attachment...');
+      const fetch = (await import('node-fetch')).default;
+      
+      const pdfResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/generate-invoice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: bookingData.id,
+          name: bookingData.name,
+          email: bookingData.email,
+          phone: bookingData.phone,
+          theaterName: bookingData.theaterName,
+          date: bookingData.date,
+          time: bookingData.time,
+          occasion: bookingData.occasion,
+          numberOfPeople: bookingData.numberOfPeople,
+          totalAmount: bookingData.totalAmount,
+          // Include all other fields for dynamic occasion details
+          ...(bookingData as any)
+        })
+      });
+      
+      if (!pdfResponse.ok) {
+        console.log('⚠️ Failed to generate PDF, sending email without attachment');
+        return await sendEmail(bookingData.email, template.subject, template.html);
+      }
+      
+      const pdfBuffer = await pdfResponse.arrayBuffer();
+      
+      // Create attachment with custom filename
+      const cleanCustomerName = (bookingData.name || 'Customer').replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '-');
+      const filename = `Invoice-FMT-${cleanCustomerName}.pdf`;
+      
+      const attachments = [{
+        filename: filename,
+        content: Buffer.from(pdfBuffer),
+        contentType: 'application/pdf'
+      }];
+      
+      console.log('📧 Sending booking confirmation email with PDF invoice attachment');
+      return await sendEmail(bookingData.email, template.subject, template.html, attachments);
+      
+    } catch (error) {
+      console.error('❌ Error generating PDF attachment:', error);
+      // Fallback: send email without attachment
+      const template = emailTemplates.bookingComplete(bookingData);
+      return await sendEmail(bookingData.email, template.subject, template.html);
+    }
   },
 
   // Send booking cancellation email
   sendBookingCancelled: async (bookingData: BookingData & { refundAmount: number; refundStatus: string; cancelledAt: Date }) => {
     if (!bookingData.email) {
-      console.log('⚠️ No email provided for booking cancellation notification');
+      
       return { success: false, error: 'No email provided' };
     }
     
-    return await sendEmail(bookingData.email, 'bookingCancelled', bookingData);
+    const template = emailTemplates.bookingCancelled(bookingData);
+    return await sendEmail(bookingData.email, template.subject, template.html);
   },
 
   // Send booking incomplete email
   sendBookingIncomplete: async (bookingData: Partial<BookingData> & { email?: string; bookingId?: string; selectedCakes?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedDecorItems?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedGifts?: Array<{ id: string; name: string; price: number; quantity: number }> }) => {
     if (!bookingData.email) {
-      console.log('⚠️ No email provided for booking incomplete notification');
+      
       return { success: false, error: 'No email provided' };
     }
 
@@ -1971,7 +2207,7 @@ const emailService = {
       });
       
       if (result.success && result.booking) {
-        console.log('💾 Incomplete booking saved to MongoDB:', result.booking.id);
+        
         
         // Update bookingData with the saved booking ID for email template
         bookingData.bookingId = result.booking.id;
@@ -1979,30 +2215,205 @@ const emailService = {
         // Also trigger cleanup of expired bookings
         const cleanupResult = await database.default.deleteExpiredIncompleteBookings();
         if (cleanupResult.deletedCount && cleanupResult.deletedCount > 0) {
-          console.log(`🧹 Cleaned up ${cleanupResult.deletedCount} expired bookings from MongoDB`);
+          
         }
       } else {
-        console.log('⚠️ Failed to save incomplete booking to MongoDB:', result.error);
+        
       }
       
     } catch (error) {
-      console.log('⚠️ Error saving incomplete booking to MongoDB:', error);
+      
     }
     
-    return await sendEmail(bookingData.email, 'bookingIncomplete', bookingData);
+    const template = emailTemplates.bookingIncomplete(bookingData);
+    return await sendEmail(bookingData.email, template.subject, template.html);
+  },
+
+  // Send staff welcome email
+  sendStaffWelcomeEmail: async (staffData: { name: string; email: string; profilePhoto: string }) => {
+    if (!staffData.email) {
+      return { success: false, error: 'No email provided' };
+    }
+
+    const emailTemplate = {
+      subject: 'Welcome to FeelME Town Team! 🎉',
+      html: `
+       <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Welcome to FeelME Town</title>
+          <style>
+            @font-face {
+              font-family: 'Paralucent-DemiBold';
+              src: url('https://ik.imagekit.io/cybershoora/fonts/Paralucent-DemiBold.ttf?updatedAt=1758320830457') format('truetype');
+            }
+            @font-face {
+              font-family: 'Paralucent-Medium';
+              src: url('https://ik.imagekit.io/cybershoora/fonts/Paralucent-Medium.ttf?updatedAt=1758320830457') format('truetype');
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+              background-color: #ededed;
+            }
+            .email-container {
+              max-width: 600px;
+              margin: 0 auto;
+              background-color: #ffffff;
+              border-radius: 4rem;
+              overflow: hidden;
+              box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            }
+            .header {
+              background: linear-gradient(135deg, #E50914 0%, #b20710 100%);
+              padding: 40px 20px;
+              text-align: center;
+            }
+            .brand-name {
+              font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+              font-size: 32px;
+              font-weight: 800;
+              color: white;
+              margin-bottom: 20px;
+              text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+              letter-spacing: 1px;
+            }
+            .profile-photo {
+              width: 120px;
+              height: 120px;
+              border-radius: 50%;
+              border: 4px solid white;
+              object-fit: cover;
+              margin: 0 auto 20px;
+              display: block;
+              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            }
+            .header h1 {
+              color: white;
+              font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+              font-size: 28px;
+              margin: 0;
+            }
+            .content {
+              padding: 40px 30px;
+            }
+            .welcome-text {
+              font-size: 18px;
+              color: #333;
+              line-height: 1.6;
+              margin-bottom: 20px;
+            }
+            .info-box {
+              background: #f8f9fa;
+              border-left: 4px solid #E50914;
+              padding: 20px;
+              margin: 20px 0;
+              border-radius: 4px;
+            }
+            .info-box h3 {
+              font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+              color: #E50914;
+              margin: 0 0 10px 0;
+              font-size: 18px;
+            }
+            .info-box p {
+              margin: 8px 0;
+              color: #555;
+              font-size: 15px;
+            }
+            .footer {
+              background-color: #1a1a1a;
+              color: #999;
+              text-align: center;
+              padding: 30px 20px;
+              font-size: 14px;
+            }
+            .footer-brand {
+              font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+              font-size: 24px;
+              font-weight: 700;
+              color: white;
+              margin-bottom: 15px;
+              letter-spacing: 0.5px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="email-container">
+            <!-- Header -->
+            <div class="header">
+              <div class="brand-name">FeelME Town</div>
+              <img src="${staffData.profilePhoto}" alt="${staffData.name}" class="profile-photo">
+              <h1>Welcome to the Team! 🎉</h1>
+            </div>
+
+            <!-- Content -->
+            <div class="content">
+              <p class="welcome-text">Dear <strong>${staffData.name}</strong>,</p>
+              
+              <p class="welcome-text">
+                Congratulations! You have been added as a <strong>Staff Member</strong> at <strong>FeelME Town</strong> - 
+                where unforgettable experiences come to life in our premium private theaters.
+              </p>
+
+              <div class="info-box">
+                <h3>Your Role</h3>
+                <p><strong>Position:</strong> Staff Member</p>
+                <p><strong>Email:</strong> ${staffData.email}</p>
+                <p><strong>Status:</strong> Active</p>
+              </div>
+
+              <p class="welcome-text">
+                As part of our team, you'll be helping create magical moments for our guests. 
+                We're excited to have you on board!
+              </p>
+
+              <p class="welcome-text">
+                If you have any questions or need assistance, please don't hesitate to reach out to the management team.
+              </p>
+
+              <p class="welcome-text">
+                Welcome aboard! 🎬🍿
+              </p>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+              <div class="footer-content">
+                <div class="footer-brand">FeelME Town</div>
+                <p>Premium Private Theater Experience • Creating Unforgettable Moments Since 2024</p>
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                  <p style="font-size: 12px; color: #999; margin-bottom: 8px;">
+                    Designed and Developed by <a href="https://www.cybershoora.com/" target="_blank" style="color: #E50914; text-decoration: none; font-weight: 600;">CYBERSHOORA</a>
+                  </p>
+                  <p style="font-size: 11px; color: #666;">This is an automated email. Please do not reply.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    return await sendEmail(staffData.email, emailTemplate.subject, emailTemplate.html);
   },
 
   // Test email configuration
   testConnection: async () => {
     try {
+      const transporter = await createTransporter();
       await transporter.verify();
-      console.log('✅ Email service connection verified');
+      
       return { success: true, message: 'Email service ready' };
     } catch (error) {
-      console.error('❌ Email service connection failed:', error);
+      
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 };
 
 export default emailService;
+

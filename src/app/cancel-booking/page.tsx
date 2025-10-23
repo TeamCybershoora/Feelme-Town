@@ -50,7 +50,7 @@ export default function CancelBookingPage() {
         setError(result.error || 'Booking not found');
       }
     } catch (error) {
-      console.error('Error fetching booking data:', error);
+      
       setError('Failed to load booking data');
     } finally {
       setLoading(false);
@@ -95,3 +95,4 @@ export default function CancelBookingPage() {
     </div>
   );
 }
+

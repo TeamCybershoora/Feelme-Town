@@ -61,7 +61,12 @@ export default function CleanupPage() {
           <div className="info-card">
             <h3>Incomplete Bookings</h3>
             <p>Deleted automatically when <code>expiresAt</code> time is reached</p>
-            <p><strong>Expiration:</strong> 1 hour after creation</p>
+            <p><strong>Expiration:</strong> 12 hours after creation</p>
+          </div>
+          <div className="info-card">
+            <h3>Cancelled Bookings</h3>
+            <p>Deleted automatically when <code>cancelledAt</code> time is reached</p>
+            <p><strong>Expiration:</strong> 12 hours after cancellation</p>
           </div>
         </div>
       </div>

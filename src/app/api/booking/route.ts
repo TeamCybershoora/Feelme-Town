@@ -2,10 +2,138 @@ import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
 
+// Helper function to get occasion specific fields with exact database field names
+async function getOccasionFields(occasionName: string, body: any) {
+  try {
+    console.log('=== getOccasionFields DEBUG ===');
+    console.log('Occasion name:', occasionName);
+    
+    // Fetch occasions from database to get required fields and labels
+    const occasions = await database.getAllOccasions();
+    console.log('All occasions from DB:', occasions.map(o => ({ name: o.name, requiredFields: o.requiredFields })));
+    
+    const occasion = occasions.find(occ => occ.name === occasionName);
+    console.log('Found occasion:', occasion);
+    
+    if (!occasion) {
+      console.log('Occasion not found in database');
+      return {};
+    }
+    
+    
+    
+    
+    
+    // Map required fields to body data using exact database field names
+    const occasionFields: any = {};
+    
+    // Check if occasionData exists (new dynamic format) - PRIORITY 1
+    if (body.occasionData && typeof body.occasionData === 'object') {
+      console.log('Processing occasionData:', body.occasionData);
+      
+      // Map each required field from occasion database to the corresponding value from occasionData
+      if (occasion?.requiredFields && occasion.requiredFields.length > 0) {
+        console.log('Required fields:', occasion.requiredFields);
+        occasion.requiredFields.forEach((dbFieldName: string) => {
+          // Check if this field exists in occasionData (might have different key)
+          const fieldValue = body.occasionData[dbFieldName];
+          console.log(`Checking field ${dbFieldName}:`, fieldValue);
+          
+          if (fieldValue) {
+            const trimmedValue = fieldValue.toString().trim();
+            
+            // Get the proper label for this field from database
+            const fieldLabel = occasion?.fieldLabels && occasion.fieldLabels[dbFieldName] 
+              ? occasion.fieldLabels[dbFieldName] 
+              : dbFieldName;
+            
+            // Save with the exact database field name
+            occasionFields[dbFieldName] = trimmedValue;
+            
+            // Also save label and value for reference
+            occasionFields[`${dbFieldName}_label`] = fieldLabel;
+            occasionFields[`${dbFieldName}_value`] = trimmedValue;
+            
+            console.log(`Added field ${dbFieldName} with value:`, trimmedValue);
+          }
+        });
+      }
+      
+      // Include ANY keys present in occasionData as a resilience fallback,
+      // even if occasion.requiredFields is empty or misconfigured
+      Object.keys(body.occasionData).forEach(frontendKey => {
+        const rawValue = body.occasionData[frontendKey];
+        if (rawValue !== undefined && rawValue !== null && rawValue.toString().trim() !== '') {
+          const fieldValue = rawValue.toString().trim();
+          const fieldLabel = occasion?.fieldLabels && occasion.fieldLabels[frontendKey]
+            ? occasion.fieldLabels[frontendKey]
+            : frontendKey;
+          
+          if (!occasionFields[frontendKey]) {
+            occasionFields[frontendKey] = fieldValue;
+            occasionFields[`${frontendKey}_label`] = fieldLabel;
+            occasionFields[`${frontendKey}_value`] = fieldValue;
+            
+          }
+        }
+      });
+      
+      // If we found data in occasionData, return it directly (don't check legacy fields)
+      if (Object.keys(occasionFields).length > 0) {
+        console.log('Returning occasion fields from occasionData:', occasionFields);
+        return occasionFields;
+      }
+    }
+    
+    // Also check for individual fields (legacy support)
+    if (occasion?.requiredFields && occasion.requiredFields.length > 0) {
+      console.log('Checking legacy fields...');
+      occasion.requiredFields.forEach((fieldName: string) => {
+        if (body[fieldName]) {
+          const fieldValue = body[fieldName].toString().trim();
+          const fieldLabel = occasion?.fieldLabels && occasion.fieldLabels[fieldName] 
+            ? occasion.fieldLabels[fieldName] 
+            : fieldName;
+          
+          occasionFields[fieldName] = fieldValue;
+          occasionFields[`${fieldName}_label`] = fieldLabel;
+          occasionFields[`${fieldName}_value`] = fieldValue;
+          
+          console.log(`Added legacy field ${fieldName} with value:`, fieldValue);
+        }
+      });
+    }
+    
+    console.log('Final occasion fields to return:', occasionFields);
+    return occasionFields;
+  } catch (error) {
+    
+    return {};
+  }
+}
+
 // POST /api/booking - Save booking data to database
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    
+    
+    
+    
+    
+    
+    // Enhanced logging for occasion data debugging
+    console.log('=== BOOKING API DEBUG ===');
+    console.log('Occasion:', body.occasion);
+    console.log('OccasionData:', body.occasionData);
+    if (body.occasionData) {
+      console.log('OccasionData keys:', Object.keys(body.occasionData));
+      Object.keys(body.occasionData).forEach(key => {
+        console.log(`  ${key}:`, body.occasionData[key]);
+      });
+    } else {
+      console.log('No occasionData found in request body');
+    }
     
     // Validate required fields
     const requiredFields = ['name', 'email', 'phone', 'theaterName', 'date', 'time', 'occasion'];
@@ -21,131 +149,126 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate total amount
-    let totalAmount = 0;
+    // Use pricing from frontend (includes all services, discounts, and calculations)
     
-    // Add theater base price based on theater name
-    let theaterBasePrice = 1399; // Default theater price
+    // Use the totalAmount calculated by frontend (includes theater + services + extra guests + discounts)
+    const totalAmount = body.totalAmount || 0;
     
-    // Extract price from theater name or set based on theater type
-    if (body.theaterName) {
-      if (body.theaterName.includes('PHILIA') || body.theaterName.includes('FRIENDS') || body.theaterName.includes('FMT-Hall-2')) {
-        theaterBasePrice = 1999;
-      } else if (body.theaterName.includes('PRAGMA') || body.theaterName.includes('LOVE') || body.theaterName.includes('FMT-Hall-3')) {
-        theaterBasePrice = 2999;
-      } else if (body.theaterName.includes('STORGE') || body.theaterName.includes('FAMILY') || body.theaterName.includes('FMT-Hall-4')) {
-        theaterBasePrice = 3999;
-      } else if (body.theaterName.includes('EROS') || body.theaterName.includes('COUPLES') || body.theaterName.includes('FMT-Hall-1')) {
-        theaterBasePrice = 1399;
-      }
-    }
-    
-    totalAmount += theaterBasePrice;
-    
-    // Add extra guest charges (₹400 per guest beyond 2)
-    const numberOfPeople = body.numberOfPeople || 2;
-    const extraGuests = Math.max(0, numberOfPeople - 2);
-    const extraGuestCharges = extraGuests * 400;
-    totalAmount += extraGuestCharges;
-    
-    // Add cake costs
-    if (body.selectedCakes && Array.isArray(body.selectedCakes)) {
-      body.selectedCakes.forEach((cake: { price?: number; quantity?: number }) => {
-        totalAmount += (cake.price || 0) * (cake.quantity || 1);
-      });
-    }
-    
-    // Add decor item costs
-    if (body.selectedDecorItems && Array.isArray(body.selectedDecorItems)) {
-      body.selectedDecorItems.forEach((item: { price?: number; quantity?: number }) => {
-        totalAmount += (item.price || 0) * (item.quantity || 1);
-      });
-    }
-    
-    // Add gift costs
-    if (body.selectedGifts && Array.isArray(body.selectedGifts)) {
-      body.selectedGifts.forEach((gift: { price?: number; quantity?: number }) => {
-        totalAmount += (gift.price || 0) * (gift.quantity || 1);
-      });
-    }
-    
-    // Add movie costs
-    if (body.selectedMovies && Array.isArray(body.selectedMovies)) {
-      body.selectedMovies.forEach((movie: { price?: number; quantity?: number }) => {
-        totalAmount += (movie.price || 0) * (movie.quantity || 1);
-      });
-    }
+    // Use advance payment and venue payment from frontend if provided, otherwise calculate
+    const advancePayment = body.advancePayment || 0; // Default advance payment
+    const venuePayment = body.venuePayment || (totalAmount - advancePayment); // Remaining amount to be paid at venue
 
-    // Calculate payment breakdown
-    const advancePayment = 600; // Fixed advance payment
-    const venuePayment = totalAmount - advancePayment; // Remaining amount to be paid at venue
 
-    // Calculate expiredAt time (2 hours after the booking END time)
-    const calculateExpiredAt = (date: string, time: string) => {
+    // Helper function to calculate booking date and time
+    const calculateBookingDateTime = (date: string, time: string) => {
       try {
-        // Parse the booking date
         let bookingDate: Date;
+        
         if (date.includes(',')) {
-          // Format: "Saturday, September 27, 2025"
-          bookingDate = new Date(date);
+          // Format: "Thursday, October 2, 2025" - parse manually
+          const dateParts = date.split(', ');
+          if (dateParts.length >= 2) {
+            const dateStr = dateParts[1]; // "October 2, 2025"
+            
+            // Manual parsing to avoid JavaScript date parsing issues
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                              'July', 'August', 'September', 'October', 'November', 'December'];
+            
+            const parts = dateStr.split(' '); // ["October", "2", "2025"]
+            
+            if (parts.length >= 2) {
+              const monthName = parts[0]; // "October"
+              const dayStr = parts[1].replace(',', ''); // "2"
+              const yearStr = parts[2] || new Date().getFullYear(); // "2025" or current year
+              
+              const monthIndex = monthNames.indexOf(monthName);
+              const day = parseInt(dayStr);
+              const year = parseInt(String(yearStr));
+              
+              if (monthIndex !== -1 && !isNaN(day) && !isNaN(year)) {
+                bookingDate = new Date(year, monthIndex, day);
+              } else {
+                throw new Error('Invalid date format');
+              }
+            } else {
+              throw new Error('Invalid date format');
+            }
+          } else {
+            bookingDate = new Date(date);
+          }
         } else {
           // Format: "2025-09-27" or similar
           bookingDate = new Date(date);
         }
         
-        // Parse the booking time - use END time for expiration
-        let bookingEndDateTime: Date;
-        if (time.includes(' - ')) {
-          // Format: "9:00 am - 12:00 pm" - use the END time (12:00 pm)
-          const endTime = time.split(' - ')[1].trim();
-          const [timeStr, period] = endTime.split(' ');
-          const [hours, minutes] = timeStr.split(':').map(Number);
-          
-          // Convert to 24-hour format
-          let hour24 = hours;
-          if (period && period.toLowerCase() === 'pm' && hours !== 12) {
-            hour24 = hours + 12;
-          } else if (period && period.toLowerCase() === 'am' && hours === 12) {
-            hour24 = 0;
-          }
-          
-          bookingEndDateTime = new Date(bookingDate);
-          bookingEndDateTime.setHours(hour24, minutes, 0, 0);
-        } else {
-          // Format: "12:00 PM" or "12:00" - assume it's a single time slot
-          const [timeStr] = time.split(' '); // Extract time part
-          const [hours, minutes] = timeStr.split(':').map(Number);
-          
-          // Convert to 24-hour format if needed
-          let hour24 = hours;
-          if (time.includes('PM') && hours !== 12) {
-            hour24 = hours + 12;
-          } else if (time.includes('AM') && hours === 12) {
-            hour24 = 0;
-          }
-          
-          bookingEndDateTime = new Date(bookingDate);
-          bookingEndDateTime.setHours(hour24, minutes, 0, 0);
+        if (isNaN(bookingDate.getTime())) {
+          throw new Error('Invalid date format');
         }
         
-        // Add 2 hours to the booking END time for expiredAt
-        const expiredAt = new Date(bookingEndDateTime);
-        expiredAt.setHours(expiredAt.getHours() + 2);
         
-        console.log(`📅 Booking: ${date} ${time}`);
-        console.log(`📅 End time: ${bookingEndDateTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
-        console.log(`📅 Expires at: ${expiredAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
-        console.log(`📅 Current time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
         
-        return expiredAt;
+        // Parse time to get hours and minutes
+        let hour24 = 18; // Default to 6 PM
+        let minutes = 0;
+        
+        if (time) {
+          // Handle different time formats
+          if (time.includes(' - ')) {
+            // Format: "4:00 PM - 7:00 PM" - extract start time
+            const startTime = time.split(' - ')[0].trim();
+            const timeMatch = startTime.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+            if (timeMatch) {
+              const [, hours, mins, period] = timeMatch;
+              hour24 = parseInt(hours);
+              minutes = parseInt(mins);
+              
+              if (period.toLowerCase() === 'pm' && hour24 !== 12) {
+                hour24 += 12;
+              } else if (period.toLowerCase() === 'am' && hour24 === 12) {
+                hour24 = 0;
+              }
+            }
+          } else {
+            // Format: "6:00 PM" - direct time
+            const timeMatch = time.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+            if (timeMatch) {
+              const [, hours, mins, period] = timeMatch;
+              hour24 = parseInt(hours);
+              minutes = parseInt(mins);
+              
+              if (period.toLowerCase() === 'pm' && hour24 !== 12) {
+                hour24 += 12;
+              } else if (period.toLowerCase() === 'am' && hour24 === 12) {
+                hour24 = 0;
+              }
+            }
+          }
+        }
+        
+        // Create booking date time in IST
+        const bookingDateTime = new Date(bookingDate);
+        bookingDateTime.setHours(hour24, minutes, 0, 0);
+        
+        // Convert to IST timezone for database storage
+        const istDateTime = new Date(bookingDateTime.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        
+        
+        
+        
+        
+        return istDateTime;
       } catch (error) {
-        console.error('Error calculating expiredAt:', error);
-        // Fallback: set expiredAt to 2 hours from now
-        const fallback = new Date();
-        fallback.setHours(fallback.getHours() + 2);
-        return fallback;
+        
+        // Fallback: use current time
+        return new Date();
       }
     };
+
+
+    // Get occasion specific fields first
+    console.log('Getting occasion fields...');
+    const occasionFields = await getOccasionFields(body.occasion, body);
+    console.log('Occasion fields received:', occasionFields);
 
     // Create booking data
     const bookingData = {
@@ -156,7 +279,23 @@ export async function POST(request: NextRequest) {
       date: body.date,
       time: body.time,
       occasion: body.occasion.trim(),
+      // Preserve full dynamic occasion data for database layer resilience
+      occasionData: body.occasionData || {},
       numberOfPeople: body.numberOfPeople || 2,
+      // Calculate and store extra guests count for easy reference
+      extraGuestsCount: (() => {
+        const numberOfPeople = body.numberOfPeople || 2;
+        // Get theater capacity to calculate extra guests
+        const getTheaterCapacity = (theaterName: string) => {
+          if (theaterName?.includes('EROS') || theaterName?.includes('FMT-Hall-1')) return { min: 2, max: 4 };
+          if (theaterName?.includes('PHILIA') || theaterName?.includes('FMT-Hall-2')) return { min: 2, max: 6 };
+          if (theaterName?.includes('PRAGMA') || theaterName?.includes('FMT-Hall-3')) return { min: 2, max: 8 };
+          if (theaterName?.includes('STORGE') || theaterName?.includes('FMT-Hall-4')) return { min: 2, max: 10 };
+          return { min: 2, max: 10 };
+        };
+        const capacity = getTheaterCapacity(body.theaterName || '');
+        return Math.max(0, numberOfPeople - capacity.min);
+      })(),
       selectedCakes: body.selectedCakes || [],
       selectedDecorItems: body.selectedDecorItems || [],
       selectedGifts: body.selectedGifts || [],
@@ -164,79 +303,93 @@ export async function POST(request: NextRequest) {
       totalAmount: totalAmount,
       advancePayment: advancePayment, // Amount paid now (25%)
       venuePayment: venuePayment, // Amount to be paid at venue
-      status: body.isManualBooking ? 'manual' : 'completed', // Booking status
-      // Timestamps
-      createdAt: new Date(), // When booking was created
-      // Auto-expiration: 2 hours after booking END time
-      expiredAt: calculateExpiredAt(body.date, body.time),
+      status: body.isManualBooking ? 'manual' : 'confirmed', // Booking status
+      // Store pricing data used at time of booking
+      pricingData: body.pricingData || {
+        slotBookingFee: 1000,
+        extraGuestFee: 400,
+        convenienceFee: 50
+      },
+      // Store calculated extra guest charges
+      extraGuestCharges: body.extraGuestCharges || 0,
+      // Timestamps - Set createdAt based on booking time, not server time
+      createdAt: calculateBookingDateTime(body.date, body.time), // When booking was created (based on booking time)
       // Manual booking specific fields
       isManualBooking: body.isManualBooking || false,
       bookingType: body.bookingType || 'Online',
       createdBy: body.createdBy || 'Customer',
+      staffId: body.staffId || null, // Staff ID who created the booking
+      staffName: body.staffName || null, // Staff name who created the booking
       notes: body.notes || '',
-      // Occasion-specific data (only save relevant fields based on occasion)
-      occasionPersonName: body.occasionPersonName || '',
-      // Only save the relevant name field based on the selected occasion
-      ...(body.occasion === 'Birthday Party' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Anniversary' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Baby Shower' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Bride to be' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Congratulations' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Farewell' && { birthdayName: body.birthdayName }),
-      ...(body.occasion === 'Marriage Proposal' && { 
-        proposerName: body.proposerName,
-        proposalPartnerName: body.proposalPartnerName 
-      }),
-      ...(body.occasion === 'Romantic Date' && { 
-        partner1Name: body.partner1Name,
-        partner2Name: body.partner2Name 
-      }),
-      ...(body.occasion === "Valentine's Day" && { valentineName: body.valentineName }),
-      ...(body.occasion === 'Date Night' && { dateNightName: body.dateNightName })
+      // Spread occasion specific fields dynamically from database (no legacy occasionPersonName)
+      ...occasionFields
     };
+    
+    console.log('Final booking data to save:', JSON.stringify(bookingData, null, 2));
 
     // Check if this is completing an incomplete booking
     const incompleteBookingId = body.incompleteBookingId;
     let deletedIncompleteBooking = null;
 
     // Save to database using db-connect (optimized for speed)
-    // All bookings go to regular booking collection, but manual bookings have status 'manual'
-    const result = await database.saveBooking(bookingData);
+    let result;
+    
+    if (body.isManualBooking) {
+      // Manual bookings go ONLY to manual_booking collection
+      
+      result = await database.saveManualBooking({
+        ...bookingData,
+        staffId: body.staffId,
+        staffName: body.staffName,
+        createdBy: body.createdBy || 'Admin'
+      });
+      
+    } else {
+      // Online bookings go to regular booking collection
+      // Note: Counter increment is handled inside saveBooking function
+      result = await database.saveBooking(bookingData);
+      
+    }
 
     if (result.success && result.booking) {
       const bookingType = body.isManualBooking ? 'Manual' : 'Online';
       const createdBy = body.createdBy || 'Customer';
       
-      console.log(`✅ ${bookingType} booking data saved to FeelME Town database:`, {
-        id: result.booking.id,
-        name: result.booking.name,
-        theater: result.booking.theaterName,
-        date: result.booking.date,
-        time: result.booking.time,
-        total: result.booking.totalAmount,
-        type: bookingType,
-        createdBy: createdBy
+      
+      
+      // Log occasion-specific fields that were saved
+      
+      const occasionFields = await getOccasionFields(body.occasion, body);
+      Object.keys(occasionFields).forEach(key => {
+        if (key.endsWith('_label')) {
+          const baseKey = key.replace('_label', '');
+          const label = occasionFields[key];
+          const value = occasionFields[baseKey];
+          
+        } else if (!key.endsWith('_value') && !key.endsWith('_label')) {
+          
+        }
       });
 
       // If this was completing an incomplete booking, delete the incomplete one
       if (incompleteBookingId) {
-        console.log('🔄 Completing incomplete booking:', incompleteBookingId);
+        
         
         const deleteResult = await database.deleteIncompleteBooking(incompleteBookingId);
         if (deleteResult.success) {
-          console.log('🗑️ Deleted incomplete booking:', incompleteBookingId);
+          
           deletedIncompleteBooking = {
             id: incompleteBookingId,
             deleted: true
           };
         } else {
-          console.log('⚠️ Failed to delete incomplete booking:', deleteResult.message);
+          
         }
       }
 
-      // Send email in background (non-blocking for faster response)
-      emailService.sendBookingComplete(result.booking).catch(error => {
-        console.log('⚠️ Email service error (background):', error);
+      // Send confirmation email in background (no invoice attachment)
+      emailService.sendBookingConfirmed(result.booking).catch(error => {
+        
       });
 
       return NextResponse.json({
@@ -245,7 +398,8 @@ export async function POST(request: NextRequest) {
         bookingId: result.booking.id,
         booking: result.booking,
         database: 'FeelME Town',
-        collection: 'booking',
+        collection: body.isManualBooking ? 'manual_booking' : 'booking',
+        bookingType: body.isManualBooking ? 'Manual' : 'Online',
         incompleteBookingDeleted: deletedIncompleteBooking
       }, { status: 201 });
     } else {
@@ -253,7 +407,7 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('❌ Error saving booking data:', error);
+    
     return NextResponse.json(
       { 
         success: false, 

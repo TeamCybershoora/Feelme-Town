@@ -1,26 +1,74 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
+interface GalleryImage {
+  _id: string;
+  imageUrl: string;
+  title: string;
+  description: string;
+  alt: string;
+  category?: string;
+  isActive: boolean;
+}
+
 const HeroContent = () => {
   const router = useRouter();
   
   const handleBookingClick = () => {
     router.push('/theater');
   };
+  
   const [currentSlide, setCurrentSlide] = useState(0);
-  const slides = [
-    { id: 1, src: "/images/theater1.webp", alt: "Theatre 1" },
-    { id: 2, src: "/images/theater2.webp", alt: "Theatre 2" },
-    { id: 3, src: "/images/theater3.webp", alt: "Theatre 3" },
-    { id: 4, src: "/images/theater4.webp", alt: "Theatre 4" }
-  ];
+  const [slides, setSlides] = useState<GalleryImage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch gallery images from database
+  useEffect(() => {
+    const fetchGalleryImages = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch('/api/gallery');
+        const data = await response.json();
+        
+        if (data.success && data.images && data.images.length > 0) {
+          // Filter only active images (if isActive field exists, otherwise include all)
+          const activeImages = data.images
+            .filter((img: GalleryImage) => img.isActive !== false) // Include if isActive is true or undefined
+            .map((img: GalleryImage) => ({
+              _id: img._id,
+              imageUrl: img.imageUrl,
+              title: img.title || 'FeelMe Town Theatre',
+              description: img.description || 'Premium theatre experience',
+              alt: img.alt || img.title || 'FeelMe Town Theatre',
+              isActive: img.isActive !== false
+            }));
+          
+          if (activeImages.length > 0) {
+            setSlides(activeImages);
+          } else {
+            setSlides([]);
+          }
+        } else {
+          setSlides([]);
+        }
+      } catch (error) {
+        setSlides([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchGalleryImages();
+  }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % slides.length);
-    }, 3000); // Change slide every 3 seconds
+    if (slides.length > 0) {
+      const interval = setInterval(() => {
+        setCurrentSlide((prev) => (prev + 1) % slides.length); // Cycle through all images
+      }, 3000); // Change slide every 3 seconds
 
-    return () => clearInterval(interval);
+      return () => clearInterval(interval);
+    }
   }, [slides.length]);
   return (
     <div className="hero-container">
@@ -59,25 +107,43 @@ const HeroContent = () => {
           <div className="widget-title">Theatre Gallery</div>
           <div className="theatre-slider">
             <div className="slider-container">
-              {slides.map((slide, index) => (
-                <div 
-                  key={slide.id} 
-                  className={`slider-image ${index === currentSlide ? 'active' : ''}`}
-                >
-                  <div className="image-wrapper">
-                    <img src={slide.src} alt={slide.alt} />
-                  </div>
+              {isLoading ? (
+                <div className="loading-placeholder">
+                  <div className="loading-spinner"></div>
+                  <p>Loading gallery...</p>
                 </div>
-              ))}
+              ) : slides.length > 0 ? (
+                slides.map((slide, index) => (
+                  <div 
+                    key={slide._id} 
+                    className={`slider-image ${index === currentSlide ? 'active' : ''}`}
+                  >
+                    <div className="image-wrapper">
+                      <img 
+                        src={slide.imageUrl} 
+                        alt={slide.alt}
+                      />
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="no-images-placeholder">
+                  <p>No gallery images available</p>
+                </div>
+              )}
             </div>
             <div className="slider-dots">
-              {slides.map((_, index) => (
-                <span 
-                  key={index}
-                  className={`dot ${index === currentSlide ? 'active' : ''}`}
-                  onClick={() => setCurrentSlide(index)}
-                ></span>
-              ))}
+              {slides.length > 0 && [0, 1, 2, 3].map((dotIndex) => {
+                const imageIndex = Math.floor((dotIndex * slides.length) / 4);
+                const isActive = Math.floor((currentSlide * 4) / slides.length) === dotIndex;
+                return (
+                  <span 
+                    key={dotIndex}
+                    className={`dot ${isActive ? 'active' : ''}`}
+                    onClick={() => setCurrentSlide(imageIndex)}
+                  ></span>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -497,6 +563,37 @@ const HeroContent = () => {
         .slider-image.active {
           opacity: 1;
         }
+        
+        .loading-placeholder {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.8);
+          color: white;
+          border-radius: 8px;
+          z-index: 3;
+        }
+        
+        .loading-spinner {
+          width: 30px;
+          height: 30px;
+          border: 2px solid rgba(255, 255, 255, 0.3);
+          border-top: 2px solid #fff;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 0.5rem;
+        }
+        
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
 
         .image-wrapper {
           width: 100%;
@@ -525,6 +622,7 @@ const HeroContent = () => {
           transform: translateX(-50%);
           display: flex;
           gap: 0.5rem;
+          justify-content: center;
         }
 
         .slider-dots .dot {
@@ -533,7 +631,7 @@ const HeroContent = () => {
           background: rgba(255, 255, 255, 0.5);
           border-radius: 50%;
           cursor: pointer;
-          transition: background 0.3s ease;
+          transition: all 0.3s ease;
         }
         
         .slider-dots .dot:hover {
@@ -542,6 +640,7 @@ const HeroContent = () => {
 
         .slider-dots .dot.active {
           background: white;
+          transform: scale(1.3);
         }
 
         .metric {

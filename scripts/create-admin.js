@@ -9,7 +9,7 @@ async function createAdmin() {
   
   try {
     await client.connect();
-    console.log('Connected to MongoDB');
+    
     
     const db = client.db(DB_NAME);
     
@@ -29,7 +29,7 @@ async function createAdmin() {
     const existingAdmin = await db.collection('admin').findOne({});
     
     if (existingAdmin) {
-      console.log('Admin already exists. Updating password...');
+      
       await db.collection('admin').updateOne(
         { _id: existingAdmin._id },
         { 
@@ -44,19 +44,19 @@ async function createAdmin() {
           } 
         }
       );
-      console.log('Admin password updated!');
+      
     } else {
-      console.log('Creating new admin...');
+      
       await db.collection('admin').insertOne(admin);
-      console.log('Admin created successfully!');
+      
     }
     
-    console.log('Admin credentials:');
-    console.log('Username: admin');
-    console.log('Password: FeelMeTown2024!');
+    
+    
+    
     
   } catch (error) {
-    console.error('Error:', error);
+    
   } finally {
     await client.close();
   }

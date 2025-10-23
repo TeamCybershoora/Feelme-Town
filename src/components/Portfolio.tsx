@@ -1,35 +1,66 @@
 import React, { useState, useEffect } from 'react';
 
+interface GalleryImage {
+  _id: string;
+  imageUrl: string;
+  title: string;
+  description: string;
+  alt: string;
+  category?: string;
+  isActive: boolean;
+}
+
 const Portfolio = () => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  
-  // Array of images for slideshow
-  const images = [
-    {
-      src: "./images/theater1.webp", // You can replace with different images
-      alt: "FeelMe Town Couple",
-      title: "EROS (Couples) (FMT-Hall-1)",
-      description: "Premium amenities • Welcoming atmosphere • Memorable events"
-    },
-    {
-      src: "./images/theater2.webp",
-      alt: "FeelMe Town Friends",
-      title: "PHILIA (FRIENDS) (FMT-Hall-2)",
-      description: "Luxury seating • 4K Projection • Surround Sound"
-    },
-    {
-      src: "./images/theater3.webp", // You can replace with different images
-      alt: "FeelMe Town Relationsip & Love",
-      title: "PRAGMA (LOVE) (FMT-Hall-3)",
-      description: "Professional service • Creative solutions • Perfect execution"
-    },
-    {
-      src: "./images/theater4.webp", // You can replace with different images
-      alt: "FeelMe Town Event Planning",
-      title: "STORGE (FAMILY) (FMT-Hall-4)",
-      description: "Professional service • Creative solutions • Perfect execution"
-    }
-  ];
+  const [images, setImages] = useState<GalleryImage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch gallery images from database
+  useEffect(() => {
+    const fetchGalleryImages = async () => {
+      try {
+        setIsLoading(true);
+        console.log('📸 Portfolio: Fetching gallery images...');
+        const response = await fetch('/api/gallery');
+        console.log('📸 Portfolio: Response status:', response.status);
+        const data = await response.json();
+        console.log('📸 Portfolio: API Response:', data);
+        
+        if (data.success && data.images && data.images.length > 0) {
+          // Filter only active images and format them (include if isActive is true or undefined)
+          const activeImages = data.images
+            .filter((img: GalleryImage) => img.isActive !== false)
+            .map((img: GalleryImage) => ({
+              _id: img._id,
+              imageUrl: img.imageUrl,
+              title: img.title || 'FeelMe Town Theater',
+              description: img.description || 'Premium theater experience',
+              alt: img.alt || img.title || 'FeelMe Town Theater',
+              isActive: img.isActive !== false
+            }));
+          
+          console.log('📸 Portfolio: Active images found:', activeImages.length);
+          if (activeImages.length > 0) {
+            console.log('📸 Portfolio: Setting images:', activeImages);
+            setImages(activeImages);
+          } else {
+            console.log('📸 Portfolio: No active images found');
+            setImages([]);
+          }
+        } else {
+          console.log('📸 Portfolio: API failed or returned empty');
+          setImages([]);
+        }
+      } catch (error) {
+        console.error('📸 Portfolio: Error fetching gallery images:', error);
+        setImages([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchGalleryImages();
+  }, []);
 
   // Auto-advance slideshow
   useEffect(() => {
@@ -84,14 +115,25 @@ const Portfolio = () => {
         <div className="portfolio-image">
           <div className="image-frame">
             <div className="slideshow-container">
-              {images.map((image, index) => (
-                <img 
-                  key={index}
-                  src={image.src} 
-                  alt={image.alt}
-                  className={`theatre-image ${index === currentImageIndex ? 'active' : ''}`}
-                />
-              ))}
+              {isLoading ? (
+                <div className="loading-placeholder">
+                  <div className="loading-spinner"></div>
+                  <p>Loading gallery images...</p>
+                </div>
+              ) : images.length > 0 ? (
+                images.map((image, index) => (
+                  <img 
+                    key={image._id || index}
+                    src={image.imageUrl} 
+                    alt={image.alt}
+                    className={`theatre-image ${index === currentImageIndex ? 'active' : ''}`}
+                  />
+                ))
+              ) : (
+                <div className="no-images-placeholder">
+                  <p>No gallery images available</p>
+                </div>
+              )}
               <div className="slideshow-gradient"></div>
             </div>
             <div className="image-overlay">
@@ -242,6 +284,36 @@ const Portfolio = () => {
         
         .theatre-image.active {
           opacity: 1;
+        }
+        
+        .loading-placeholder {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.8);
+          color: white;
+          z-index: 3;
+        }
+        
+        .loading-spinner {
+          width: 40px;
+          height: 40px;
+          border: 3px solid rgba(255, 255, 255, 0.3);
+          border-top: 3px solid #D3BBDC;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 1rem;
+        }
+        
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
         
         .slideshow-gradient {

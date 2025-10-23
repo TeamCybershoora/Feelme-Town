@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     const result = await database.updateBooking(bookingId, updateData);
 
     if (result.success) {
-      console.log('✅ Booking status updated to completed:', bookingId);
+      
       return NextResponse.json({
         success: true,
         message: 'Booking status updated successfully',
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('❌ Error updating booking status:', error);
+    
     return NextResponse.json(
       { 
         success: false, 
@@ -47,3 +47,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

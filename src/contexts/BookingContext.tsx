@@ -6,7 +6,7 @@ interface TheaterData {
   id: number;
   name: string;
   image: string;
-  capacity: string;
+  capacity: string | { min: number; max: number };
   capacityNumber: number;
   type: string;
   price: string;
@@ -43,6 +43,7 @@ interface BookingContextType {
   setIncompleteBookingData: (data: IncompleteBookingData | null) => void;
   setSelectedTimeSlot: (timeSlot: string | null) => void;
   setSelectedTheater: (theater: TheaterData | null) => void;
+  setSelectedDate: (date: string | null) => void;
   // Cancel booking popup
   isCancelBookingPopupOpen: boolean;
   cancelBookingData: { id: string; name: string; email: string; phone: string; theaterName: string; date: string; time: string; occasion: string; numberOfPeople: number; totalAmount: number; createdAt: string; } | null;
@@ -72,21 +73,15 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const [isPopupClosed, setIsPopupClosed] = useState(false);
 
   const openBookingPopup = (theater?: TheaterData, date?: string, timeSlot?: string, incompleteData?: IncompleteBookingData) => {
-    console.log('🎯 openBookingPopup called with:', { theater: theater?.name, date, timeSlot, isPopupClosed, isBookingPopupOpen });
-    
     // Don't open if popup was manually closed
     if (isPopupClosed) {
-      console.log('🚫 Popup was manually closed, not opening');
       return;
     }
     
     // Don't open if popup is already open
     if (isBookingPopupOpen) {
-      console.log('🚫 Popup is already open, not opening');
       return;
     }
-    
-    console.log('✅ Opening booking popup...');
     
     if (theater) {
       setSelectedTheater(theater);
@@ -94,15 +89,19 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     if (date) {
       setSelectedDate(date);
     }
+    
+    // Always set a default time slot if none is provided
     if (timeSlot) {
       setSelectedTimeSlot(timeSlot);
+    } else {
+      setSelectedTimeSlot('6:00 PM - 9:00 PM');
     }
     if (incompleteData) {
       setIncompleteBookingData(incompleteData);
     }
     setIsBookingPopupOpen(true);
     
-    console.log('✅ Booking popup state set to true');
+    
   };
 
   const closeBookingPopup = () => {
@@ -149,6 +148,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       setIncompleteBookingData,
       setSelectedTimeSlot,
       setSelectedTheater,
+      setSelectedDate,
       isCancelBookingPopupOpen,
       cancelBookingData,
       openCancelBookingPopup,
@@ -169,3 +169,4 @@ export function useBooking() {
   }
   return context;
 }
+

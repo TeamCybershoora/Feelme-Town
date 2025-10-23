@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Invoice Generation</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-button { 
+            background: #007bff; color: white; padding: 15px 30px; 
+            text-decoration: none; border-radius: 5px; margin: 10px; 
+            display: inline-block; font-weight: bold;
+        }
+        .info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Invoice Generation</h1>
+    
+    <div class="info">
+        <h3>Test Links (Replace with real booking ID):</h3>
+        <p>Change "FMT-2025-1023-001-123456-42" to a real booking ID from your database</p>
+    </div>
+
+    <a href="http://localhost:3000/api/generate-invoice?bookingId=FMT-2025-1023-001-123456-42&format=html" 
+       class="test-button" target="_blank">
+        👁️ Preview Invoice HTML
+    </a>
+    
+    <a href="http://localhost:3000/api/generate-invoice?bookingId=FMT-2025-1023-001-123456-42&format=pdf" 
+       class="test-button" target="_blank">
+        📄 Download Invoice PDF
+    </a>
+
+    <div class="info">
+        <h3>✅ What should happen:</h3>
+        <ul>
+            <li><strong>HTML Preview:</strong> Shows invoice with booking details, occasion fields, and proper styling</li>
+            <li><strong>PDF Download:</strong> Downloads a PDF with same content and styling</li>
+            <li><strong>Content includes:</strong> Customer info, booking details, occasion-specific fields, pricing table</li>
+        </ul>
+    </div>
+
+    <div class="info">
+        <h3>🔧 If it doesn't work:</h3>
+        <ul>
+            <li>Replace the booking ID with a real one from your database</li>
+            <li>Make sure your dev server is running</li>
+            <li>Check browser console for errors</li>
+        </ul>
+    </div>
+</body>
+</html>

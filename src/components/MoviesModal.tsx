@@ -27,7 +27,7 @@ interface MoviesModalProps {
 export default function MoviesModal({ isOpen, onClose, onMovieSelect, selectedMovies = [] }: MoviesModalProps) {
   const [isVisible, setIsVisible] = useState(false);
   
-  console.log('🎬 MoviesModal: Props received', { isOpen, onMovieSelect: !!onMovieSelect });
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
@@ -58,7 +58,7 @@ export default function MoviesModal({ isOpen, onClose, onMovieSelect, selectedMo
   };
 
   const handleMovieSelect = (movieTitle: string) => {
-    console.log('🎬 MoviesModal: Movie selected:', movieTitle);
+    
     onMovieSelect(movieTitle);
     onClose();
   };

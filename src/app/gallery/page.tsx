@@ -1,26 +1,50 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+
+interface GalleryImage {
+    _id: string;
+    imageUrl: string;
+    alt: string;
+    title?: string;
+    description?: string;
+    category?: string;
+    isActive: boolean;
+    createdAt: string;
+}
 
 export default function Gallery() {
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
-    // Gallery images from /images/gallery/ folder
-    const allImages = [
-        { src: '/images/gallery/Feelme Town_1.webp', alt: 'FeelMe Town Gallery 1' },
-        { src: '/images/gallery/Feelme Town_2.webp', alt: 'FeelMe Town Gallery 2' },
-        { src: '/images/gallery/Feelme Town_3.webp', alt: 'FeelMe Town Gallery 3' },
-        { src: '/images/gallery/Feelme Town_4.webp', alt: 'FeelMe Town Gallery 4' },
-        { src: '/images/gallery/Feelme Town_5.webp', alt: 'FeelMe Town Gallery 5' },
-        { src: '/images/gallery/Feelme Town_6.webp', alt: 'FeelMe Town Gallery 6' },
-        { src: '/images/gallery/Feelme Town_7.webp', alt: 'FeelMe Town Gallery 7' },
-        { src: '/images/gallery/Feelme Town_8.webp', alt: 'FeelMe Town Gallery 8' },
-        { src: '/images/gallery/Feelme Town_9.webp', alt: 'FeelMe Town Gallery 9' },
-        { src: '/images/gallery/Feelme Town_10.webp', alt: 'FeelMe Town Gallery 10' },
-        { src: '/images/gallery/Feelme Town_11.webp', alt: 'FeelMe Town Gallery 11' },
-        { src: '/images/gallery/Feelme Town_12.webp', alt: 'FeelMe Town Gallery 12' },
-        { src: '/images/gallery/Feelme Town_13.webp', alt: 'FeelMe Town Gallery 13' },
-        { src: '/images/gallery/Feelme Town_14.webp', alt: 'FeelMe Town Gallery 14' },
-    ];
+    const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    // Fetch gallery images from database
+    useEffect(() => {
+        const fetchGalleryImages = async () => {
+            try {
+                setLoading(true);
+                const response = await fetch('/api/gallery');
+                const data = await response.json();
+                
+                if (data.success) {
+                    setGalleryImages(data.images || []);
+                } else {
+                    setError(data.error || 'Failed to fetch gallery images');
+                }
+            } catch (err) {
+                setError('Failed to fetch gallery images');
+                console.error('Error fetching gallery images:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchGalleryImages();
+    }, []);
+
+    // Use only database images
+    const allImages = galleryImages;
 
     // Split images into two rows
     const topRowImages = allImages.slice(0, 8); // First 8 images
@@ -269,6 +293,21 @@ export default function Gallery() {
             {/* Gallery Section */}
             <section className="gallery-section">
                 <div className="container">
+                    {loading && (
+                        <div style={{ textAlign: 'center', padding: '2rem', color: '#d1d5db' }}>
+                            <p>Loading gallery images...</p>
+                        </div>
+                    )}
+                    
+                    {error && (
+                        <div style={{ textAlign: 'center', padding: '2rem', color: '#ED2024' }}>
+                            <p>Error: {error}</p>
+                            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>
+                                Please try again later or contact support.
+                            </p>
+                        </div>
+                    )}
+                    
                     <div className="gallery-container">
                         {/* Top Row - Right to Left (8 images) */}
                         <div className="gallery-row">
@@ -280,10 +319,10 @@ export default function Gallery() {
                                     <div 
                                         key={`top-${index}`} 
                                         className="gallery-image-card"
-                                        onClick={() => setSelectedImage(image.src)}
+                                        onClick={() => setSelectedImage(image.imageUrl)}
                                     >
                                         <img
-                                            src={image.src}
+                                            src={image.imageUrl}
                                             alt={image.alt}
                                             className="gallery-image"
                                         />
@@ -302,10 +341,10 @@ export default function Gallery() {
                                     <div 
                                         key={`bottom-${index}`} 
                                         className="gallery-image-card"
-                                        onClick={() => setSelectedImage(image.src)}
+                                        onClick={() => setSelectedImage(image.imageUrl)}
                                     >
                                         <img
-                                            src={image.src}
+                                            src={image.imageUrl}
                                             alt={image.alt}
                                             className="gallery-image"
                                         />

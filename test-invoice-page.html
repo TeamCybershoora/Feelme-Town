@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Invoice Page</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .test-button { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 15px 30px; text-decoration: none; 
+            border-radius: 50px; display: inline-block; font-weight: 600;
+            margin: 10px; transition: all 0.3s ease;
+        }
+        .test-button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+        .info { background: #e8f5e8; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #28a745; }
+        .warning { background: #fff3cd; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #ffc107; }
+        .success { background: #d4edda; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #28a745; }
+        h1 { color: #333; text-align: center; margin-bottom: 30px; }
+        h3 { color: #555; margin-bottom: 15px; }
+        ul { line-height: 1.6; }
+        .highlight { background: #ffeb3b; padding: 2px 6px; border-radius: 3px; }
+        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📄 Test Invoice Page</h1>
+        
+        <div class="info">
+            <h3>🆕 New Invoice Page Features:</h3>
+            <ul>
+                <li><strong>📄 View Invoice:</strong> Shows full invoice in browser</li>
+                <li><strong>📥 Download PDF:</strong> Button to download PDF</li>
+                <li><strong>🖨️ Print:</strong> Print button for physical copy</li>
+                <li><strong>📱 Responsive:</strong> Works on mobile and desktop</li>
+            </ul>
+        </div>
+
+        <div class="warning">
+            <h3>🧪 Test the Invoice Page:</h3>
+            <p>Enter a booking ID to test the invoice page:</p>
+            <input type="text" id="bookingId" placeholder="Enter Booking ID (e.g., FMT-2025-1023-001-123456-42)" value="FMT-2025-1023-001-123456-42">
+            <div style="text-align: center; margin: 20px 0;">
+                <button onclick="testInvoicePage()" class="test-button">
+                    📄 Test Invoice Page
+                </button>
+            </div>
+        </div>
+
+        <div class="success">
+            <h3>✅ What the Invoice Page Shows:</h3>
+            <ul>
+                <li><strong>Header:</strong> Invoice title with booking ID</li>
+                <li><strong>Action Bar:</strong> Print and Download PDF buttons</li>
+                <li><strong>Invoice Content:</strong> Full invoice with all booking details</li>
+                <li><strong>Footer:</strong> Back and Download buttons</li>
+                <li><strong>Print Ready:</strong> Clean print layout</li>
+            </ul>
+        </div>
+
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
+            <h3>📧 Email Button Flow:</h3>
+            <ol>
+                <li><strong>User receives email</strong> with booking confirmation</li>
+                <li><strong>Clicks "View & Download Invoice"</strong> button</li>
+                <li><strong>Opens invoice page</strong> in browser</li>
+                <li><strong>Can view, print, or download</strong> the invoice</li>
+            </ol>
+        </div>
+
+        <div style="background: #e3f2fd; padding: 20px; border-radius: 10px; margin: 20px 0;">
+            <h3>🎯 User Benefits:</h3>
+            <ul>
+                <li><strong>Preview:</strong> See invoice before downloading</li>
+                <li><strong>Options:</strong> View, print, or download</li>
+                <li><strong>Mobile Friendly:</strong> Works on all devices</li>
+                <li><strong>Professional:</strong> Clean, branded invoice page</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function testInvoicePage() {
+            const bookingId = document.getElementById('bookingId').value.trim();
+            if (!bookingId) {
+                alert('Please enter a booking ID');
+                return;
+            }
+            
+            const url = `http://localhost:3000/invoice/${encodeURIComponent(bookingId)}`;
+            window.open(url, '_blank');
+        }
+    </script>
+</body>
+</html>
