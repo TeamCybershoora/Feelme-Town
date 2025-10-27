@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 const DATA_DIR = path.join(process.cwd(), 'public', 'data', 'exports');
 
 const isBlobEnabled = () => {
+  // Enable blob storage if token is available
   return !!process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL === '1' || process.env.VERCEL === 'true';
 };
 
@@ -36,15 +37,22 @@ function asArray(data: any): any[] {
 export const ExportsStorage = {
   // Generic read raw JSON from storage
   async readRaw(fileName: string): Promise<any | null> {
+    console.log(`📖 Reading ${fileName} from storage...`);
+    
     // 1) Try FS first
     try {
       const filePath = path.join(DATA_DIR, fileName);
       const raw = await fs.readFile(filePath, 'utf8').catch(() => '');
       const trimmed = (raw || '').trim();
-      if (trimmed) return JSON.parse(trimmed);
-    } catch {}
+      if (trimmed) {
+        console.log(`✅ Successfully read ${fileName} from file system: ${filePath}`);
+        return JSON.parse(trimmed);
+      }
+    } catch (error) {
+      console.log(`⚠️ Failed to read ${fileName} from file system:`, error instanceof Error ? error.message : String(error));
+    }
 
-    // 2) Try Blob
+    // 2) Try Blob (currently disabled)
     if (isBlobEnabled()) {
       try {
         const blobApi = await dynamicBlob();
@@ -59,13 +67,21 @@ export const ExportsStorage = {
             if (r.ok) {
               const txt = await r.text();
               const trimmed = (txt || '').trim();
-              if (trimmed) return JSON.parse(trimmed);
+              if (trimmed) {
+                console.log(`✅ Successfully read ${fileName} from blob storage`);
+                return JSON.parse(trimmed);
+              }
             }
           }
         }
-      } catch {}
+      } catch (error) {
+        console.log(`⚠️ Failed to read ${fileName} from blob storage:`, error instanceof Error ? error.message : String(error));
+      }
+    } else {
+      console.log(`ℹ️ Blob storage disabled, using file system only`);
     }
 
+    console.log(`❌ ${fileName} not found in any storage`);
     return null;
   },
 
@@ -93,15 +109,19 @@ export const ExportsStorage = {
   // Generic write raw JSON (replaces)
   async writeRaw(fileName: string, data: any): Promise<void> {
     const json = JSON.stringify(data, null, 2);
+    console.log(`📝 Writing ${fileName} to file system...`);
 
     // FS write (dev/local)
     try {
       await ensureDir();
       const filePath = path.join(DATA_DIR, fileName);
       await fs.writeFile(filePath, json, 'utf8');
-    } catch {}
+      console.log(`✅ Successfully wrote ${fileName} to ${filePath}`);
+    } catch (error) {
+      console.error(`❌ Failed to write ${fileName} to file system:`, error instanceof Error ? error.message : String(error));
+    }
 
-    // Blob mirror (prod)
+    // Blob mirror (prod) - currently disabled
     if (isBlobEnabled()) {
       try {
         const blobApi = await dynamicBlob();
@@ -112,8 +132,13 @@ export const ExportsStorage = {
             contentType: 'application/json',
             token: process.env.BLOB_READ_WRITE_TOKEN
           });
+          console.log(`✅ Successfully wrote ${fileName} to blob storage`);
         }
-      } catch {}
+      } catch (error) {
+        console.error(`❌ Failed to write ${fileName} to blob storage:`, error instanceof Error ? error.message : String(error));
+      }
+    } else {
+      console.log(`ℹ️ Blob storage disabled, using file system only`);
     }
   },
 

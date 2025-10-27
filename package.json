@@ -10,10 +10,10 @@
     "cleanup": "node scripts/cleanup-expired-bookings.js"
   },
   "dependencies": {
-    "@vercel/blob": "^0.24.0",
     "@radix-ui/react-slot": "^1.2.3",
     "@types/form-data": "^2.2.1",
     "@types/puppeteer": "^5.4.7",
+    "@vercel/blob": "^0.24.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "form-data": "^4.0.4",
