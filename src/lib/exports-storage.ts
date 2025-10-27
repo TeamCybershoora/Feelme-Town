@@ -37,22 +37,9 @@ function asArray(data: any): any[] {
 export const ExportsStorage = {
   // Generic read raw JSON from storage
   async readRaw(fileName: string): Promise<any | null> {
-    console.log(`📖 Reading ${fileName} from storage...`);
+    console.log(`📖 Reading ${fileName} from blob storage...`);
     
-    // 1) Try FS first
-    try {
-      const filePath = path.join(DATA_DIR, fileName);
-      const raw = await fs.readFile(filePath, 'utf8').catch(() => '');
-      const trimmed = (raw || '').trim();
-      if (trimmed) {
-        console.log(`✅ Successfully read ${fileName} from file system: ${filePath}`);
-        return JSON.parse(trimmed);
-      }
-    } catch (error) {
-      console.log(`⚠️ Failed to read ${fileName} from file system:`, error instanceof Error ? error.message : String(error));
-    }
-
-    // 2) Try Blob (currently disabled)
+    // Only use Blob Storage (no file system fallback)
     if (isBlobEnabled()) {
       try {
         const blobApi = await dynamicBlob();
@@ -78,10 +65,10 @@ export const ExportsStorage = {
         console.log(`⚠️ Failed to read ${fileName} from blob storage:`, error instanceof Error ? error.message : String(error));
       }
     } else {
-      console.log(`ℹ️ Blob storage disabled, using file system only`);
+      console.log(`❌ Blob storage not enabled - cannot read ${fileName}`);
     }
 
-    console.log(`❌ ${fileName} not found in any storage`);
+    console.log(`❌ ${fileName} not found in blob storage`);
     return null;
   },
 
@@ -109,19 +96,9 @@ export const ExportsStorage = {
   // Generic write raw JSON (replaces)
   async writeRaw(fileName: string, data: any): Promise<void> {
     const json = JSON.stringify(data, null, 2);
-    console.log(`📝 Writing ${fileName} to file system...`);
+    console.log(`📝 Writing ${fileName} to blob storage...`);
 
-    // FS write (dev/local)
-    try {
-      await ensureDir();
-      const filePath = path.join(DATA_DIR, fileName);
-      await fs.writeFile(filePath, json, 'utf8');
-      console.log(`✅ Successfully wrote ${fileName} to ${filePath}`);
-    } catch (error) {
-      console.error(`❌ Failed to write ${fileName} to file system:`, error instanceof Error ? error.message : String(error));
-    }
-
-    // Blob mirror (prod) - currently disabled
+    // Only use Blob Storage (no file system backup)
     if (isBlobEnabled()) {
       try {
         const blobApi = await dynamicBlob();
@@ -136,9 +113,11 @@ export const ExportsStorage = {
         }
       } catch (error) {
         console.error(`❌ Failed to write ${fileName} to blob storage:`, error instanceof Error ? error.message : String(error));
+        throw error; // Re-throw to handle the error properly
       }
     } else {
-      console.log(`ℹ️ Blob storage disabled, using file system only`);
+      console.error(`❌ Blob storage not enabled - cannot write ${fileName}`);
+      throw new Error('Blob storage not enabled');
     }
   },
 
