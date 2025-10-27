@@ -2,15 +2,14 @@ import { NextResponse } from 'next/server';
 import { ExportsStorage } from '@/lib/exports-storage';
 import database from '@/lib/db-connect';
 
-// GET /api/admin/pricing - Get current pricing settings (Blob-backed)
+// GET /api/admin/pricing - Get current pricing settings (Blob-backed only)
 export async function GET() {
   try {
-    // First try to read from blob storage
+    // Read from blob storage (public/data/exports/pricing.json)
     let pricingData = await ExportsStorage.readRaw('pricing.json');
     
     if (!pricingData) {
-      // If not found in blob, fetch from database and save to blob
-      console.log('🔄 Admin pricing not found in blob, fetching from database...');
+      console.log('🔄 Pricing not found in blob storage, fetching from database...');
       
       try {
         // Try to get pricing from database (system settings)
@@ -27,7 +26,7 @@ export async function GET() {
           
           // Save to blob storage for future use
           await ExportsStorage.writeRaw('pricing.json', pricingData);
-          console.log('✅ Admin pricing fetched from database and saved to blob');
+          console.log('✅ Pricing fetched from database and saved to blob storage');
         } else {
           // Use default pricing if database is empty
           pricingData = {
@@ -37,9 +36,9 @@ export async function GET() {
             decorationFees: 0
           };
           
-          // Save default to blob
+          // Save default to blob storage
           await ExportsStorage.writeRaw('pricing.json', pricingData);
-          console.log('✅ Default admin pricing saved to blob');
+          console.log('✅ Default pricing saved to blob storage');
         }
       } catch (dbError) {
         console.error('❌ Database fetch failed, using default pricing:', dbError);
@@ -52,11 +51,11 @@ export async function GET() {
           decorationFees: 0
         };
         
-        // Save fallback to blob
+        // Save fallback to blob storage
         await ExportsStorage.writeRaw('pricing.json', pricingData);
       }
     } else {
-      console.log('✅ Admin pricing loaded from blob storage');
+      console.log('✅ Pricing loaded from blob storage');
     }
 
     return NextResponse.json({ 
@@ -102,10 +101,11 @@ export async function PUT(request: Request) {
       ...(decorationFees !== undefined && { decorationFees: Number(decorationFees) })
     };
 
-    // Save updated pricing to blob storage
+    // Save updated pricing to blob storage (public/data/exports/pricing.json)
     await ExportsStorage.writeRaw('pricing.json', updatedPricing);
+    console.log('✅ Pricing updated in blob storage');
     
-    // Also try to save to database (system settings) for persistence
+    // Also save to database for backup/persistence
     try {
       await database.saveSettings({
         slotBookingFee: updatedPricing.slotBookingFee,
@@ -113,7 +113,7 @@ export async function PUT(request: Request) {
         convenienceFee: updatedPricing.convenienceFee,
         decorationFees: updatedPricing.decorationFees
       });
-      console.log('✅ Pricing also saved to database');
+      console.log('✅ Pricing also saved to database for backup');
     } catch (dbError) {
       console.error('⚠️ Failed to save pricing to database:', dbError);
       // Don't fail the request if database save fails
