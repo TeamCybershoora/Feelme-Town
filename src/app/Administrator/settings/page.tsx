@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Save, Mail, Lock, User, Globe, Bell, Shield, Database } from 'lucide-react';
+import { Save, Mail, Lock, User, Globe, Bell, Shield, Database, RotateCcw, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
 import ToastContainer from '@/components/ToastContainer';
 
@@ -79,8 +79,17 @@ export default function SystemSettingsPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'notifications' | 'security' | 'booking' | 'cloudinary'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'notifications' | 'security' | 'booking' | 'cloudinary' | 'counters'>('general');
   const { toasts, removeToast, showSuccess, showError } = useToast();
+  
+  // Reset counters state
+  const [resettingCounters, setResettingCounters] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [currentCounters, setCurrentCounters] = useState<any>(null);
+  const [realTimeInterval, setRealTimeInterval] = useState<NodeJS.Timeout | null>(null);
+  
+  // Show/hide password state
+  const [showApiSecret, setShowApiSecret] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -175,6 +184,122 @@ export default function SystemSettingsPage() {
     }
   };
 
+  // Reset counters functions
+  const fetchCurrentCounters = async () => {
+    try {
+      const response = await fetch('/api/admin/dashboard-stats');
+      const data = await response.json();
+      if (data.success) {
+        setCurrentCounters(data.stats);
+        console.log('🔄 Real-time counters updated:', new Date().toLocaleTimeString());
+      }
+    } catch (error) {
+      console.error('Failed to fetch counters:', error);
+    }
+  };
+
+  // Start real-time counter updates
+  const startRealTimeUpdates = () => {
+    if (realTimeInterval) {
+      clearInterval(realTimeInterval);
+    }
+    
+    // Fetch immediately
+    fetchCurrentCounters();
+    
+    // Then fetch every 3 seconds for real-time updates
+    const interval = setInterval(() => {
+      fetchCurrentCounters();
+    }, 3000);
+    
+    setRealTimeInterval(interval);
+    console.log('🚀 Real-time counter updates started (every 3 seconds)');
+  };
+
+  // Stop real-time counter updates
+  const stopRealTimeUpdates = () => {
+    if (realTimeInterval) {
+      clearInterval(realTimeInterval);
+      setRealTimeInterval(null);
+      console.log('⏹️ Real-time counter updates stopped');
+    }
+  };
+
+  const handleResetAllCounters = async () => {
+    if (!showResetConfirm) {
+      // First click - show confirmation
+      await fetchCurrentCounters();
+      setShowResetConfirm(true);
+      return;
+    }
+
+    // Second click - actually reset
+    try {
+      setResettingCounters(true);
+      const response = await fetch('/api/admin/reset-all-counters', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ confirmReset: true })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        showSuccess('ALL counters have been reset to 0! This includes total counts from database.');
+        setShowResetConfirm(false);
+        
+        // Immediately update counters to show 0 values
+        setCurrentCounters({
+          onlineBookings: { today: 0, thisWeek: 0, thisMonth: 0, thisYear: 0, total: 0 },
+          manualBookings: { today: 0, thisWeek: 0, thisMonth: 0, thisYear: 0, total: 0 },
+          completedBookings: { today: 0, thisWeek: 0, thisMonth: 0, thisYear: 0, total: 0 },
+          cancelledBookings: { today: 0, thisWeek: 0, thisMonth: 0, thisYear: 0, total: 0 },
+          incompleteBookings: { today: 0, thisWeek: 0, thisMonth: 0, thisYear: 0, total: 0 }
+        });
+        
+        // Then fetch fresh data from server to confirm
+        setTimeout(() => {
+          fetchCurrentCounters();
+        }, 1000);
+      } else {
+        showError(data.error || 'Failed to reset all counters');
+      }
+    } catch (error) {
+      showError('Failed to reset all counters');
+    } finally {
+      setResettingCounters(false);
+    }
+  };
+
+  const cancelResetConfirm = () => {
+    setShowResetConfirm(false);
+  };
+
+  // Fetch counters when counters tab is selected and start real-time updates
+  useEffect(() => {
+    if (activeTab === 'counters') {
+      startRealTimeUpdates();
+    } else {
+      stopRealTimeUpdates();
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      stopRealTimeUpdates();
+    };
+  }, [activeTab]);
+
+  // Cleanup interval on component unmount
+  useEffect(() => {
+    return () => {
+      if (realTimeInterval) {
+        clearInterval(realTimeInterval);
+      }
+    };
+  }, [realTimeInterval]);
+
   if (loading) {
     return (
       <div className="settings-page">
@@ -189,7 +314,8 @@ export default function SystemSettingsPage() {
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'booking', label: 'Booking', icon: Database },
-    { id: 'cloudinary', label: 'Cloudinary', icon: Database }
+    { id: 'cloudinary', label: 'Cloudinary', icon: Database },
+    { id: 'counters', label: 'Reset Counters', icon: RotateCcw }
   ];
 
   return (
@@ -210,7 +336,7 @@ export default function SystemSettingsPage() {
               <button
                 key={tab.id}
                 className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab.id as 'general' | 'email' | 'notifications' | 'security' | 'booking' | 'cloudinary')}
+                onClick={() => setActiveTab(tab.id as 'general' | 'email' | 'notifications' | 'security' | 'booking' | 'cloudinary' | 'counters')}
               >
                 <Icon size={20} />
                 {tab.label}
@@ -508,14 +634,152 @@ export default function SystemSettingsPage() {
 
             <div className="form-group">
               <label>API Secret</label>
-              <input
-                type="password"
-                className="form-input"
-                value={settings.cloudinaryApiSecret}
-                onChange={(e) => setSettings({ ...settings, cloudinaryApiSecret: e.target.value })}
-                placeholder="Enter Cloudinary API Secret"
-              />
+              <div className="password-input-container">
+                <input
+                  type={showApiSecret ? "text" : "password"}
+                  className="form-input password-input"
+                  value={settings.cloudinaryApiSecret}
+                  onChange={(e) => setSettings({ ...settings, cloudinaryApiSecret: e.target.value })}
+                  placeholder="Enter Cloudinary API Secret"
+                />
+                <button
+                  type="button"
+                  className="eye-button"
+                  onClick={() => setShowApiSecret(!showApiSecret)}
+                  title={showApiSecret ? "Hide API Secret" : "Show API Secret"}
+                >
+                  {showApiSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
+          </div>
+        )}
+
+        {/* Reset Counters Settings */}
+        {activeTab === 'counters' && (
+          <div className="settings-section">
+            <h2>Reset All Counters</h2>
+            <p className="section-description">
+              ⚠️ <strong>DANGEROUS OPERATION:</strong> This will permanently reset ALL counter data including historical totals stored in the database.
+            </p>
+            
+            {currentCounters && (
+              <div className="current-counters-display">
+                <div className="counters-header">
+                  <h3>Current Counter Values</h3>
+                  <div className="real-time-indicator">
+                    <div className="pulse-dot"></div>
+                    <span>Real-time Updates</span>
+                  </div>
+                </div>
+                <div className="counters-grid">
+                  <div className="counter-card">
+                    <h4>Online Bookings</h4>
+                    <div className="counter-values">
+                      <span>Today: {currentCounters.onlineBookings?.today || 0}</span>
+                      <span>Week: {currentCounters.onlineBookings?.thisWeek || 0}</span>
+                      <span>Month: {currentCounters.onlineBookings?.thisMonth || 0}</span>
+                      <span>Year: {currentCounters.onlineBookings?.thisYear || 0}</span>
+                      <span className="total-count">Total: {currentCounters.onlineBookings?.total || 0}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="counter-card">
+                    <h4>Manual Bookings</h4>
+                    <div className="counter-values">
+                      <span>Today: {currentCounters.manualBookings?.today || 0}</span>
+                      <span>Week: {currentCounters.manualBookings?.thisWeek || 0}</span>
+                      <span>Month: {currentCounters.manualBookings?.thisMonth || 0}</span>
+                      <span>Year: {currentCounters.manualBookings?.thisYear || 0}</span>
+                      <span className="total-count">Total: {currentCounters.manualBookings?.total || 0}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="counter-card">
+                    <h4>Completed Bookings</h4>
+                    <div className="counter-values">
+                      <span>Today: {currentCounters.completedBookings?.today || 0}</span>
+                      <span>Week: {currentCounters.completedBookings?.thisWeek || 0}</span>
+                      <span>Month: {currentCounters.completedBookings?.thisMonth || 0}</span>
+                      <span>Year: {currentCounters.completedBookings?.thisYear || 0}</span>
+                      <span className="total-count">Total: {currentCounters.completedBookings?.total || 0}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="counter-card">
+                    <h4>Cancelled Bookings</h4>
+                    <div className="counter-values">
+                      <span>Today: {currentCounters.cancelledBookings?.today || 0}</span>
+                      <span>Week: {currentCounters.cancelledBookings?.thisWeek || 0}</span>
+                      <span>Month: {currentCounters.cancelledBookings?.thisMonth || 0}</span>
+                      <span>Year: {currentCounters.cancelledBookings?.thisYear || 0}</span>
+                      <span className="total-count">Total: {currentCounters.cancelledBookings?.total || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {!showResetConfirm ? (
+              <div className="reset-action">
+                <button 
+                  className="reset-all-btn"
+                  onClick={handleResetAllCounters}
+                  disabled={resettingCounters}
+                >
+                  <AlertTriangle size={20} />
+                  Reset ALL Counters (Including Database Totals)
+                </button>
+                <p className="reset-warning">
+                  This will reset both time-based counters (JSON) AND total counters (database). 
+                  All historical data will be permanently lost.
+                </p>
+              </div>
+            ) : (
+              <div className="reset-confirmation">
+                <div className="confirmation-box">
+                  <AlertTriangle size={48} color="#dc2626" />
+                  <h3>⚠️ CONFIRM DANGEROUS OPERATION</h3>
+                  <p>
+                    You are about to permanently delete ALL counter data including:
+                  </p>
+                  <ul>
+                    <li>✅ Time-based counters (Today/Week/Month/Year) - stored in JSON</li>
+                    <li>⚠️ <strong>Total counters (Historical data) - stored in DATABASE</strong></li>
+                  </ul>
+                  <p className="final-warning">
+                    <strong>This action CANNOT be undone!</strong> All booking statistics will be lost forever.
+                  </p>
+                  
+                  <div className="confirmation-actions">
+                    <button 
+                      className="cancel-reset-btn"
+                      onClick={cancelResetConfirm}
+                      disabled={resettingCounters}
+                    >
+                      Cancel - Keep Data Safe
+                    </button>
+                    <button 
+                      className="confirm-reset-btn"
+                      onClick={handleResetAllCounters}
+                      disabled={resettingCounters}
+                    >
+                      {resettingCounters ? (
+                        <>
+                          <div className="spinner" />
+                          Resetting...
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw size={16} />
+                          YES - Delete ALL Counter Data
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
         </div>
@@ -600,12 +864,11 @@ export default function SystemSettingsPage() {
 
         .tab-btn:hover {
           background: #f5f5f5;
-          color: #333;
         }
 
         .tab-btn.active {
           background: var(--accent-color);
-          color: white;
+          color: white !important;
         }
 
         .settings-content {
@@ -644,8 +907,8 @@ export default function SystemSettingsPage() {
           border-radius: 6px;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
           font-size: 0.9rem;
-          color: #000;
-          background: white;
+          color: #000 !important;
+          background: white !important;
         }
 
         .form-input:focus {
@@ -668,6 +931,56 @@ export default function SystemSettingsPage() {
           font-size: 0.8rem;
           color: #666;
           margin-top: 0.25rem;
+        }
+
+        .password-input-container {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+
+        .password-input {
+          padding-right: 3rem !important;
+          border: 1px solid #00000027 !important;
+        }
+
+        .password-input:focus {
+          border-color: var(--accent-color) !important;
+          box-shadow: 0 0 0 2px rgba(237, 32, 36, 0.2) !important;
+        }
+
+        .eye-button {
+          position: absolute;
+          right: 0.75rem;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          color: #666 !important;
+          cursor: pointer;
+          padding: 0.25rem;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+          z-index: 10;
+          height: 24px;
+          width: 24px;
+        }
+
+        .eye-button:hover {
+          color: var(--accent-color) !important;
+          background: rgba(237, 32, 36, 0.1) !important;
+        }
+
+        .eye-button:focus {
+          outline: none;
+          color: var(--accent-color) !important;
+        }
+
+        .eye-button:active {
+          transform: translateY(-50%) scale(0.95);
         }
 
         .toggle-group {
@@ -773,6 +1086,256 @@ export default function SystemSettingsPage() {
           color: #000 !important;
         }
 
+        .section-description {
+          color: #333 !important;
+          font-size: 0.95rem;
+          line-height: 1.5;
+          margin-bottom: 1.5rem;
+        }
+
+        /* Reset Counters Styles */
+        .current-counters-display {
+          margin: 2rem 0;
+          padding: 1.5rem;
+          background: #f8f9fa;
+          border-radius: 8px;
+          border: 1px solid #e5e5e5;
+        }
+
+        .counters-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1rem;
+        }
+
+        .current-counters-display h3 {
+          color: #333;
+          margin: 0;
+          font-size: 1.2rem;
+        }
+
+        .real-time-indicator {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.85rem;
+          color: #10b981;
+          font-weight: 500;
+        }
+
+        .pulse-dot {
+          width: 8px;
+          height: 8px;
+          background: #10b981;
+          border-radius: 50%;
+          animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+          0% {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+          }
+          
+          70% {
+            transform: scale(1);
+            box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+          }
+          
+          100% {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+          }
+        }
+
+        .counters-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+          gap: 1rem;
+        }
+
+        .counter-card {
+          background: white;
+          padding: 1rem;
+          border-radius: 8px;
+          border: 1px solid #ddd;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .counter-card h4 {
+          color: #333;
+          margin-bottom: 0.5rem;
+          font-size: 1rem;
+          font-weight: 600;
+        }
+
+        .counter-values {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .counter-values span {
+          font-size: 0.9rem;
+          color: #666;
+        }
+
+        .counter-values .total-count {
+          font-weight: 600;
+          color: #ED2024;
+          font-size: 1rem;
+          margin-top: 0.25rem;
+          padding-top: 0.25rem;
+          border-top: 1px solid #eee;
+        }
+
+        .reset-action {
+          margin-top: 2rem;
+          text-align: center;
+        }
+
+        .reset-all-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.5rem;
+          background: linear-gradient(135deg, #dc2626, #ef4444);
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          margin-bottom: 1rem;
+        }
+
+        .reset-all-btn:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 16px rgba(220, 38, 38, 0.3);
+        }
+
+        .reset-all-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
+        }
+
+        .reset-warning {
+          color: #dc2626;
+          font-size: 0.9rem;
+          max-width: 500px;
+          margin: 0 auto;
+          line-height: 1.4;
+        }
+
+        .reset-confirmation {
+          margin-top: 2rem;
+          display: flex;
+          justify-content: center;
+        }
+
+        .confirmation-box {
+          background: #fef2f2;
+          border: 2px solid #fecaca;
+          border-radius: 12px;
+          padding: 2rem;
+          max-width: 600px;
+          text-align: center;
+        }
+
+        .confirmation-box h3 {
+          color: #dc2626;
+          margin: 1rem 0;
+          font-size: 1.3rem;
+        }
+
+        .confirmation-box p {
+          color: #666;
+          margin-bottom: 1rem;
+          line-height: 1.5;
+        }
+
+        .confirmation-box ul {
+          text-align: left;
+          margin: 1rem 0;
+          padding-left: 1.5rem;
+        }
+
+        .confirmation-box li {
+          margin-bottom: 0.5rem;
+          color: #666;
+        }
+
+        .final-warning {
+          color: #dc2626 !important;
+          font-weight: 600 !important;
+          font-size: 1rem !important;
+        }
+
+        .confirmation-actions {
+          display: flex;
+          gap: 1rem;
+          justify-content: center;
+          margin-top: 2rem;
+        }
+
+        .cancel-reset-btn {
+          background: #f5f5f5;
+          color: #666;
+          border: 1px solid #ddd;
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-size: 0.9rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .cancel-reset-btn:hover:not(:disabled) {
+          background: #e5e5e5;
+          border-color: #ccc;
+        }
+
+        .confirm-reset-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          background: linear-gradient(135deg, #dc2626, #ef4444);
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-size: 0.9rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .confirm-reset-btn:hover:not(:disabled) {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+        }
+
+        .confirm-reset-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
+        }
+
+        .spinner {
+          width: 16px;
+          height: 16px;
+          border: 2px solid #f3f3f3;
+          border-top: 2px solid #ED2024;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
         
       `}</style>
     </div>

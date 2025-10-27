@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateInvoiceHtml } from '@/lib/invoice';
 import puppeteer from 'puppeteer';
 import database from '@/lib/db-connect';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 export async function POST(request: NextRequest) {
   try {
@@ -91,7 +92,8 @@ export async function GET(request: NextRequest) {
 
       // If not completed, gate the invoice with friendly HTML
       if (status !== 'completed') {
-        const gatingHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Invoice Pending</title><style>body{margin:0;padding:0;background:#0b0b0b;color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:720px;margin:6rem auto;background:#141414;border-radius:20px;border:1px solid #222;box-shadow:0 10px 30px rgba(0,0,0,.4);padding:32px;text-align:center}.title{font-size:28px;font-weight:800;margin-bottom:10px}.note{background:#1a1a1a;border-left:4px solid #eab308;color:#fef08a;padding:14px;border-radius:10px;margin-top:12px;display:inline-block}</style></head><body><div class="wrap"><div class="title">Your invoice will be generated after booking completion</div><div class="note">Once your show ends and the booking is marked as <b>Completed</b>, your invoice will be available here.</div></div><!-- INVOICE_PENDING --></body></html>`;
+        const customerName = b.name || 'Valued Customer';
+        const gatingHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Invoice Pending</title><style>body{margin:0;padding:0;background:#0b0b0b;color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:720px;margin:6rem auto;background:#141414;border-radius:20px;border:1px solid #222;box-shadow:0 10px 30px rgba(0,0,0,.4);padding:32px;text-align:center}.title{font-size:28px;font-weight:800;margin-bottom:10px}.note{background:#1a1a1a;border-left:4px solid #eab308;color:#fef08a;padding:14px;border-radius:10px;margin-top:12px;display:inline-block}</style></head><body><div class="wrap"><div class="title">Invoice will be available after completion</div><div class="note">Your invoice will generate automatically once your booking is marked as <b>Completed</b>. We'll email you a link to download it.</div></div><!-- INVOICE_PENDING --><script type="application/json" id="booking-data">{"name":"${customerName}","bookingId":"${bookingId}"}</script></body></html>`;
 
         // If PDF requested while pending, block
         if (format === 'pdf') {
@@ -140,13 +142,11 @@ export async function GET(request: NextRequest) {
 
     // Not found in DB → try completed-bookings.json (archived after completion)
     try {
-      const fs = require('fs').promises;
-      const path = require('path');
-      const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'completed-bookings.json');
-      const content = await fs.readFile(jsonFilePath, 'utf8').catch(() => '');
-      const trimmed = (content || '').trim();
-      const arr = trimmed ? JSON.parse(trimmed) : [];
-      const record = Array.isArray(arr) ? arr.find((r: any) => (r.bookingId || r.id) === bookingId) : null;
+      let record: any = null;
+      const arr = await ExportsStorage.readArray('completed-bookings.json');
+      if (Array.isArray(arr)) {
+        record = arr.find((r: any) => (r.bookingId || r.id) === bookingId) || null;
+      }
       if (!record) {
         return NextResponse.json({ success: false, error: 'Booking not found' }, { status: 404 });
       }

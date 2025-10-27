@@ -71,7 +71,14 @@ const getSettingsOrDefault = async () => {
   }
 };
 
-// Helper: Create transporter strictly from database settings
+const getSiteUrl = () => {
+  const url =
+    process.env.NEXTAUTH_URL ||
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.BASE_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  return (url || 'http://localhost:3000').replace(/\/$/, '');
+};
 const createTransporter = async () => {
   const settings = await getSettingsOrDefault();
 
@@ -930,10 +937,6 @@ const emailTemplates = {
                 <p>Your booking has been successfully confirmed. We're excited to make your special occasion absolutely memorable!</p>
               </div>
               
-              <div class="booking-id">
-                <div class="booking-id-label">Booking Reference</div>
-                <div class="booking-id-value">${bookingData.id}</div>
-              </div>
               
               <div class="booking-card">
                 <div class="booking-header">
@@ -947,12 +950,12 @@ const emailTemplates = {
                     <div class="detail-value">${bookingData.name}</div>
                   </div>
                   <div class="detail-item">
-                    <div class="detail-label">Number of People</div>
-                    <div class="detail-value">${bookingData.numberOfPeople || 2} Guests</div>
-                  </div>
-                  <div class="detail-item">
                     <div class="detail-label">Theater Venue</div>
                     <div class="detail-value">${bookingData.theaterName}</div>
+                  </div>
+                  <div class="detail-item">
+                    <div class="detail-label">Number of People</div>
+                    <div class="detail-value">${bookingData.numberOfPeople || 2} Guests</div>
                   </div>
                   <div class="detail-item">
                     <div class="detail-label">Booking Date</div>
@@ -966,6 +969,48 @@ const emailTemplates = {
                     <div class="detail-label">Special Occasion</div>
                     <div class="detail-value">${bookingData.occasion}</div>
                   </div>
+                  ${(bookingData as any).birthdayName ? `
+                  <div class="detail-item">
+                    <div class="detail-label">Birthday Person</div>
+                    <div class="detail-value">${(bookingData as any).birthdayName}</div>
+                  </div>
+                  ` : ''}
+                  ${(bookingData as any).partner1Name ? `
+                  <div class="detail-item">
+                    <div class="detail-label">Partner 1</div>
+                    <div class="detail-value">${(bookingData as any).partner1Name}</div>
+                  </div>
+                  ` : ''}
+                  ${(bookingData as any).partner2Name ? `
+                  <div class="detail-item">
+                    <div class="detail-label">Partner 2</div>
+                    <div class="detail-value">${(bookingData as any).partner2Name}</div>
+                  </div>
+                  ` : ''}
+                  ${(bookingData as any).proposerName ? `
+                  <div class="detail-item">
+                    <div class="detail-label">Proposer</div>
+                    <div class="detail-value">${(bookingData as any).proposerName}</div>
+                  </div>
+                  ` : ''}
+                  ${(bookingData as any).proposalPartnerName ? `
+                  <div class="detail-item">
+                    <div class="detail-label">Proposal Partner</div>
+                    <div class="detail-value">${(bookingData as any).proposalPartnerName}</div>
+                  </div>
+                  ` : ''}
+                  ${(bookingData as any).valentineName ? `
+                  <div class="detail-item">
+                    <div class="detail-label">Valentine</div>
+                    <div class="detail-value">${(bookingData as any).valentineName}</div>
+                  </div>
+                  ` : ''}
+                  ${(bookingData as any).dateNightName ? `
+                  <div class="detail-item">
+                    <div class="detail-label">Date Night Person</div>
+                    <div class="detail-value">${(bookingData as any).dateNightName}</div>
+                  </div>
+                  ` : ''}
                 </div>
               </div>
               ${renderOccasionDetails(bookingData)}
@@ -1981,7 +2026,7 @@ const emailService = {
     if (!bookingData.email) {
       return { success: false, error: 'No email provided' };
     }
-    const siteUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000');
+    const siteUrl = getSiteUrl();
     const template = {
       subject: 'Your Invoice is Ready - FeelME Town 🧾',
       html: `
@@ -2046,7 +2091,7 @@ const emailService = {
             body { margin:0; padding:0; background:#0b0b0b; color:#fff; font-family: 'Paralucent-Medium', Arial, sans-serif; }
             .container { max-width:650px; margin:0 auto; background:#141414; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.35); }
             .header { background: linear-gradient(135deg, #E50914 0%, #b20710 100%); padding:40px 24px; text-align:center; }
-            .logo { font-size:32px; font-weight:800; }
+            .logo { font-size:32px; font-weight:800; color: white; }
             .tagline { color: rgba(255,255,255,0.85); margin-top:6px; }
             .badge { display:inline-block; margin-top:16px; background:#16a34a; color:#fff; padding:8px 14px; border-radius:999px; font-weight:700; font-size:14px; }
             .content { padding:28px; }
@@ -2065,7 +2110,7 @@ const emailService = {
               <div class="badge">Booking Confirmed</div>
             </div>
             <div class="content">
-              <div style="margin-bottom:12px; font-size:18px;">Hi ${bookingData.name || 'Customer'},</div>
+              <div style="margin-bottom:12px; font-size:18px; color: white;">Hi ${bookingData.name || 'Customer'},</div>
               <div style="color:#ddd; line-height:1.6;">Your booking has been confirmed. We are excited to host you!</div>
 
               <div class="card">
@@ -2089,6 +2134,72 @@ const emailService = {
                   <div class="label">Time</div>
                   <div class="value">${bookingData.time || ''}</div>
                 </div>
+                <div>
+                  <div class="label">Occasion</div>
+                  <div class="value">${bookingData.occasion || ''}</div>
+                </div>
+                ${(bookingData as any).birthdayName ? `
+                <div>
+                  <div class="label">Birthday Person</div>
+                  <div class="value">${(bookingData as any).birthdayName}</div>
+                </div>
+                ` : ''}
+                ${(bookingData as any).partner1Name ? `
+                <div>
+                  <div class="label">Partner 1</div>
+                  <div class="value">${(bookingData as any).partner1Name}</div>
+                </div>
+                ` : ''}
+                ${(bookingData as any).partner2Name ? `
+                <div>
+                  <div class="label">Partner 2</div>
+                  <div class="value">${(bookingData as any).partner2Name}</div>
+                </div>
+                ` : ''}
+                ${(bookingData as any).proposerName ? `
+                <div>
+                  <div class="label">Proposer</div>
+                  <div class="value">${(bookingData as any).proposerName}</div>
+                </div>
+                ` : ''}
+                ${(bookingData as any).proposalPartnerName ? `
+                <div>
+                  <div class="label">Proposal Partner</div>
+                  <div class="value">${(bookingData as any).proposalPartnerName}</div>
+                </div>
+                ` : ''}
+                ${(bookingData as any).valentineName ? `
+                <div>
+                  <div class="label">Valentine</div>
+                  <div class="value">${(bookingData as any).valentineName}</div>
+                </div>
+                ` : ''}
+                ${(bookingData as any).dateNightName ? `
+                <div>
+                  <div class="label">Date Night Person</div>
+                  <div class="value">${(bookingData as any).dateNightName}</div>
+                </div>
+                ` : ''}
+                ${(() => {
+                  // Handle dynamic occasion-specific fields
+                  const dynamicFields: string[] = [];
+                  Object.keys(bookingData).forEach(key => {
+                    if (key.endsWith('_label') && !key.includes('_value')) {
+                      const baseKey = key.replace('_label', '');
+                      const label = (bookingData as any)[key];
+                      const value = (bookingData as any)[baseKey] || (bookingData as any)[`${baseKey}_value`];
+                      if (value && value.trim()) {
+                        dynamicFields.push(`
+                        <div>
+                          <div class="label">${label}</div>
+                          <div class="value">${value}</div>
+                        </div>
+                        `);
+                      }
+                    }
+                  });
+                  return dynamicFields.join('');
+                })()}
               </div>
 
               <div class="note">

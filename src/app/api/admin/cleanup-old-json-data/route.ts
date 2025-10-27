@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 // POST /api/admin/cleanup-old-json-data
 // Cleans up JSON data older than 1 month from cancelled and completed bookings
@@ -16,11 +17,9 @@ export async function POST(request: NextRequest) {
     let totalDeleted = 0;
     let warnings: any[] = [];
     
-    // Process cancelled bookings
-    const cancelledPath = path.join(process.cwd(), 'data', 'exports', 'cancelled-bookings.json');
+    // Process cancelled bookings (Blob-backed)
     try {
-      const cancelledData = await fs.readFile(cancelledPath, 'utf8');
-      let cancelledBookings = JSON.parse(cancelledData);
+      let cancelledBookings = await ExportsStorage.readArray('cancelled-bookings.json');
       
       // Find bookings that will be deleted in 5 days
       cancelledBookings.forEach((booking: any) => {
@@ -52,17 +51,15 @@ export async function POST(request: NextRequest) {
       totalDeleted += deletedCount;
       
       // Write back filtered data
-      await fs.writeFile(cancelledPath, JSON.stringify(cancelledBookings, null, 2), 'utf8');
+      await ExportsStorage.writeArray('cancelled-bookings.json', cancelledBookings);
       console.log(`✅ Deleted ${deletedCount} cancelled bookings older than 1 month`);
     } catch (err) {
       console.error('❌ Failed to cleanup cancelled bookings:', err);
     }
     
-    // Process completed bookings
-    const completedPath = path.join(process.cwd(), 'data', 'exports', 'completed-bookings.json');
+    // Process completed bookings (Blob-backed)
     try {
-      const completedData = await fs.readFile(completedPath, 'utf8');
-      let completedBookings = JSON.parse(completedData);
+      let completedBookings = await ExportsStorage.readArray('completed-bookings.json');
       
       // Find bookings that will be deleted in 5 days
       completedBookings.forEach((booking: any) => {
@@ -94,7 +91,7 @@ export async function POST(request: NextRequest) {
       totalDeleted += deletedCount;
       
       // Write back filtered data
-      await fs.writeFile(completedPath, JSON.stringify(completedBookings, null, 2), 'utf8');
+      await ExportsStorage.writeArray('completed-bookings.json', completedBookings);
       console.log(`✅ Deleted ${deletedCount} completed bookings older than 1 month`);
     } catch (err) {
       console.error('❌ Failed to cleanup completed bookings:', err);
@@ -127,11 +124,9 @@ export async function GET(request: NextRequest) {
     
     let warnings: any[] = [];
     
-    // Check cancelled bookings for upcoming deletions
-    const cancelledPath = path.join(process.cwd(), 'data', 'exports', 'cancelled-bookings.json');
+    // Check cancelled bookings for upcoming deletions (Blob-backed)
     try {
-      const cancelledData = await fs.readFile(cancelledPath, 'utf8');
-      const cancelledBookings = JSON.parse(cancelledData);
+      const cancelledBookings = await ExportsStorage.readArray('cancelled-bookings.json');
       
       cancelledBookings.forEach((booking: any) => {
         const cancelledDate = new Date(booking.cancelledAt);
@@ -154,11 +149,9 @@ export async function GET(request: NextRequest) {
       // Ignore
     }
     
-    // Check completed bookings for upcoming deletions
-    const completedPath = path.join(process.cwd(), 'data', 'exports', 'completed-bookings.json');
+    // Check completed bookings for upcoming deletions (Blob-backed)
     try {
-      const completedData = await fs.readFile(completedPath, 'utf8');
-      const completedBookings = JSON.parse(completedData);
+      const completedBookings = await ExportsStorage.readArray('completed-bookings.json');
       
       completedBookings.forEach((booking: any) => {
         const completedDate = new Date(booking.completedAt);

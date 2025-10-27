@@ -92,14 +92,39 @@ export default function CancelBookingPopup({ isOpen, onClose, bookingData }: Can
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/cancel-reasons.json', { cache: 'no-cache' });
+        // Fetch cancel reasons from blob-backed API
+        const res = await fetch('/api/cancel-reasons', { cache: 'no-cache' });
         const data = await res.json();
-        if (Array.isArray(data)) {
-          setReasons(data);
-        } else if (Array.isArray((data as any)?.records)) {
-          setReasons((data as any).records);
+        
+        if (data.success && Array.isArray(data.reasons)) {
+          setReasons(data.reasons);
+          console.log('✅ Cancel reasons loaded from API:', data.reasons.length, 'reasons');
+        } else {
+          console.warn('⚠️ Invalid cancel reasons response:', data);
+          // Fallback to default reasons
+          setReasons([
+            "Change of plans",
+            "Booked wrong date/time",
+            "Found a better price",
+            "Personal emergency",
+            "Weather concerns", 
+            "Transportation issues",
+            "Other"
+          ]);
         }
-      } catch {}
+      } catch (error) {
+        console.error('❌ Failed to fetch cancel reasons:', error);
+        // Fallback to default reasons
+        setReasons([
+          "Change of plans",
+          "Booked wrong date/time", 
+          "Found a better price",
+          "Personal emergency",
+          "Weather concerns",
+          "Transportation issues", 
+          "Other"
+        ]);
+      }
     })();
   }, []);
 

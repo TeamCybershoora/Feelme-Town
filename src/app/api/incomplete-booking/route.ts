@@ -187,6 +187,10 @@ export async function POST(request: NextRequest) {
       selectedDecorItems: body.selectedDecorItems,
       selectedGifts: body.selectedGifts,
       totalAmount: body.totalAmount,
+      // Add pricing data for proper display
+      pricingData: body.pricingData || {},
+      advancePayment: body.advancePayment,
+      venuePayment: body.venuePayment,
       // Add timestamps based on booking time
       createdAt: calculateBookingDateTime(body.date, body.time),
       // Add occasion specific fields

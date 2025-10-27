@@ -1,26 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
+import { getAllCounters, checkAndResetTimeBasedCounters } from '@/lib/counter-system';
 
 // GET /api/admin/dashboard-stats - Get dashboard statistics
 export async function GET() {
   try {
-    // Initialize counters if needed and get counter data
-    await database.initializeCounters();
-    await database.checkAndResetCounters();
+    // Check and reset time-based counters first
+    await checkAndResetTimeBasedCounters();
     
     // Check and process expired bookings (auto-complete then delete)
     const currentDateTime = new Date();
     try {
       const expiredResult = await database.deleteExpiredBookings(currentDateTime);
       if (expiredResult.completedCount && expiredResult.completedCount > 0) {
-        
+        console.log(`✅ ${expiredResult.completedCount} bookings auto-completed`);
       }
     } catch (error) {
-      
+      console.error('❌ Error processing expired bookings:', error);
     }
     
-    // Get counter data from database
-    const countersResult = await database.getAllCounters();
+    // Get counter data from new counter system
+    const countersResult = await getAllCounters();
     
     if (!countersResult.success) {
       return NextResponse.json(
@@ -163,16 +163,16 @@ export async function GET() {
     
     
 
-    // Calculate statistics with proper counter integration and fallback
+    // Calculate statistics using new counter system
     const getCounterStats = (counterType: string, fallbackBookings: any[]) => {
-      const counter = counters[counterType];
+      const counter = (counters as any)[counterType];
       
       if (counter && typeof counter === 'object') {
         return {
-          today: counter.daily || 0,
-          thisWeek: counter.weekly || 0,
-          thisMonth: counter.monthly || 0,
-          thisYear: counter.yearly || 0, // Use yearly counter from database
+          today: counter.today || 0,
+          thisWeek: counter.week || 0,
+          thisMonth: counter.month || 0,
+          thisYear: counter.year || 0,
           total: counter.total || 0
         };
       }

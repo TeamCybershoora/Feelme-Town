@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 export async function PUT(request: NextRequest) {
   try {
@@ -90,20 +91,12 @@ export async function PUT(request: NextRequest) {
       let jsonManualRecordFound = false;
       if (!bookingData) {
         try {
-          const fs = require('fs').promises;
-          const path = require('path');
-          const manualJsonPath = path.join(process.cwd(), 'data', 'exports', 'manual-bookings.json');
-          const manualContent = await fs.readFile(manualJsonPath, 'utf8').catch(() => '');
-          const trimmed = (manualContent || '').trim();
-          if (trimmed) {
-            const data = JSON.parse(trimmed);
-            const records = Array.isArray(data) ? data : (Array.isArray((data as any)?.records) ? (data as any).records : []);
-            const found = records.find((r: any) => (r.bookingId || r.id) === bookingId);
-            if (found) {
-              bookingData = found;
-              isManual = true;
-              jsonManualRecordFound = true;
-            }
+          const manual = await ExportsStorage.readManual('manual-bookings.json');
+          const found = (manual.records || []).find((r: any) => (r.bookingId || r.id) === bookingId);
+          if (found) {
+            bookingData = found;
+            isManual = true;
+            jsonManualRecordFound = true;
           }
         } catch {}
       }
@@ -111,23 +104,8 @@ export async function PUT(request: NextRequest) {
       // Save to cancelled JSON file before deleting
       if (bookingData) {
         try {
-          const fs = require('fs').promises;
-          const path = require('path');
-          const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'cancelled-bookings.json');
-          
-          // Read existing cancelled bookings
-          let cancelledBookings = [] as any[];
-          try {
-            const fileContent = await fs.readFile(jsonFilePath, 'utf8');
-            const trimmed = (fileContent || '').trim();
-            cancelledBookings = trimmed ? JSON.parse(trimmed) : [];
-          } catch (err) {
-            // File doesn't exist yet, start with empty array
-            cancelledBookings = [];
-          }
-          
           // Add new cancelled booking with timestamp
-          cancelledBookings.push({
+          const record = {
             bookingId: bookingData.bookingId || bookingData.id,
             name: bookingData.name,
             email: bookingData.email,
@@ -143,33 +121,19 @@ export async function PUT(request: NextRequest) {
             status: 'cancelled',
             cancelledAt: new Date().toISOString(),
             cancelReason: (typeof body.cancelReason === 'string' && body.cancelReason.trim()) ? body.cancelReason.trim() : 'Cancelled by Administrator'
-          });
-          
-          // Write back to file
-          await fs.writeFile(jsonFilePath, JSON.stringify(cancelledBookings, null, 2), 'utf8');
-          console.log(`✅ Cancelled booking saved to JSON file`);
+          };
+          await ExportsStorage.appendToArray('cancelled-bookings.json', record);
+          console.log(`✅ Cancelled booking saved to JSON (Blob-backed)`);
 
           // If manual, also remove from manual-bookings.json
           if (isManual) {
             try {
-              const manualJsonPath = path.join(process.cwd(), 'data', 'exports', 'manual-bookings.json');
-              const manualContent = await fs.readFile(manualJsonPath, 'utf8').catch(() => '');
-              let manualData: any = { type: 'manual', generatedAt: new Date().toISOString(), total: 0, records: [] };
-              const mtrim = (manualContent || '').trim();
-              if (mtrim) {
-                try { manualData = JSON.parse(mtrim); } catch {}
-              }
-              if (Array.isArray(manualData.records)) {
-                manualData.records = manualData.records.filter((r: any) => (r.bookingId || r.id) !== (bookingData.bookingId || bookingData.id));
-                manualData.total = manualData.records.length;
-                manualData.generatedAt = new Date().toISOString();
-                await fs.writeFile(manualJsonPath, JSON.stringify(manualData, null, 2), 'utf8');
-                console.log(`🧹 Removed manual booking ${bookingId} from manual-bookings.json`);
-              }
+              await ExportsStorage.removeManualByBookingId(bookingId);
+              console.log(`🧹 Removed manual booking ${bookingId} from manual-bookings.json`);
             } catch {}
           }
         } catch (err) {
-          console.error('❌ Failed to save to JSON file:', err);
+          console.error('❌ Failed to save to JSON (Blob-backed):', err);
         }
       }
       
@@ -209,20 +173,12 @@ export async function PUT(request: NextRequest) {
       let jsonManualRecordFound = false;
       if (!bookingData) {
         try {
-          const fs = require('fs').promises;
-          const path = require('path');
-          const manualJsonPath = path.join(process.cwd(), 'data', 'exports', 'manual-bookings.json');
-          const manualContent = await fs.readFile(manualJsonPath, 'utf8').catch(() => '');
-          const trimmed = (manualContent || '').trim();
-          if (trimmed) {
-            const data = JSON.parse(trimmed);
-            const records = Array.isArray(data) ? data : (Array.isArray((data as any)?.records) ? (data as any).records : []);
-            const found = records.find((r: any) => (r.bookingId || r.id) === bookingId);
-            if (found) {
-              bookingData = found;
-              isManual = true;
-              jsonManualRecordFound = true;
-            }
+          const manual = await ExportsStorage.readManual('manual-bookings.json');
+          const found = (manual.records || []).find((r: any) => (r.bookingId || r.id) === bookingId);
+          if (found) {
+            bookingData = found;
+            isManual = true;
+            jsonManualRecordFound = true;
           }
         } catch {}
       }
@@ -230,26 +186,7 @@ export async function PUT(request: NextRequest) {
       // Save to completed JSON file before deleting
       if (bookingData) {
         try {
-          const fs = require('fs').promises;
-          const path = require('path');
-          const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'completed-bookings.json');
-
-          // Ensure directory exists
-          await fs.mkdir(path.dirname(jsonFilePath), { recursive: true }).catch(() => {});
-
-          // Read existing completed bookings
-          let completedBookings = [] as any[];
-          try {
-            const fileContent = await fs.readFile(jsonFilePath, 'utf8');
-            const trimmed = (fileContent || '').trim();
-            completedBookings = trimmed ? JSON.parse(trimmed) : [];
-          } catch (err) {
-            // File doesn't exist yet, start with empty array
-            completedBookings = [];
-          }
-
-          // Push record
-          completedBookings.push({
+          const record = {
             bookingId: bookingData.bookingId || bookingData.id,
             name: bookingData.name,
             email: bookingData.email,
@@ -264,33 +201,19 @@ export async function PUT(request: NextRequest) {
             totalAmount: bookingData.totalAmount,
             status: 'completed',
             completedAt: new Date().toISOString()
-          });
-
-          // Write back
-          await fs.writeFile(jsonFilePath, JSON.stringify(completedBookings, null, 2), 'utf8');
-          console.log(`✅ Completed booking archived to JSON`);
+          };
+          await ExportsStorage.appendToArray('completed-bookings.json', record);
+          console.log(`✅ Completed booking archived to JSON (Blob-backed)`);
 
           // If manual, also remove from manual-bookings.json so it doesn't appear in manual list anymore
           if (isManual) {
             try {
-              const manualJsonPath = path.join(process.cwd(), 'data', 'exports', 'manual-bookings.json');
-              const manualContent = await fs.readFile(manualJsonPath, 'utf8').catch(() => '');
-              let manualData: any = { type: 'manual', generatedAt: new Date().toISOString(), total: 0, records: [] };
-              const mtrim = (manualContent || '').trim();
-              if (mtrim) {
-                try { manualData = JSON.parse(mtrim); } catch {}
-              }
-              if (Array.isArray(manualData.records)) {
-                manualData.records = manualData.records.filter((r: any) => (r.bookingId || r.id) !== (bookingData.bookingId || bookingData.id));
-                manualData.total = manualData.records.length;
-                manualData.generatedAt = new Date().toISOString();
-                await fs.writeFile(manualJsonPath, JSON.stringify(manualData, null, 2), 'utf8');
-                console.log(`🧹 Removed manual booking ${bookingId} from manual-bookings.json after completion`);
-              }
+              await ExportsStorage.removeManualByBookingId(bookingId);
+              console.log(`🧹 Removed manual booking ${bookingId} from manual-bookings.json after completion`);
             } catch {}
           }
         } catch (err) {
-          console.error('❌ Failed to archive completed booking to JSON:', err);
+          console.error('❌ Failed to archive completed booking to JSON (Blob-backed):', err);
         }
       }
 

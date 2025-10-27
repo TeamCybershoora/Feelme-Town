@@ -43,6 +43,10 @@ export async function POST(request: NextRequest) {
       selectedDecorItems: body.selectedDecorItems,
       selectedGifts: body.selectedGifts,
       totalAmount: body.totalAmount,
+      // Add pricing data for proper display
+      pricingData: body.pricingData || {},
+      advancePayment: body.advancePayment,
+      venuePayment: body.venuePayment,
       // Add occasion specific fields
       ...(body.birthdayName && { birthdayName: body.birthdayName }),
       ...(body.birthdayGender && { birthdayGender: body.birthdayGender }),
@@ -60,12 +64,13 @@ export async function POST(request: NextRequest) {
     // Send incomplete booking email
     const emailResult = await emailService.sendBookingIncomplete(body);
 
-    if (emailResult.success && dbResult.success) {
+    if (dbResult.success && ('messageId' in emailResult)) {
       console.log('✅ Incomplete booking saved to database and email sent successfully');
+      const { messageId } = emailResult as { messageId: string };
       return NextResponse.json({
         success: true,
         message: 'Incomplete booking saved and email sent successfully!',
-        messageId: emailResult.messageId,
+        ...(messageId ? { messageId } : {}),
         bookingId: dbResult.booking?.id
       }, { status: 200 });
     } else {

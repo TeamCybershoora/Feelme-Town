@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 // GET /api/admin/excel-records-count
 // Fetch record counts from JSON files
 export async function GET(request: NextRequest) {
   try {
-    const fs = require('fs').promises;
-    const path = require('path');
-    
     const records = [];
     
     // Completed bookings count
     try {
-      const completedPath = path.join(process.cwd(), 'data', 'exports', 'completed-bookings.json');
-      const completedData = await fs.readFile(completedPath, 'utf8');
-      const completedBookings = JSON.parse(completedData);
+      const completedBookings = await ExportsStorage.readArray('completed-bookings.json');
       records.push({
         _id: 'completed',
         type: 'completed',
@@ -35,10 +31,8 @@ export async function GET(request: NextRequest) {
     
     // Manual bookings count (from JSON file)
     try {
-      const manualPath = path.join(process.cwd(), 'data', 'exports', 'manual-bookings.json');
-      const manualData = await fs.readFile(manualPath, 'utf8');
-      const manualBookings = JSON.parse(manualData);
-      const manualCount = manualBookings.records?.length || 0;
+      const manual = await ExportsStorage.readManual('manual-bookings.json');
+      const manualCount = manual.records?.length || 0;
       records.push({
         _id: 'manual',
         type: 'manual',
@@ -60,9 +54,7 @@ export async function GET(request: NextRequest) {
     
     // Cancelled bookings count
     try {
-      const cancelledPath = path.join(process.cwd(), 'data', 'exports', 'cancelled-bookings.json');
-      const cancelledData = await fs.readFile(cancelledPath, 'utf8');
-      const cancelledBookings = JSON.parse(cancelledData);
+      const cancelledBookings = await ExportsStorage.readArray('cancelled-bookings.json');
       records.push({
         _id: 'cancelled',
         type: 'cancelled',

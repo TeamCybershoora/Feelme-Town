@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Minus, X, Check, Star, Calendar, Clock, Users, MapPin, Gift, Cake, Sparkles, Play, Phone, MessageCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus, Minus, X, Check, Star, Calendar, Clock, Users, MapPin, Gift, Cake, Sparkles, Play, Phone, MessageCircle } from 'lucide-react';
 import { useBooking } from '@/contexts/BookingContext';
 import { useDatePicker } from '@/contexts/DatePickerContext';
 
@@ -125,7 +125,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [pricingData, setPricingData] = useState({
     slotBookingFee: 1000,
     extraGuestFee: 400,
-    convenienceFee: 50
+    convenienceFee: 50,
+    decorationFees: 0
   });
   const [pricingLoaded, setPricingLoaded] = useState(false);
 
@@ -257,7 +258,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
     if (formData.wantDecorItems === 'Yes' && formData.selectedDecorItems.length === 0) {
       setValidationErrorName('Decoration Items Selection Required');
-      setValidationMessage('You selected "Yes" for decoration items but didn&apos;t choose any decoration items. Please select decoration items or change to "No".');
+      setValidationMessage('You selected "Yes" for decoration items. Please select at least one decoration item to continue.');
       setShowValidationPopup(true);
       return false;
     }
@@ -368,6 +369,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           slotBookingFee: pricingData.slotBookingFee,
           extraGuestFee: pricingData.extraGuestFee,
           convenienceFee: pricingData.convenienceFee,
+          decorationFees: pricingData.decorationFees,
           theaterBasePrice: theaterBasePrice
         },
         // Store calculated guest charges for easy reference
@@ -475,6 +477,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           slotBookingFee: pricingData.slotBookingFee,
           extraGuestFee: pricingData.extraGuestFee,
           convenienceFee: pricingData.convenienceFee,
+          decorationFees: pricingData.decorationFees,
           theaterBasePrice: theaterBasePrice
         },
         // Store calculated guest charges for easy reference
@@ -1452,8 +1455,26 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   };
 
   const getPayableAmount = () => {
-    const amount = pricingData.slotBookingFee || 10;
-    return amount; // Dynamic amount from JSON file
+    const slotFee = pricingData.slotBookingFee || 10;
+    const decorationFee = getDecorationFee();
+    return slotFee + decorationFee; // Dynamic amount from JSON file + decoration fee
+  };
+
+  const getDecorationFee = () => {
+    if (formData.wantDecorItems === 'Yes' && formData.selectedDecorItems.length > 0) {
+      // Add decoration fees from pricing.json
+      const pricingDecorationFee = pricingData.decorationFees || 0;
+      
+      // Add individual decoration items prices
+      let itemsDecorationFee = 0;
+      formData.selectedDecorItems.forEach(decorName => {
+        const decor = decorOptions.find(d => d.name === decorName);
+        if (decor) itemsDecorationFee += decor.price;
+      });
+      
+      return pricingDecorationFee + itemsDecorationFee;
+    }
+    return 0;
   };
 
   const getBalanceAmount = () => {
@@ -1681,7 +1702,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           pricingData: {
             slotBookingFee: pricingData.slotBookingFee,
             extraGuestFee: pricingData.extraGuestFee,
-            convenienceFee: pricingData.convenienceFee
+            convenienceFee: pricingData.convenienceFee,
+            decorationFees: pricingData.decorationFees
           },
           // Store calculated guest charges for easy reference
           extraGuestCharges: (() => {
@@ -1848,6 +1870,16 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                 time: selectedTimeSlot || '',
                 occasion: formData.occasion,
                 occasionPersonName: formData.birthdayName || formData.partner1Name || formData.partner2Name || formData.proposerName || formData.proposalPartnerName || formData.valentineName || '',
+                // Add pricing data for proper display
+                pricingData: {
+                  slotBookingFee: pricingData.slotBookingFee,
+                  extraGuestFee: pricingData.extraGuestFee,
+                  convenienceFee: pricingData.convenienceFee,
+                  decorationFees: pricingData.decorationFees
+                },
+                advancePayment: getPayableAmount(),
+                venuePayment: getFinalTotal() - getPayableAmount(),
+                totalAmount: getFinalTotal(),
                 // Send all occasion-specific fields dynamically (database will handle mapping)
                 ...(formData.birthdayName && { birthdayName: formData.birthdayName }),
                 ...(formData.birthdayGender && { birthdayGender: formData.birthdayGender }),
@@ -1909,6 +1941,16 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
               time: selectedTimeSlot || '',
               occasion: formData.occasion,
               occasionPersonName: formData.birthdayName || formData.partner1Name || formData.partner2Name || formData.proposerName || formData.proposalPartnerName || formData.valentineName || '',
+              // Add pricing data for proper display
+              pricingData: {
+                slotBookingFee: pricingData.slotBookingFee,
+                extraGuestFee: pricingData.extraGuestFee,
+                convenienceFee: pricingData.convenienceFee,
+                decorationFees: pricingData.decorationFees
+              },
+              advancePayment: getPayableAmount(),
+              venuePayment: getFinalTotal() - getPayableAmount(),
+              totalAmount: getFinalTotal(),
               // Send all occasion-specific fields dynamically (database will handle mapping)
               ...(formData.birthdayName && { birthdayName: formData.birthdayName }),
               ...(formData.birthdayGender && { birthdayGender: formData.birthdayGender }),
@@ -2276,7 +2318,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                             })()}
                           >
                             <option value="No">No</option>
-                            <option value="Yes">Yes</option>
+                            <option value="Yes">Yes (₹{pricingData.decorationFees} Decoration)</option>
                           </select>
                           {(() => {
                             const isCoupleTheater = selectedTheater?.name && (
@@ -2362,9 +2404,15 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                           )}
 
                           {/* Decorations Section */}
-                          {formData.wantDecorItems === 'Yes' && formData.selectedDecorItems.length > 0 && (
+                          {formData.wantDecorItems === 'Yes' && (
                             <div className="booking-popup-overview-summary-section">
                               <h5 className="booking-popup-overview-summary-section-title">Decorations</h5>
+                              {pricingData.decorationFees > 0 && (
+                                <div className="booking-popup-overview-summary-item">
+                                  <span>Decoration Fees</span>
+                                  <span>₹{pricingData.decorationFees}</span>
+                                </div>
+                              )}
                               {formData.selectedDecorItems.map((decorName) => {
                                 const decor = decorOptions.find(d => d.name === decorName);
                                 return decor ? (
@@ -2420,6 +2468,33 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                             <div className="booking-popup-overview-summary-lower">
                               <div className="booking-popup-overview-summary-item booking-popup-overview-summary-advance">
                                 <span>Slot Booking Fee</span>
+                                <span>₹{pricingData.slotBookingFee || 10}</span>
+                              </div>
+                              {getDecorationFee() > 0 && (
+                                <>
+                                  {pricingData.decorationFees > 0 && (
+                                    <div className="booking-popup-overview-summary-item booking-popup-overview-summary-advance">
+                                      <span>Decoration Fees</span>
+                                      <span>₹{pricingData.decorationFees}</span>
+                                    </div>
+                                  )}
+                                  {(() => {
+                                    let itemsFee = 0;
+                                    formData.selectedDecorItems.forEach(decorName => {
+                                      const decor = decorOptions.find(d => d.name === decorName);
+                                      if (decor) itemsFee += decor.price;
+                                    });
+                                    return itemsFee > 0 ? (
+                                      <div className="booking-popup-overview-summary-item booking-popup-overview-summary-advance">
+                                        <span>Decoration Items</span>
+                                        <span>₹{itemsFee}</span>
+                                      </div>
+                                    ) : null;
+                                  })()}
+                                </>
+                              )}
+                              <div className="booking-popup-overview-summary-item booking-popup-overview-summary-total-advance">
+                                <span>Total Advance Payment</span>
                                 <span>₹{getPayableAmount()}</span>
                               </div>
                               <div className="booking-popup-overview-summary-item booking-popup-overview-summary-balance">
@@ -2581,6 +2656,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                       <Sparkles className="w-5 h-5" />
                       Decoration Items
                     </h3>
+                    <div className="booking-popup-section-note">
+                      <p>Select at least one decoration item to continue.</p>
+                    </div>
                     <div className="booking-popup-items">
                       {decorOptions.map((decor) => (
                         <div
@@ -2743,7 +2821,6 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
               <div className="booking-popup-action">
                 {/* Show skip button for optional sections when no items selected */}
                 {((activeTab === 'Cakes' && formData.selectedCakes.length === 0) ||
-                  (activeTab === 'Decor Items' && formData.selectedDecorItems.length === 0) ||
                   (activeTab === 'Gifts Items' && formData.selectedGifts.length === 0)) &&
                   activeTab !== tabs[tabs.length - 1] ? (
                   <div className="booking-popup-buttons">
@@ -2752,13 +2829,23 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                     </button>
                     <button onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} className="booking-popup-btn">
                       <span>{activeTab === tabs[tabs.length - 1] ? 'Confirm Booking' : 'Continue'}</span>
-                      <ArrowLeft className="w-5 h-5" />
+                      <ArrowRight className="w-5 h-5" />
+                    </button>
+                  </div>
+                ) : activeTab === 'Decor Items' && formData.selectedDecorItems.length === 0 ? (
+                  <div className="booking-popup-buttons">
+                    <button onClick={handleSkip} className="booking-popup-btn skip">
+                      <span>Skip</span>
+                    </button>
+                    <button onClick={handleNextStep} className="booking-popup-btn">
+                      <span>Continue</span>
+                      <ArrowRight className="w-5 h-5" />
                     </button>
                   </div>
                 ) : (
                   <button onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} className="booking-popup-btn">
                     <span>{activeTab === tabs[tabs.length - 1] ? 'Confirm Booking' : 'Continue'}</span>
-                    <ArrowLeft className="w-5 h-5" />
+                    <ArrowRight className="w-5 h-5" />
                   </button>
                 )}
               </div>
@@ -3520,6 +3607,22 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             color: #ffffff;
             margin: 0 0 1rem 0;
           }
+
+          .booking-popup-section-note {
+            background: rgba(255, 0, 5, 0.1);
+            border: 1px solid rgba(255, 0, 5, 0.3);
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+          }
+
+          .booking-popup-section-note p {
+            color: #ffffff;
+            font-size: 0.875rem;
+            margin: 0;
+            line-height: 1.4;
+          }
+
 
 
           .booking-popup-form {
@@ -5954,6 +6057,33 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                 </div>
                 <div className="flex justify-between items-center text-green-600">
                   <span>Slot Booking Fee:</span>
+                  <span>₹{pricingData.slotBookingFee || 10}</span>
+                </div>
+                {getDecorationFee() > 0 && (
+                  <>
+                    {pricingData.decorationFees > 0 && (
+                      <div className="flex justify-between items-center text-green-600">
+                        <span>Decoration Fees:</span>
+                        <span>₹{pricingData.decorationFees}</span>
+                      </div>
+                    )}
+                    {(() => {
+                      let itemsFee = 0;
+                      formData.selectedDecorItems.forEach(decorName => {
+                        const decor = decorOptions.find(d => d.name === decorName);
+                        if (decor) itemsFee += decor.price;
+                      });
+                      return itemsFee > 0 ? (
+                        <div className="flex justify-between items-center text-green-600">
+                          <span>Decoration Items:</span>
+                          <span>₹{itemsFee}</span>
+                        </div>
+                      ) : null;
+                    })()}
+                  </>
+                )}
+                <div className="flex justify-between items-center text-green-600 font-bold">
+                  <span>Total Advance Payment:</span>
                   <span>₹{getPayableAmount()}</span>
                 </div>
                 <div className="flex justify-between items-center text-blue-600">

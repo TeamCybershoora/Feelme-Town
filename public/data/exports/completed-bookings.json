@@ -1,0 +1,105 @@
+[
+  {
+    "bookingId": "FMT-2025-1027-003-477673-20",
+    "name": "Nishant",
+    "email": "teamcybershoora@gmail.com",
+    "phone": "9870691784",
+    "theaterName": "Lovbe",
+    "date": "Monday, October 27, 2025",
+    "time": "5:30 PM - 8:30 PM",
+    "occasion": "Marriage Proposal",
+    "numberOfPeople": 6,
+    "advancePayment": 400,
+    "venuePayment": 2300,
+    "totalAmount": 2700,
+    "selectedDecorItems": [],
+    "selectedCakes": [],
+    "selectedGifts": [],
+    "selectedMovies": [],
+    "theaterPrice": 0,
+    "extraGuestCharges": 1200,
+    "extraGuestsCount": 2,
+    "couponDiscount": 0,
+    "pricingData": {
+      "slotBookingFee": 400,
+      "extraGuestFee": 600,
+      "convenienceFee": 0,
+      "decorationFees": 750,
+      "theaterBasePrice": 1500
+    },
+    "status": "completed",
+    "bookingType": "online",
+    "paymentMode": "pay_at_venue",
+    "createdBy": "Customer",
+    "isManualBooking": false,
+    "createdAt": "2025-10-27T10:18:47.033Z",
+    "Your Nickname": "Nishant",
+    "Your Nickname_label": "Your Nickname",
+    "Your Nickname_value": "Nishant",
+    "Your Partner's Name": "Taniya",
+    "Your Partner's Name_label": "Your Partner's Name",
+    "Your Partner's Name_value": "Taniya",
+    "completedAt": "2025-10-27T10:18:48.271Z"
+  },
+  {
+    "bookingId": "FMT-2025-1027-003-677156-63",
+    "name": "vikas",
+    "email": "teamcybershoora@gmail.com",
+    "phone": "9520396655",
+    "theaterName": "EROS (COUPLES) (FMT-Hall-1)",
+    "date": "Tuesday, October 27, 2025",
+    "time": "8:08 PM - 11:08 PM",
+    "occasion": "Baby Shower",
+    "numberOfPeople": 2,
+    "advancePayment": 2350,
+    "venuePayment": 1299,
+    "totalAmount": 3649,
+    "selectedDecorItems": [
+      {
+        "id": "ITEM1759228362256",
+        "name": "Super LUXE Fog Entry",
+        "price": 1200,
+        "quantity": 1
+      }
+    ],
+    "selectedCakes": [
+      {
+        "id": "ITEM1759227970938",
+        "name": "Blueberry Half Kg",
+        "price": 800,
+        "quantity": 1
+      }
+    ],
+    "selectedGifts": [
+      {
+        "id": "ITEM1759228503652",
+        "name": "Small rose bouquet",
+        "price": 250,
+        "quantity": 1
+      }
+    ],
+    "selectedMovies": [],
+    "theaterPrice": 0,
+    "extraGuestCharges": 0,
+    "extraGuestsCount": 0,
+    "couponDiscount": 0,
+    "pricingData": {
+      "slotBookingFee": 400,
+      "extraGuestFee": 600,
+      "convenienceFee": 0,
+      "decorationFees": 750,
+      "theaterBasePrice": 1399
+    },
+    "status": "completed",
+    "bookingType": "online",
+    "paymentMode": "pay_at_venue",
+    "createdBy": "Customer",
+    "isManualBooking": false,
+    "createdAt": "2025-10-27T17:39:39.188Z",
+    "Nick name of Mon to be": "Avyan",
+    "Nick name of Mon to be_label": "Nick name of Mon to be",
+    "Nick name of Mon to be_value": "Avyan",
+    "_id": "68ffae5b5e988980d161c830",
+    "completedAt": "2025-10-27T17:44:41.252Z"
+  }
+]

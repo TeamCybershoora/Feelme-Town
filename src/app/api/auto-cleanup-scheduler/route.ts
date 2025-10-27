@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
+import { ExportsStorage } from '@/lib/exports-storage';
+import { incrementCounter } from '@/lib/counter-system';
 
 // Global variable to track if cleanup is already running
 let isCleanupRunning = false;
 let cleanupInterval: NodeJS.Timeout | null = null;
 
-// Auto-start the scheduler when the API route is first loaded
-if (!isCleanupRunning) {
+// Auto-start the scheduler when the API route is first loaded (no ENV flag required)
+const shouldAutoStart = process.env.NEXT_PHASE !== 'phase-production-build';
+if (shouldAutoStart && !isCleanupRunning) {
   console.log('🚀 Auto-starting cleanup scheduler...');
   isCleanupRunning = true;
   
@@ -18,13 +21,13 @@ if (!isCleanupRunning) {
     console.error('❌ Initial cleanup failed:', err);
   });
   
-  // Then run every 1 minute
+  // Then run every 5 minutes
   cleanupInterval = setInterval(async () => {
     console.log('⏰ Running scheduled cleanup...');
     await performCleanup();
-  }, 60000); // 1 minute = 60000ms
+  }, 300000); // 5 minutes = 300000ms
   
-  console.log('✅ Auto-cleanup scheduler started (runs every 1 minute)');
+  console.log('✅ Auto-cleanup scheduler started (runs every 5 minutes)');
 }
 
 export async function POST(request: NextRequest) {
@@ -42,14 +45,14 @@ export async function POST(request: NextRequest) {
       
       isCleanupRunning = true;
       
-      // Run cleanup every 1 minute
+      // Run cleanup every 5 minutes
       cleanupInterval = setInterval(async () => {
         await performCleanup();
-      }, 60000); // 1 minute interval
+      }, 300000); // 5 minutes interval
       
       return NextResponse.json({
         success: true,
-        message: 'Automatic cleanup scheduler started (runs every 1 minute)'
+        message: 'Automatic cleanup scheduler started (runs every 5 minutes)'
       });
       
     } else if (action === 'stop') {
@@ -107,13 +110,11 @@ export async function POST(request: NextRequest) {
 // Function to perform the actual cleanup
 async function performCleanup() {
   try {
-    
-    
-    // Get current time in IST (proper way)
-    const currentTime = new Date();
-    // Get IST offset (+5:30 = 330 minutes)
-    const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-    const currentTimeIST = new Date(currentTime.getTime() + istOffset);
+      
+      
+      // Get current time in IST (proper way)
+    const nowUtcMs = Date.now();
+    const IST_OFFSET_MINUTES = 330;
     
     
     
@@ -124,85 +125,63 @@ async function performCleanup() {
     // Helper function to calculate expiry time (1 minute after time slot ends)
     const calculateExpiryTime = (date: string, time: string) => {
       try {
-        // Parse the end time from time slot (e.g., "9:00 AM - 12:00 PM")
-        let endHour24 = 21; // Default to 9 PM
+        let startHour24 = 0;
+        let startMinutes = 0;
+        let endHour24 = 21;
         let endMinutes = 0;
-        
+        let addOneDay = false;
         if (time && time.includes(' - ')) {
-          const endTime = time.split(' - ')[1].trim(); // "12:00 PM"
-          
-          const timeMatch = endTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-          
-          if (timeMatch) {
-            let hour = parseInt(timeMatch[1]);
-            const minuteStr = timeMatch[2];
-            const period = timeMatch[3].toUpperCase();
-            
-            
-            
-            if (period === 'PM' && hour !== 12) {
-              hour += 12;
-            } else if (period === 'AM' && hour === 12) {
-              hour = 0;
-            }
-            
-            endHour24 = hour;
-            endMinutes = parseInt(minuteStr);
-            
-          } else {
-            
+          const [startStrRaw, endStrRaw] = time.split(' - ');
+          const startStr = startStrRaw.trim();
+          const endStr = endStrRaw.trim();
+          const tRe = /(\d{1,2}):(\d{2})\s*(AM|PM)/i;
+          const s = startStr.match(tRe);
+          const e = endStr.match(tRe);
+          if (s) {
+            let h = parseInt(s[1]);
+            const m = parseInt(s[2]);
+            const p = s[3].toUpperCase();
+            if (p === 'PM' && h !== 12) h += 12; else if (p === 'AM' && h === 12) h = 0;
+            startHour24 = h; startMinutes = m;
           }
+          if (e) {
+            let h = parseInt(e[1]);
+            const m = parseInt(e[2]);
+            const p = e[3].toUpperCase();
+            if (p === 'PM' && h !== 12) h += 12; else if (p === 'AM' && h === 12) h = 0;
+            endHour24 = h; endMinutes = m;
+          }
+          const startTotal = startHour24 * 60 + startMinutes;
+          const endTotal = endHour24 * 60 + endMinutes;
+          if (endTotal < startTotal) addOneDay = true;
         }
-        
-        // No additional hour offset; we'll add a 1-minute grace after building the Date
-        
-        // Create expiry date (same as booking date)
-        let bookingDate: Date;
-        
-        if (date.includes(',')) {
+        let year = NaN, monthIndex = NaN, day = NaN;
+        if (date && date.includes(',')) {
           const dateParts = date.split(', ');
           if (dateParts.length >= 2) {
-            const dateStr = dateParts[1]; // "October 2, 2025"
-            
-            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                              'July', 'August', 'September', 'October', 'November', 'December'];
-            
+            const dateStr = dateParts[1];
+            const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
             const parts = dateStr.split(' ');
             if (parts.length >= 2) {
               const monthName = parts[0];
               const dayStr = parts[1].replace(',', '');
-              const yearStr = parts[2] || new Date().getFullYear();
-              
-              const monthIndex = monthNames.indexOf(monthName);
-              const day = parseInt(dayStr);
-              const year = parseInt(String(yearStr));
-              
-              if (monthIndex !== -1 && !isNaN(day) && !isNaN(year)) {
-                bookingDate = new Date(year, monthIndex, day);
-              } else {
-                throw new Error('Invalid date format');
-              }
-            } else {
-              throw new Error('Invalid date format');
+              const yearStr = parts[2] || String(new Date().getFullYear());
+              monthIndex = monthNames.indexOf(monthName);
+              day = parseInt(dayStr);
+              year = parseInt(yearStr);
             }
-          } else {
-            bookingDate = new Date(date);
           }
-        } else {
-          bookingDate = new Date(date);
         }
-        
-        // Create expiry time in IST
-        const expiryDateTime = new Date(bookingDate);
-        expiryDateTime.setHours(endHour24, endMinutes, 0, 0);
-        // Add 1 minute grace window after slot end
-        expiryDateTime.setMinutes(expiryDateTime.getMinutes() + 1);
-        
-        // Since we're working with IST times, we need to ensure proper comparison
-        // The booking date/time is assumed to be in IST, so we keep it as is
-        
-        
-        return expiryDateTime;
+        if (isNaN(year) || isNaN(monthIndex) || isNaN(day)) {
+          const d = new Date(date);
+          year = d.getFullYear();
+          monthIndex = d.getMonth();
+          day = d.getDate();
+        }
+        if (addOneDay) day += 1;
+        const istMs = Date.UTC(year, monthIndex, day, endHour24, endMinutes);
+        const expiryUtcMs = istMs - IST_OFFSET_MINUTES * 60 * 1000 + 5 * 60 * 1000;
+        return new Date(expiryUtcMs);
       } catch (error) {
         
         return null;
@@ -217,33 +196,29 @@ async function performCleanup() {
     // Check each booking for expiry
     for (const booking of allBookings) {
       const expiryTime = calculateExpiryTime(booking.date, booking.time);
-      
-      
-      
-      
-      
-      
-      if (expiryTime && currentTimeIST > expiryTime && String(booking.status || '').toLowerCase() === 'confirmed') {
-        
-        
-        
-        // Save to completed JSON file before deleting
-        try {
-          const fs = require('fs').promises;
-          const path = require('path');
-          const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'completed-bookings.json');
-          // Ensure directory exists
-          await fs.mkdir(path.dirname(jsonFilePath), { recursive: true }).catch(() => {});
-          
-          let completedBookings = [];
-          try {
-            const fileContent = await fs.readFile(jsonFilePath, 'utf8');
-            completedBookings = JSON.parse(fileContent);
-          } catch (err) {
-            completedBookings = [];
+      const expiredBySlot = !!(expiryTime && nowUtcMs > expiryTime.getTime());
+      let expiredByField = false;
+      try {
+        if (booking && (booking as any).expiredAt) {
+          const t = new Date((booking as any).expiredAt).getTime();
+          if (!Number.isNaN(t) && nowUtcMs > t) {
+            expiredByField = true;
           }
-          
-          completedBookings.push({
+        }
+      } catch {}
+      
+      
+      
+      
+      
+      
+      if ((String(booking.status || '').trim().toLowerCase() === 'confirmed') && (expiredBySlot || expiredByField)) {
+        
+        
+        
+        // Save to completed JSON (Blob-backed)
+        try {
+          const record = {
             bookingId: booking.bookingId || booking.id,
             name: booking.name,
             email: booking.email,
@@ -256,13 +231,22 @@ async function performCleanup() {
             advancePayment: booking.advancePayment,
             venuePayment: booking.venuePayment,
             totalAmount: booking.totalAmount,
+            // Add decoration items
+            selectedDecorItems: booking.selectedDecorItems || [],
+            selectedCakes: booking.selectedCakes || [],
+            selectedGifts: booking.selectedGifts || [],
+            selectedMovies: booking.selectedMovies || [],
+            // Add theater price details
+            theaterPrice: booking.theaterPrice || 0,
+            extraGuestCharges: booking.extraGuestCharges || 0,
+            // Add all occasion-specific fields
+            ...booking,
             status: 'completed',
             completedAt: new Date().toISOString()
-          });
-          
-          await fs.writeFile(jsonFilePath, JSON.stringify(completedBookings, null, 2), 'utf8');
+          };
+          await ExportsStorage.appendToArray('completed-bookings.json', record);
         } catch (err) {
-          console.error('❌ Failed to save to JSON file:', err);
+          console.error('❌ Failed to save to JSON (Blob) :', err);
         }
         
         // Delete booking from database
@@ -271,18 +255,22 @@ async function performCleanup() {
         if (deleteResult.success) {
           console.log(`✅ Booking ${booking.bookingId} saved to JSON and deleted`);
           
+          const expiredLocal = (() => {
+            const baseMs = expiryTime ? (expiryTime.getTime() + IST_OFFSET_MINUTES * 60 * 1000) : (nowUtcMs + IST_OFFSET_MINUTES * 60 * 1000);
+            return new Date(baseMs).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+          })();
           deletedBookings.push({
             name: booking.name,
             theaterName: booking.theaterName,
             date: booking.date,
             time: booking.time,
-            expiredAt: expiryTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+            expiredAt: expiredLocal,
             action: 'saved to JSON and deleted'
           });
           
           totalDeleted++;
           try {
-            await database.incrementCounter('completed');
+            await incrementCounter('completed');
           } catch {}
           // Send invoice ready email (best-effort)
           try {
@@ -303,6 +291,85 @@ async function performCleanup() {
       }
     }
 
+    // Also process manual bookings
+    try {
+      const manualResult = await (database as any).getAllManualBookings?.();
+      const manualList = manualResult?.manualBookings || [];
+
+      for (const booking of manualList) {
+        const expiryTime = calculateExpiryTime(booking.date, booking.time);
+        const expiredBySlot = !!(expiryTime && nowUtcMs > expiryTime.getTime());
+        let expiredByField = false;
+        try {
+          if (booking && (booking as any).expiredAt) {
+            const t = new Date((booking as any).expiredAt).getTime();
+            if (!Number.isNaN(t) && nowUtcMs > t) {
+              expiredByField = true;
+            }
+          }
+        } catch {}
+
+        if ((String(booking.status || '').trim().toLowerCase() === 'confirmed') && (expiredBySlot || expiredByField)) {
+          // Archive to completed JSON
+          try {
+            const record = {
+              bookingId: booking.bookingId || booking.id,
+              name: booking.name,
+              email: booking.email,
+              phone: booking.phone,
+              theaterName: booking.theaterName,
+              date: booking.date,
+              time: booking.time,
+              occasion: booking.occasion,
+              numberOfPeople: booking.numberOfPeople,
+              advancePayment: booking.advancePayment,
+              venuePayment: booking.venuePayment,
+              totalAmount: booking.totalAmount,
+              selectedDecorItems: booking.selectedDecorItems || [],
+              selectedCakes: booking.selectedCakes || [],
+              selectedGifts: booking.selectedGifts || [],
+              selectedMovies: booking.selectedMovies || [],
+              theaterPrice: booking.theaterPrice || 0,
+              extraGuestCharges: booking.extraGuestCharges || 0,
+              ...booking,
+              status: 'completed',
+              completedAt: new Date().toISOString()
+            };
+            await ExportsStorage.appendToArray('completed-bookings.json', record);
+          } catch {}
+
+          // Remove from manual JSON list if exists (best-effort)
+          try { await ExportsStorage.removeManualByBookingId(booking.bookingId || booking.id); } catch {}
+
+          // Delete from manual collection (fallback to main delete)
+          let delRes: any = null;
+          try { delRes = await (database as any).deleteManualBooking?.(booking.bookingId || booking.id); } catch {}
+          if (!delRes || !delRes.success) {
+            try { delRes = await database.deleteBooking(booking.bookingId || booking.id); } catch {}
+          }
+          if (delRes && delRes.success) {
+            totalDeleted++;
+            try { await incrementCounter('completed'); } catch {}
+            // Send invoice ready (best-effort)
+            try {
+              const mailData: any = {
+                id: booking.bookingId || booking.id,
+                name: booking.name,
+                email: booking.email,
+                phone: booking.phone,
+                theaterName: booking.theaterName,
+                date: booking.date,
+                time: booking.time,
+                numberOfPeople: booking.numberOfPeople,
+                totalAmount: booking.totalAmount
+              };
+              emailService.sendBookingInvoiceReady(mailData).catch(() => {});
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+
     // Get all incomplete bookings
     const allIncompleteBookingsResult = await database.getAllIncompleteBookings();
     const allIncompleteBookings = allIncompleteBookingsResult.incompleteBookings || [];
@@ -319,7 +386,7 @@ async function performCleanup() {
         
         
         
-        if (currentTimeIST > twelveHoursAfterCreation) {
+        if (nowUtcMs > twelveHoursAfterCreation.getTime()) {
           
           
           // Delete the incomplete booking permanently
@@ -380,7 +447,7 @@ async function performCleanup() {
       totalProcessed,
       deletedBookings,
       jsonDeleted: jsonCleanupResult.totalDeleted,
-      currentTime: currentTimeIST.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+      currentTime: new Date(nowUtcMs + IST_OFFSET_MINUTES * 60 * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
       message: totalProcessed > 0 ? 
         `${totalDeleted} expired bookings marked as completed, ${cancelledDeleted} old cancelled bookings deleted, ${jsonCleanupResult.totalDeleted} old JSON records cleaned` : 
         'No expired or old cancelled bookings found'
@@ -393,7 +460,3 @@ async function performCleanup() {
     };
   }
 }
-
-// Export for manual testing
-export { performCleanup };
-

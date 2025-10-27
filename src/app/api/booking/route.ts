@@ -388,7 +388,13 @@ export async function POST(request: NextRequest) {
       }
 
       // Send confirmation email in background (no invoice attachment)
-      emailService.sendBookingConfirmed(result.booking).catch(error => {
+      // Include occasion-specific fields in the email data
+      const emailData = {
+        ...result.booking,
+        // Include occasion-specific fields from the original booking data
+        ...occasionFields
+      };
+      emailService.sendBookingConfirmed(emailData).catch(error => {
         
       });
 

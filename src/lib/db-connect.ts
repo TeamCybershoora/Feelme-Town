@@ -3812,6 +3812,32 @@ const getSettings = async () => {
   }
 };
 
+const getSystemSettings = async () => {
+  try {
+    const settings = await getSettings();
+    
+    if (!settings) {
+      return { 
+        success: false, 
+        error: 'No system settings found in database',
+        settings: null 
+      };
+    }
+    
+    return { 
+      success: true, 
+      settings: settings 
+    };
+  } catch (error) {
+    console.error('❌ Error fetching system settings:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error',
+      settings: null 
+    };
+  }
+};
+
 const saveSettings = async (settingsData: Record<string, unknown>) => {
   try {
     if (!isConnected) {
@@ -4661,6 +4687,7 @@ const database = {
   updateUser: updateUser, // Keep for backward compatibility
   deleteUser: deleteUser, // Keep for backward compatibility
   getSettings: getSettings,
+  getSystemSettings: getSystemSettings,
   saveSettings: saveSettings,
   getAdminByPassword: getAdminByPassword,
   updateAdminProfile: updateAdminProfile,

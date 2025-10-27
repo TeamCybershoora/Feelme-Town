@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,21 +39,8 @@ export async function POST(request: NextRequest) {
     for (const booking of expiredBookings) {
       // Save to completed JSON file before deleting
       try {
-        const fs = require('fs').promises;
-        const path = require('path');
-        const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'completed-bookings.json');
-        
-        // Read existing completed bookings
-        let completedBookings = [];
-        try {
-          const fileContent = await fs.readFile(jsonFilePath, 'utf8');
-          completedBookings = JSON.parse(fileContent);
-        } catch (err) {
-          completedBookings = [];
-        }
-        
         // Add new completed booking
-        completedBookings.push({
+        const record = {
           bookingId: booking.bookingId || booking.id,
           name: booking.name,
           email: booking.email,
@@ -67,12 +55,10 @@ export async function POST(request: NextRequest) {
           totalAmount: booking.totalAmount,
           status: 'completed',
           completedAt: new Date().toISOString()
-        });
-        
-        // Write back to file
-        await fs.writeFile(jsonFilePath, JSON.stringify(completedBookings, null, 2), 'utf8');
+        };
+        await ExportsStorage.appendToArray('completed-bookings.json', record);
       } catch (err) {
-        console.error('❌ Failed to save to JSON file:', err);
+        console.error('❌ Failed to save to JSON (Blob-backed):', err);
       }
       
       // Delete booking from database

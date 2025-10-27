@@ -209,6 +209,45 @@ export default function BookingsPage() {
         incompleteBookingsResponse.json()
       ]);
 
+      const getPublicJson = async (p: string) => {
+        try {
+          const r = await fetch(p);
+          if (!r.ok) return [] as any[];
+          const j = await r.json().catch(() => null);
+          if (!j) return [] as any[];
+          if (Array.isArray(j)) return j as any[];
+          if (Array.isArray((j as any).records)) return (j as any).records as any[];
+          if (Array.isArray((j as any).bookings)) return (j as any).bookings as any[];
+          return [] as any[];
+        } catch {
+          return [] as any[];
+        }
+      };
+
+      let completedArray = (completedData.bookings || []) as any[];
+      if (!completedArray || completedArray.length === 0) {
+        completedArray = await getPublicJson('/data/exports/completed-bookings.json');
+        if (!completedArray || completedArray.length === 0) {
+          completedArray = await getPublicJson('/exports/completed-bookings.json');
+        }
+      }
+
+      let manualArray = (manualData.bookings || []) as any[];
+      if (!manualArray || manualArray.length === 0) {
+        manualArray = await getPublicJson('/data/exports/manual-bookings.json');
+        if (!manualArray || manualArray.length === 0) {
+          manualArray = await getPublicJson('/exports/manual-bookings.json');
+        }
+      }
+
+      let cancelledArray = (cancelledData.bookings || []) as any[];
+      if (!cancelledArray || cancelledArray.length === 0) {
+        cancelledArray = await getPublicJson('/data/exports/cancelled-bookings.json');
+        if (!cancelledArray || cancelledArray.length === 0) {
+          cancelledArray = await getPublicJson('/exports/cancelled-bookings.json');
+        }
+      }
+
       // Process confirmed bookings from database (only confirmed/pending status)
       const confirmedBookings = (confirmedData.bookings || []).map((booking: any) => {
         // Only include confirmed/pending bookings from database
@@ -223,7 +262,7 @@ export default function BookingsPage() {
       }).filter(Boolean);
 
       // Process completed bookings from JSON file (data/exports/completed-bookings.json)
-      const completedBookings = (completedData.bookings || []).map((booking: any) => ({
+      const completedBookings = (completedArray).map((booking: any) => ({
         ...booking,
         bookingType: 'online',
         status: 'completed',
@@ -231,7 +270,7 @@ export default function BookingsPage() {
       }));
 
       // Process manual bookings from JSON file (data/exports/manual-bookings.json)
-      const manualBookings = (manualData.bookings || []).map((booking: any) => ({
+      const manualBookings = (manualArray).map((booking: any) => ({
         ...booking,
         bookingType: 'manual',
         status: 'manual',
@@ -239,7 +278,7 @@ export default function BookingsPage() {
       }));
 
       // Process cancelled bookings from JSON file (data/exports/cancelled-bookings.json)
-      const cancelledBookings = (cancelledData.bookings || []).map((booking: any) => ({
+      const cancelledBookings = (cancelledArray).map((booking: any) => ({
         ...booking,
         bookingType: 'online',
         status: 'cancelled',

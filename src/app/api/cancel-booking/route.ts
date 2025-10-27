@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 // POST /api/cancel-booking - Cancel booking and process refund
 export async function POST(request: NextRequest) {
@@ -83,18 +84,6 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const fs = require('fs').promises;
-      const path = require('path');
-      const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'cancelled-bookings.json');
-      let records: any[] = [];
-      try {
-        const raw = await fs.readFile(jsonFilePath, 'utf8');
-        const trimmed = (raw || '').trim();
-        if (trimmed) {
-          const parsed = JSON.parse(trimmed);
-          records = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.records) ? parsed.records : []);
-        }
-      } catch {}
       const record = {
         bookingId: booking.bookingId || booking.id || booking._id,
         name: booking.name,
@@ -112,9 +101,7 @@ export async function POST(request: NextRequest) {
         cancelledAt: new Date().toISOString(),
         cancelReason: (typeof reason === 'string' && reason.trim()) ? reason.trim() : 'Cancelled by Customer'
       };
-      await fs.mkdir(path.dirname(jsonFilePath), { recursive: true });
-      records.push(record);
-      await fs.writeFile(jsonFilePath, JSON.stringify(records, null, 2), 'utf8');
+      await ExportsStorage.appendToArray('cancelled-bookings.json', record);
     } catch {}
 
     const deleteResult = await database.deleteBooking(bookingId);

@@ -62,54 +62,94 @@ export default function InvoicePage() {
       if (!customerName || customerName === 'Valued Customer') {
         let extractedName = 'Valued Customer';
         
-        // Try multiple patterns to extract customer name
-        const patterns = [
-          // Look for the specific h2 tag in bill-to section (most likely match)
-          /<div class="bill-to-left"[^>]*>[\s\S]*?<h2>([^<]+)<\/h2>/,
-          /<h2>([^<]+)<\/h2>/,
+        // For pending invoices, try to extract from the booking data first
+        if (html.includes('INVOICE_PENDING')) {
+          // Try to extract from the JSON script tag in the HTML
+          const scriptMatch = html.match(/<script type="application\/json" id="booking-data">({[^}]+})<\/script>/);
+          if (scriptMatch && scriptMatch[1]) {
+            try {
+              const bookingData = JSON.parse(scriptMatch[1]);
+              if (bookingData.name) {
+                extractedName = bookingData.name;
+                console.log('✅ Customer name extracted from pending invoice JSON:', extractedName);
+              }
+            } catch (jsonErr) {
+              console.log('⚠️ Could not parse booking data JSON');
+            }
+          }
           
-          // Look for Invoice to section
-          /Invoice to[^<]*<[^>]*>([^<]+)/,
-          /Invoice to[\s\S]*?<h2>([^<]+)<\/h2>/,
+          // Fallback: try to extract from the booking data that might be embedded in the HTML
+          if (extractedName === 'Valued Customer') {
+            const bookingDataMatch = html.match(/"name":\s*"([^"]+)"/);
+            if (bookingDataMatch && bookingDataMatch[1]) {
+              extractedName = bookingDataMatch[1].trim();
+              console.log('✅ Customer name extracted from pending invoice HTML:', extractedName);
+            } else {
+              // Final fallback: try to get from the booking API again
+              try {
+                const bookingResponse = await fetch(`/api/booking/${encodeURIComponent(bookingId)}`);
+                if (bookingResponse.ok) {
+                  const bookingData = await bookingResponse.json();
+                  if (bookingData.success && bookingData.booking && bookingData.booking.name) {
+                    extractedName = bookingData.booking.name;
+                    console.log('✅ Customer name fetched from booking API (retry):', extractedName);
+                  }
+                }
+              } catch (err) {
+                console.log('⚠️ Could not fetch booking data on retry');
+              }
+            }
+          }
+        } else {
+          // For completed invoices, use the existing pattern matching
+          const patterns = [
+            // Look for the specific h2 tag in bill-to section (most likely match)
+            /<div class="bill-to-left"[^>]*>[\s\S]*?<h2>([^<]+)<\/h2>/,
+            /<h2>([^<]+)<\/h2>/,
+            
+            // Look for Invoice to section
+            /Invoice to[^<]*<[^>]*>([^<]+)/,
+            /Invoice to[\s\S]*?<h2>([^<]+)<\/h2>/,
+            
+            // Look for Bill To section
+            /Bill To[^<]*<[^>]*>([^<]+)</,
+            /Bill To[^<]*:\s*([^<\n]+)/,
+            
+            // Look for specific customer name patterns
+            /<div class="customer-name"[^>]*>([^<]+)<\/div>/,
+            /<div[^>]*class="[^"]*customer-name[^"]*"[^>]*>([^<]+)<\/div>/,
+            
+            // Look for any strong tags that might contain name
+            /<strong[^>]*>([A-Z][a-zA-Z\s]+)<\/strong>/,
+            
+            // Look for name patterns in divs
+            /<div[^>]*>([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)<\/div>/,
+            
+            // Look for name labels
+            /Name[^<]*<[^>]*>([^<]+)/,
+            /Customer[^<]*<[^>]*>([^<]+)/,
+            
+            // Look in JSON-like structures
+            /"name"[^>]*>([^<]+)/,
+            /"name":\s*"([^"]+)"/,
+            
+            // Look for any capitalized name pattern
+            />([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)</
+          ];
           
-          // Look for Bill To section
-          /Bill To[^<]*<[^>]*>([^<]+)</,
-          /Bill To[^<]*:\s*([^<\n]+)/,
-          
-          // Look for specific customer name patterns
-          /<div class="customer-name"[^>]*>([^<]+)<\/div>/,
-          /<div[^>]*class="[^"]*customer-name[^"]*"[^>]*>([^<]+)<\/div>/,
-          
-          // Look for any strong tags that might contain name
-          /<strong[^>]*>([A-Z][a-zA-Z\s]+)<\/strong>/,
-          
-          // Look for name patterns in divs
-          /<div[^>]*>([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)<\/div>/,
-          
-          // Look for name labels
-          /Name[^<]*<[^>]*>([^<]+)/,
-          /Customer[^<]*<[^>]*>([^<]+)/,
-          
-          // Look in JSON-like structures
-          /"name"[^>]*>([^<]+)/,
-          /"name":\s*"([^"]+)"/,
-          
-          // Look for any capitalized name pattern
-          />([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)</
-        ];
-        
-        for (let i = 0; i < patterns.length; i++) {
-          const pattern = patterns[i];
-          const match = html.match(pattern);
-          if (match && match[1] && match[1].trim() && match[1].trim() !== 'Customer') {
-            extractedName = match[1].trim();
-            console.log(`✅ Customer name extracted from HTML using pattern ${i + 1}:`, extractedName);
-            break;
+          for (let i = 0; i < patterns.length; i++) {
+            const pattern = patterns[i];
+            const match = html.match(pattern);
+            if (match && match[1] && match[1].trim() && match[1].trim() !== 'Customer') {
+              extractedName = match[1].trim();
+              console.log(`✅ Customer name extracted from HTML using pattern ${i + 1}:`, extractedName);
+              break;
+            }
           }
         }
         
         if (extractedName === 'Valued Customer') {
-          console.log('⚠️ Could not extract customer name from HTML, using fallback');
+          console.log('⚠️ Could not extract customer name, using fallback');
         }
         
         setCustomerName(extractedName);
@@ -219,8 +259,8 @@ export default function InvoicePage() {
     >
       {/* Modern Header - Centered */}
       <div className="flex flex-col items-center justify-center text-center py-16">
-        <div className="w-full max-w-4xl px-4">
-          <h1 className="modern-heading text-4xl md:text-6xl mb-8" style={{ textShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
+        <div className="w-full max-w-4xl px-4 text-center">
+          <h1 className="modern-heading text-4xl md:text-6xl mb-8 text-center" style={{ textShadow: '0 4px 20px rgba(0,0,0,0.5)', textAlign: 'center' }}>
             Invoice of {customerName || 'Valued Customer'}
           </h1>
          
@@ -236,14 +276,7 @@ export default function InvoicePage() {
                 </a>
               </div>
             </div>
-          ) : (
-            <div className="flex justify-center mb-12">
-              <div className="modern-thank-you" style={{ maxWidth: 720 }}>
-                <h2>Invoice will be available after completion</h2>
-                <p>Your invoice will generate automatically once your booking is marked as <strong>Completed</strong>. We'll email you a link to download it.</p>
-              </div>
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -276,8 +309,8 @@ export default function InvoicePage() {
         </div>
       )}
 
-      {/* Back Button - Mobile */}
-      <div className="absolute top-12 left-6 z-20">
+      {/* Back Button - Desktop & Mobile */}
+      <div className="absolute top-6 left-6 z-20">
         <button
           onClick={() => window.location.href = '/theater'}
           className="back-button"
@@ -333,12 +366,21 @@ export default function InvoicePage() {
           letter-spacing: -0.02em;
           line-height: 1.1;
           font-size: 2rem;
-          margin-top: 3rem;
-          margin-bottom: 3rem;
-
-          text-align: center;
-          display: block;
-          width: 100%;
+          margin: 3rem auto !important;
+          text-align: center !important;
+          display: block !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          padding: 0 !important;
+          position: relative !important;
+        }
+        
+        /* Force center alignment for heading */
+        h1.modern-heading {
+          text-align: center !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+          display: block !important;
         }
         
         /* Animated Download Button Styles - Global */
@@ -573,6 +615,16 @@ export default function InvoicePage() {
           gap: 8px;
         }
         
+        /* Desktop back button positioning */
+        @media (min-width: 769px) {
+          .absolute.top-6.left-6 {
+            position: fixed !important;
+            top: 24px !important;
+            left: 24px !important;
+            z-index: 100 !important;
+          }
+        }
+        
         .back-button:hover {
           background: rgba(255, 255, 255, 0.3);
           transform: translateY(-2px);
@@ -586,12 +638,18 @@ export default function InvoicePage() {
             background: url('/bg7.png') center/cover fixed no-repeat !important;
           }
           
-          /* Hide all decorative elements */
-          .modern-heading,
+          /* Hide only unnecessary decorative elements */
           .modern-download-btn,
-          .modern-thank-you,
           .mobile-pdf-title {
             display: none !important;
+          }
+          
+          /* Show customer name heading on mobile */
+          .modern-heading {
+            display: block !important;
+            font-size: 1.5rem !important;
+            margin-bottom: 1rem !important;
+            text-align: center !important;
           }
           
           /* Mobile back button adjustments */
@@ -600,17 +658,15 @@ export default function InvoicePage() {
           .min-h-screen.invoice-page-container {
             background: url('/bg7.png') center/cover fixed no-repeat !important;
             padding: 0 !important;
-            height: 100vh !important;
+            min-height: 100vh !important;
             width: 100vw !important;
             position: relative !important;
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: center !important;
-            justify-content: center !important;
+            display: block !important;
+            overflow-y: auto !important;
           }
           
           /* Position back button below download button - order second */
-          .absolute.top-12.left-6 {
+          .absolute.top-6.left-6 {
             display: block !important;
             position: static !important;
             top: auto !important;
@@ -620,26 +676,55 @@ export default function InvoicePage() {
             order: 2 !important;
           }
           
-          /* Remove header section completely */
+          /* Show header section on mobile with adjustments */
           .flex.flex-col.items-center.justify-center.text-center.py-16 {
-            display: none !important;
+            display: flex !important;
+            padding: 1rem !important;
+            margin-bottom: 1rem !important;
           }
           
-          /* Hide invoice preview completely on mobile */
-          .pb-16.px-4,
+          /* Show invoice preview on mobile with adjustments */
+          .pb-16.px-4 {
+            display: block !important;
+            padding: 1rem !important;
+            padding-bottom: 2rem !important;
+          }
+          
           .modern-invoice-container {
-            display: none !important;
+            display: block !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
           }
           
           /* Proper mobile layout with background */
           html, body {
-            height: 100% !important;
-            overflow: hidden !important;
+            height: auto !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
             background-image: url('/bg7.png') !important;
             background-size: cover !important;
             background-position: center !important;
             background-attachment: fixed !important;
             background-repeat: no-repeat !important;
+          }
+          
+          /* Show thank you section on mobile */
+          .modern-thank-you {
+            display: block !important;
+            margin: 1rem !important;
+            padding: 1.5rem !important;
+            border-radius: 12px !important;
+          }
+          
+          .modern-thank-you h2 {
+            font-size: 1.5rem !important;
+            margin-bottom: 0.5rem !important;
+          }
+          
+          .modern-thank-you p {
+            font-size: 1rem !important;
           }
           
           /* Center download button using flexbox - order first */

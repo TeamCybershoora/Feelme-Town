@@ -8,13 +8,15 @@ interface PricingData {
   slotBookingFee: number;
   extraGuestFee: number;
   convenienceFee: number;
+  decorationFees: number;
 }
 
 const PricingManagement: React.FC = () => {
   const [pricing, setPricing] = useState<PricingData>({
     slotBookingFee: 1000,
     extraGuestFee: 400,
-    convenienceFee: 50
+    convenienceFee: 50,
+    decorationFees: 0
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -155,6 +157,21 @@ const PricingManagement: React.FC = () => {
                 Processing fee for online bookings
               </p>
             </div>
+
+            <div className="pricing-field">
+              <label htmlFor="decorationFees">Decoration Fees (₹)</label>
+              <input
+                id="decorationFees"
+                type="number"
+                value={pricing.decorationFees}
+                onChange={(e) => handleInputChange('decorationFees', e.target.value)}
+                placeholder="Enter decoration fees"
+                min="0"
+              />
+              <p className="field-description">
+                Additional fees for decoration services
+              </p>
+            </div>
           </div>
 
           <div className="pricing-actions">
@@ -182,6 +199,10 @@ const PricingManagement: React.FC = () => {
             <div className="summary-item">
               <span className="label">Convenience Fee:</span>
               <span className="value">₹{pricing.convenienceFee}</span>
+            </div>
+            <div className="summary-item">
+              <span className="label">Decoration Fees:</span>
+              <span className="value">₹{pricing.decorationFees}</span>
             </div>
           </div>
         </div>

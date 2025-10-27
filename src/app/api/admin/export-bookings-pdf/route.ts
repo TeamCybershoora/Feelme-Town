@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,48 +13,15 @@ export async function GET(request: NextRequest) {
     const allBookings = (await database.getAllBookings()).bookings || [];
     
     if (type === 'completed') {
-      // Fetch completed bookings from JSON file
-      try {
-        const fs = require('fs').promises;
-        const path = require('path');
-        const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'completed-bookings.json');
-        
-        const fileContent = await fs.readFile(jsonFilePath, 'utf8');
-        bookings = JSON.parse(fileContent);
-        console.log(`📊 Fetched ${bookings.length} completed bookings from JSON`);
-      } catch (err) {
-        console.error('❌ Failed to read completed JSON file:', err);
-        bookings = [];
-      }
+      bookings = await ExportsStorage.readArray('completed-bookings.json');
+      console.log(`📊 Fetched ${bookings.length} completed bookings from JSON/Blob`);
     } else if (type === 'manual') {
-      // Fetch manual bookings from JSON file
-      try {
-        const fs = require('fs').promises;
-        const path = require('path');
-        const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'manual-bookings.json');
-        
-        const fileContent = await fs.readFile(jsonFilePath, 'utf8');
-        const manualBookingsData = JSON.parse(fileContent);
-        bookings = manualBookingsData.records || [];
-        console.log(`📊 Fetched ${bookings.length} manual bookings from JSON`);
-      } catch (err) {
-        console.error('❌ Failed to read manual JSON file:', err);
-        bookings = [];
-      }
+      const manual = await ExportsStorage.readManual('manual-bookings.json');
+      bookings = manual.records || [];
+      console.log(`📊 Fetched ${bookings.length} manual bookings from JSON/Blob`);
     } else if (type === 'cancelled') {
-      // Fetch cancelled bookings from JSON file
-      try {
-        const fs = require('fs').promises;
-        const path = require('path');
-        const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'cancelled-bookings.json');
-        
-        const fileContent = await fs.readFile(jsonFilePath, 'utf8');
-        bookings = JSON.parse(fileContent);
-        console.log(`📊 Fetched ${bookings.length} cancelled bookings from JSON`);
-      } catch (err) {
-        console.error('❌ Failed to read cancelled JSON file:', err);
-        bookings = [];
-      }
+      bookings = await ExportsStorage.readArray('cancelled-bookings.json');
+      console.log(`📊 Fetched ${bookings.length} cancelled bookings from JSON/Blob`);
     }
 
     // Return JSON data for client-side PDF generation

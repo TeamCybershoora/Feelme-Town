@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 import emailService from '@/lib/email-service';
 export async function POST(request: NextRequest) {
@@ -195,26 +196,6 @@ export async function POST(request: NextRequest) {
       // If this is a manual booking, write it to manual-bookings.json file
       if (completeBookingData.isManualBooking || completeBookingData.status === 'manual') {
         try {
-          const fs = require('fs').promises;
-          const path = require('path');
-          const jsonFilePath = path.join(process.cwd(), 'data', 'exports', 'manual-bookings.json');
-          
-          // Read existing manual bookings
-          let manualBookingsData = {
-            type: 'manual',
-            generatedAt: new Date().toISOString(),
-            total: 0,
-            records: []
-          };
-          
-          try {
-            const fileContent = await fs.readFile(jsonFilePath, 'utf8');
-            manualBookingsData = JSON.parse(fileContent);
-          } catch (err) {
-            // File doesn't exist yet, use default structure
-            console.log('📝 Creating new manual-bookings.json file');
-          }
-          
           // Add new manual booking (only essential fields for Excel/PDF export)
           const manualBookingRecord = {
             bookingId: completeBookingData.bookingId || completeBookingData.id,
@@ -247,14 +228,11 @@ export async function POST(request: NextRequest) {
             createdAt: completeBookingData.createdAt,
             isManualBooking: true
           };
-          
-          // Add to records array
-          (manualBookingsData.records as any[]).push(manualBookingRecord);
-          manualBookingsData.total = manualBookingsData.records.length;
-          manualBookingsData.generatedAt = new Date().toISOString();
-          
-          // Write back to file
-          await fs.writeFile(jsonFilePath, JSON.stringify(manualBookingsData, null, 2), 'utf8');
+          const manual = await ExportsStorage.readManual('manual-bookings.json');
+          manual.records.push(manualBookingRecord);
+          manual.total = manual.records.length;
+          manual.generatedAt = new Date().toISOString();
+          await ExportsStorage.writeManual('manual-bookings.json', manual);
           console.log('✅ Manual booking written to manual-bookings.json:', completeBookingData.bookingId);
         } catch (jsonError) {
           console.error('❌ Failed to write manual booking to JSON file:', jsonError);
@@ -280,6 +258,15 @@ export async function POST(request: NextRequest) {
 
       const bookingForEmail = (result as any).booking || { id: bookingId, ...completeBookingData };
       emailService.sendBookingConfirmed(bookingForEmail as any).catch(() => {});
+
+      // Best-effort: ensure auto-cleanup scheduler is started (non-blocking)
+      try {
+        fetch(`${request.nextUrl.origin}/api/auto-cleanup-scheduler`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start' })
+        }).catch(() => {});
+      } catch {}
 
       return NextResponse.json({
         success: true,

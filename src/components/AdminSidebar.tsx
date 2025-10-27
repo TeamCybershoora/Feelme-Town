@@ -20,7 +20,8 @@ import {
   User,
   DollarSign,
   FileSpreadsheet,
-  Edit
+  Edit,
+  X
 } from 'lucide-react';
 
 interface AdminSidebarProps {
@@ -265,6 +266,13 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       label: 'Occasions',
       icon: Clock,
       path: '/Administrator/occasions',
+      badge: null
+    },
+    {
+      id: 'cancel-reasons',
+      label: 'Cancel Reasons',
+      icon: X,
+      path: '/Administrator/cancel-reasons',
       badge: null
     },
     {

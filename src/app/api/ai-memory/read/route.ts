@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
 }
 
 // Helper function to get formatted memory for AI
-export async function getAIMemoryForPrompt() {
+async function getAIMemoryForPrompt() {
   try {
     const memoryPath = join(process.cwd(), 'src', 'ai-memory');
     const memoryFiles = ['theaters', 'occasions', 'gifts', 'services', 'faq'];
