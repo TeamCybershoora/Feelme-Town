@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 // POST /api/admin/auto-complete-expired - Auto-complete expired bookings
 export async function POST(request: NextRequest) {
@@ -116,11 +117,38 @@ export async function POST(request: NextRequest) {
         );
         
         if (updateResult.modifiedCount > 0) {
+          // Import the new counter system
+          const { incrementCounter } = await import('@/lib/counter-system');
           // Increment completed counter
-          await database.incrementCounter('completed');
+          await incrementCounter('completed');
           completedCount++;
           
-          
+          // Update completed-bookings.json
+          try {
+            const completedRecord = {
+              id: expiredBooking.mongoId,
+              bookingId: expiredBooking.bookingId,
+              name: expiredBooking.name,
+              email: (expiredBooking as any).email || '',
+              phone: (expiredBooking as any).phone || '',
+              theaterName: (expiredBooking as any).theaterName || '',
+              date: expiredBooking.date,
+              time: expiredBooking.time,
+              occasion: (expiredBooking as any).occasion || '',
+              numberOfPeople: (expiredBooking as any).numberOfPeople || 2,
+              totalAmount: (expiredBooking as any).totalAmount || 0,
+              advancePayment: (expiredBooking as any).advancePayment || 0,
+              venuePayment: (expiredBooking as any).venuePayment || 0,
+              status: 'completed',
+              createdAt: (expiredBooking as any).createdAt || new Date().toISOString(),
+              completedAt: currentDateTime.toISOString()
+            };
+            
+            await ExportsStorage.appendToArray('completed-bookings.json', completedRecord);
+            console.log('✅ Auto-completed booking written to completed-bookings.json:', expiredBooking.bookingId);
+          } catch (jsonError) {
+            console.error('❌ Failed to update completed-bookings.json:', jsonError);
+          }
         }
       } catch (error) {
         

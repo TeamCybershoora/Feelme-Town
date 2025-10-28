@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
+import { ExportsStorage } from '@/lib/exports-storage';
 
 // Helper function to get occasion specific fields with exact database field names
 async function getOccasionFields(occasionName: string, body: any) {
@@ -385,6 +386,74 @@ export async function POST(request: NextRequest) {
         } else {
           
         }
+      }
+
+      // Update blob storage JSON files
+      try {
+        if (body.isManualBooking) {
+          // Update manual-bookings.json
+          const manual = await ExportsStorage.readManual('manual-bookings.json');
+          const manualBookingRecord = {
+            id: result.booking.id,
+            bookingId: result.booking.bookingId,
+            name: result.booking.name,
+            email: result.booking.email,
+            phone: result.booking.phone,
+            theaterName: result.booking.theaterName,
+            date: result.booking.date,
+            time: result.booking.time,
+            occasion: result.booking.occasion,
+            numberOfPeople: result.booking.numberOfPeople,
+            totalAmount: result.booking.totalAmount,
+            advancePayment: result.booking.advancePayment,
+            venuePayment: result.booking.venuePayment,
+            status: result.booking.status,
+            createdAt: result.booking.createdAt,
+            staffId: result.booking.staffId,
+            staffName: result.booking.staffName,
+            createdBy: result.booking.createdBy,
+            notes: result.booking.notes,
+            ...occasionFields
+          };
+          
+          manual.records.push(manualBookingRecord);
+          manual.total = manual.records.length;
+          manual.generatedAt = new Date().toISOString();
+          await ExportsStorage.writeManual('manual-bookings.json', manual);
+          console.log('✅ Manual booking written to manual-bookings.json:', result.booking.bookingId);
+        } else {
+          // Update confirmed bookings JSON (if it exists)
+          try {
+            const confirmed = await ExportsStorage.readArray('confirmed-bookings.json');
+            const confirmedBookingRecord = {
+              id: result.booking.id,
+              bookingId: result.booking.bookingId,
+              name: result.booking.name,
+              email: result.booking.email,
+              phone: result.booking.phone,
+              theaterName: result.booking.theaterName,
+              date: result.booking.date,
+              time: result.booking.time,
+              occasion: result.booking.occasion,
+              numberOfPeople: result.booking.numberOfPeople,
+              totalAmount: result.booking.totalAmount,
+              advancePayment: result.booking.advancePayment,
+              venuePayment: result.booking.venuePayment,
+              status: result.booking.status,
+              createdAt: result.booking.createdAt,
+              ...occasionFields
+            };
+            
+            confirmed.push(confirmedBookingRecord);
+            await ExportsStorage.writeArray('confirmed-bookings.json', confirmed);
+            console.log('✅ Confirmed booking written to confirmed-bookings.json:', result.booking.bookingId);
+          } catch (jsonError) {
+            console.log('ℹ️ confirmed-bookings.json not found or error, skipping JSON update');
+          }
+        }
+      } catch (jsonError) {
+        console.error('❌ Failed to update JSON files in blob storage:', jsonError);
+        // Don't fail the booking if JSON update fails
       }
 
       // Send confirmation email in background (no invoice attachment)

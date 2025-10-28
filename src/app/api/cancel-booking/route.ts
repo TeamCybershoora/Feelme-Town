@@ -83,7 +83,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Save cancelled booking to blob storage JSON
     try {
+      console.log(`🗑️ Saving cancelled booking ${bookingId} to cancelled-bookings.json`);
       const record = {
         bookingId: booking.bookingId || booking.id || booking._id,
         name: booking.name,
@@ -101,8 +103,14 @@ export async function POST(request: NextRequest) {
         cancelledAt: new Date().toISOString(),
         cancelReason: (typeof reason === 'string' && reason.trim()) ? reason.trim() : 'Cancelled by Customer'
       };
+      
+      console.log(`📝 Cancelled booking record:`, JSON.stringify(record, null, 2));
       await ExportsStorage.appendToArray('cancelled-bookings.json', record);
-    } catch {}
+      console.log(`✅ Successfully saved cancelled booking to blob storage`);
+    } catch (blobError) {
+      console.error(`❌ Failed to save cancelled booking to blob storage:`, blobError);
+      // Don't fail the cancellation if blob storage fails
+    }
 
     const deleteResult = await database.deleteBooking(bookingId);
     if (!deleteResult.success) {

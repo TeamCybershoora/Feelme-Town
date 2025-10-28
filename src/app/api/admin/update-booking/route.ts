@@ -124,6 +124,7 @@ export async function PUT(request: NextRequest) {
           };
           await ExportsStorage.appendToArray('cancelled-bookings.json', record);
           console.log(`✅ Cancelled booking saved to JSON (Blob-backed)`);
+          console.log(`📝 Cancelled booking record:`, JSON.stringify(record, null, 2));
 
           // If manual, also remove from manual-bookings.json
           if (isManual) {
@@ -153,7 +154,9 @@ export async function PUT(request: NextRequest) {
       
       if (result.success) {
         console.log(`✅ Booking ${bookingId} deleted from database`);
-        await database.incrementCounter('cancelled');
+        // Import the new counter system
+        const { incrementCounter } = await import('@/lib/counter-system');
+        await incrementCounter('cancelled');
       }
     } else if (newStatus === 'completed') {
       // Archive to completed JSON then delete from DB
@@ -204,6 +207,7 @@ export async function PUT(request: NextRequest) {
           };
           await ExportsStorage.appendToArray('completed-bookings.json', record);
           console.log(`✅ Completed booking archived to JSON (Blob-backed)`);
+          console.log(`📝 Completed booking record:`, JSON.stringify(record, null, 2));
 
           // If manual, also remove from manual-bookings.json so it doesn't appear in manual list anymore
           if (isManual) {
@@ -233,7 +237,9 @@ export async function PUT(request: NextRequest) {
 
       if (result.success) {
         console.log(`🗑️ Booking ${bookingId} deleted from database after archiving`);
-        await database.incrementCounter('completed');
+        // Import the new counter system
+        const { incrementCounter } = await import('@/lib/counter-system');
+        await incrementCounter('completed');
         // Notify customer their invoice is ready
         try {
           const mailData: any = {
@@ -290,7 +296,9 @@ export async function PUT(request: NextRequest) {
         
         // Increment new status counter
         if (newStatus === 'completed') {
-          await database.incrementCounter('completed');
+          // Import the new counter system
+          const { incrementCounter } = await import('@/lib/counter-system');
+          await incrementCounter('completed');
           
         }
         }

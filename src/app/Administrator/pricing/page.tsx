@@ -13,9 +13,9 @@ interface PricingData {
 
 const PricingManagement: React.FC = () => {
   const [pricing, setPricing] = useState<PricingData>({
-    slotBookingFee: 1000,
-    extraGuestFee: 400,
-    convenienceFee: 50,
+    slotBookingFee: 0,
+    extraGuestFee: 0,
+    convenienceFee: 0,
     decorationFees: 0
   });
   const [loading, setLoading] = useState(true);
@@ -23,23 +23,35 @@ const PricingManagement: React.FC = () => {
   const { showSuccess, showError, toasts, removeToast } = useToast();
 
   useEffect(() => {
-    fetchPricing();
+    loadPricingFromJSON();
   }, []);
 
-  const fetchPricing = async () => {
+  const loadPricingFromJSON = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/admin/pricing');
+      console.log('🔄 Loading pricing from JSON...');
+      
+      const response = await fetch(`/api/admin/pricing?cache=${Date.now()}`, { cache: 'no-store' });
       const data = await response.json();
+      console.log('📊 Pricing API response:', data);
       
       if (data.success && data.pricing) {
-        setPricing(data.pricing);
+        console.log('✅ Setting pricing state:', data.pricing);
+        setPricing({
+          slotBookingFee: data.pricing.slotBookingFee || 0,
+          extraGuestFee: data.pricing.extraGuestFee || 0,
+          convenienceFee: data.pricing.convenienceFee || 0,
+          decorationFees: data.pricing.decorationFees || 0
+        });
+      } else if (data.success && !data.pricing) {
+        console.log('⚠️ No pricing data in JSON - keeping current state');
+        // Keep current state if no pricing data exists
       } else {
-        console.error('Failed to fetch pricing:', data.error);
+        console.error('❌ Failed to load pricing:', data.error);
         showError('Failed to load pricing data');
       }
     } catch (error) {
-      console.error('Error fetching pricing:', error);
+      console.error('❌ Error loading pricing:', error);
       showError('Failed to load pricing data');
     } finally {
       setLoading(false);
@@ -49,6 +61,8 @@ const PricingManagement: React.FC = () => {
   const handleSave = async () => {
     try {
       setSaving(true);
+      console.log('💾 Saving pricing to JSON:', pricing);
+      
       const response = await fetch('/api/admin/pricing', {
         method: 'PUT',
         headers: {
@@ -58,14 +72,28 @@ const PricingManagement: React.FC = () => {
       });
 
       const data = await response.json();
+      console.log('💾 Save response:', data);
       
       if (data.success) {
         showSuccess('Pricing updated successfully!');
+        console.log('✅ Pricing saved successfully - real-time update');
+        
+        // Real-time update: Use the returned pricing data directly
+        if (data.pricing) {
+          console.log('🔄 Real-time updating pricing state:', data.pricing);
+          setPricing({
+            slotBookingFee: data.pricing.slotBookingFee || 0,
+            extraGuestFee: data.pricing.extraGuestFee || 0,
+            convenienceFee: data.pricing.convenienceFee || 0,
+            decorationFees: data.pricing.decorationFees || 0
+          });
+        }
       } else {
+        console.error('❌ Save failed:', data.error);
         showError('Failed to update pricing: ' + data.error);
       }
     } catch (error) {
-      console.error('Error updating pricing:', error);
+      console.error('❌ Save error:', error);
       showError('Failed to update pricing');
     } finally {
       setSaving(false);
@@ -73,11 +101,19 @@ const PricingManagement: React.FC = () => {
   };
 
   const handleInputChange = (field: keyof PricingData, value: string) => {
-    const numValue = parseInt(value) || 0;
-    setPricing(prev => ({
-      ...prev,
-      [field]: numValue
-    }));
+    // Allow any number including negative, empty string becomes 0
+    const numValue = value === '' ? 0 : parseInt(value);
+    console.log(`💰 Real-time input change - ${field}: ${value} → ${numValue}`);
+    
+    // Real-time state update
+    setPricing(prev => {
+      const newPricing = {
+        ...prev,
+        [field]: isNaN(numValue) ? 0 : numValue
+      };
+      console.log(`🔄 Real-time pricing state updated:`, newPricing);
+      return newPricing;
+    });
   };
 
   if (loading) {
@@ -120,8 +156,12 @@ const PricingManagement: React.FC = () => {
                 type="number"
                 value={pricing.slotBookingFee}
                 onChange={(e) => handleInputChange('slotBookingFee', e.target.value)}
+                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+                }}
+                inputMode="numeric"
                 placeholder="Enter slot booking fee"
-                min="0"
               />
               <p className="field-description">
                 Base fee charged for booking a theater slot
@@ -135,8 +175,12 @@ const PricingManagement: React.FC = () => {
                 type="number"
                 value={pricing.extraGuestFee}
                 onChange={(e) => handleInputChange('extraGuestFee', e.target.value)}
+                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+                }}
+                inputMode="numeric"
                 placeholder="Enter extra guest fee"
-                min="0"
               />
               <p className="field-description">
                 Additional fee per guest beyond theater minimum capacity
@@ -150,8 +194,12 @@ const PricingManagement: React.FC = () => {
                 type="number"
                 value={pricing.convenienceFee}
                 onChange={(e) => handleInputChange('convenienceFee', e.target.value)}
+                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+                }}
+                inputMode="numeric"
                 placeholder="Enter convenience fee"
-                min="0"
               />
               <p className="field-description">
                 Processing fee for online bookings
@@ -165,8 +213,12 @@ const PricingManagement: React.FC = () => {
                 type="number"
                 value={pricing.decorationFees}
                 onChange={(e) => handleInputChange('decorationFees', e.target.value)}
+                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+                }}
+                inputMode="numeric"
                 placeholder="Enter decoration fees"
-                min="0"
               />
               <p className="field-description">
                 Additional fees for decoration services
@@ -182,27 +234,46 @@ const PricingManagement: React.FC = () => {
             >
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
+            <button
+              onClick={() => {
+                console.log('🔄 Manual refresh clicked');
+                loadPricingFromJSON();
+              }}
+              disabled={loading}
+              className="refresh-button"
+              style={{ marginLeft: '1rem' }}
+            >
+              {loading ? 'Loading...' : 'Refresh'}
+            </button>
           </div>
         </div>
 
         <div className="pricing-preview">
-          <h3>Current Pricing Summary</h3>
+          <h3>Real-time Pricing Summary</h3>
           <div className="pricing-summary">
             <div className="summary-item">
               <span className="label">Slot Booking Fee:</span>
-              <span className="value">₹{pricing.slotBookingFee}</span>
+              <span className="value" style={{color: pricing.slotBookingFee > 0 ? 'var(--accent-color)' : '#999'}}>
+                ₹{pricing.slotBookingFee}
+              </span>
             </div>
             <div className="summary-item">
               <span className="label">Extra Guest Fee:</span>
-              <span className="value">₹{pricing.extraGuestFee} per guest</span>
+              <span className="value" style={{color: pricing.extraGuestFee > 0 ? 'var(--accent-color)' : '#999'}}>
+                ₹{pricing.extraGuestFee} per guest
+              </span>
             </div>
             <div className="summary-item">
               <span className="label">Convenience Fee:</span>
-              <span className="value">₹{pricing.convenienceFee}</span>
+              <span className="value" style={{color: pricing.convenienceFee > 0 ? 'var(--accent-color)' : '#999'}}>
+                ₹{pricing.convenienceFee}
+              </span>
             </div>
             <div className="summary-item">
               <span className="label">Decoration Fees:</span>
-              <span className="value">₹{pricing.decorationFees}</span>
+              <span className="value" style={{color: pricing.decorationFees > 0 ? 'var(--accent-color)' : '#999'}}>
+                ₹{pricing.decorationFees}
+              </span>
             </div>
           </div>
         </div>
@@ -316,6 +387,17 @@ const PricingManagement: React.FC = () => {
           color: #000;
         }
 
+        /* Hide number input spinners (Chrome, Safari, Edge) */
+        .pricing-field input[type='number']::-webkit-outer-spin-button,
+        .pricing-field input[type='number']::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        /* Hide number input spinners (Firefox) */
+        .pricing-field input[type='number'] {
+          -moz-appearance: textfield;
+        }
+
         .pricing-field input:focus {
           outline: none;
           border-color: var(--accent-color);
@@ -362,6 +444,34 @@ const PricingManagement: React.FC = () => {
           cursor: not-allowed;
           transform: none;
         }
+
+        .refresh-button {
+          background: #28a745;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          padding: 0.875rem 2rem;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.95rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .refresh-button:hover:not(:disabled) {
+          background: #218838;
+          transform: translateY(-1px);
+        }
+
+        .refresh-button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
+        }
+
 
         .pricing-preview {
           background: white;

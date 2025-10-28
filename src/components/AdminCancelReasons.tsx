@@ -7,14 +7,28 @@ interface AdminCancelReasonsProps {
   onClose?: () => void;
 }
 
+interface CancelReason {
+  id: string;
+  reason: string;
+  category?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
 export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps) {
-  const [reasons, setReasons] = useState<string[]>([]);
+  const [reasons, setReasons] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newReason, setNewReason] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ show: boolean; reason: string }>({ show: false, reason: '' });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ show: boolean; reason: any | null }>({ show: false, reason: null });
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Helper: normalize reason text (supports string or object)
+  const getReasonText = (r: any): string => (typeof r === 'string' ? r : (r?.reason ?? ''));
 
   // Fetch cancel reasons on component mount
   useEffect(() => {
@@ -24,12 +38,12 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
   const fetchCancelReasons = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch('/api/cancel-reasons');
+      const response = await fetch('/api/admin/cancel-reasons', { cache: 'no-store' });
       const data = await response.json();
       
-      if (data.success && Array.isArray(data.reasons)) {
-        setReasons(data.reasons);
-        console.log('✅ Cancel reasons loaded:', data.reasons.length, 'reasons');
+      if (data.success && Array.isArray(data.cancelReasons)) {
+        setReasons(data.cancelReasons);
+        console.log('✅ Cancel reasons loaded:', data.cancelReasons.length, 'reasons');
       } else {
         throw new Error(data.error || 'Failed to fetch cancel reasons');
       }
@@ -49,7 +63,7 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
 
     try {
       setIsAdding(true);
-      const response = await fetch('/api/cancel-reasons', {
+      const response = await fetch('/api/admin/cancel-reasons', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -60,9 +74,17 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
       const data = await response.json();
       
       if (data.success) {
-        setReasons(data.reasons);
+        if (data.cancelReason) {
+          setReasons(prev => [...prev, data.cancelReason]);
+        } else if (Array.isArray(data.cancelReasons)) {
+          setReasons(data.cancelReasons);
+        } else {
+          // Fallback to refetch
+          fetchCancelReasons();
+        }
         setNewReason('');
-        showMessage('success', `Cancel reason "${data.reason}" added successfully! ✅`);
+        const addedText = data.cancelReason?.reason || newReason.trim();
+        showMessage('success', `Cancel reason "${addedText}" added successfully! ✅`);
       } else {
         throw new Error(data.error || 'Failed to add cancel reason');
       }
@@ -74,8 +96,8 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
     }
   };
 
-  const handleDeleteClick = (reasonToRemove: string) => {
-    if (reasonToRemove.toLowerCase() === 'other') {
+  const handleDeleteClick = (reasonToRemove: any) => {
+    if (getReasonText(reasonToRemove).toLowerCase() === 'other') {
       showMessage('error', 'Cannot remove "Other" reason as it is required');
       return;
     }
@@ -84,26 +106,41 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
   };
 
   const confirmDelete = async () => {
-    const reasonToRemove = showDeleteConfirm.reason;
+    const reasonObj = showDeleteConfirm.reason as any;
+    if (!reasonObj) return;
+    const id = typeof reasonObj === 'object' ? reasonObj.id : undefined;
+    const text = getReasonText(reasonObj);
     setIsDeleting(true);
 
     try {
-      const response = await fetch('/api/cancel-reasons', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ reason: reasonToRemove })
-      });
+      const params = new URLSearchParams();
+      if (id) params.set('id', id);
+      if (text) params.set('reason', text);
+      const response = await fetch(`/api/admin/cancel-reasons?${params.toString()}`, { method: 'DELETE' });
 
       const data = await response.json();
       
       if (data.success) {
-        setReasons(data.reasons);
-        setShowDeleteConfirm({ show: false, reason: '' });
-        showMessage('success', `Cancel reason "${data.removedReason}" removed successfully! 🗑️`);
+        setReasons(prev => prev.filter((r: any) => {
+          if (id && r && typeof r === 'object' && 'id' in r) return r.id !== id;
+          return getReasonText(r).toLowerCase() !== text.toLowerCase();
+        }));
+        setShowDeleteConfirm({ show: false, reason: null });
+        showMessage('success', `Cancel reason "${text}" removed successfully! 🗑️`);
       } else {
-        throw new Error(data.error || 'Failed to remove cancel reason');
+        // Treat not found as idempotent success and optimistically update UI
+        if ((response.status === 404) || (typeof data.error === 'string' && data.error.toLowerCase().includes('not found'))) {
+          setReasons(prev => prev.filter((r: any) => {
+            if (id && r && typeof r === 'object' && 'id' in r) return r.id !== id;
+            return getReasonText(r).toLowerCase() !== text.toLowerCase();
+          }));
+          setShowDeleteConfirm({ show: false, reason: null });
+          showMessage('success', `Cancel reason "${text}" was already removed.`);
+          // Soft re-fetch to ensure server state is in sync
+          fetchCancelReasons();
+        } else {
+          throw new Error(data.error || 'Failed to remove cancel reason');
+        }
       }
     } catch (error) {
       console.error('❌ Failed to remove cancel reason:', error);
@@ -114,7 +151,7 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
   };
 
   const cancelDelete = () => {
-    setShowDeleteConfirm({ show: false, reason: '' });
+    setShowDeleteConfirm({ show: false, reason: null });
   };
 
   const showMessage = (type: 'success' | 'error', text: string) => {
@@ -196,19 +233,19 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
         ) : (
           <div className="reasons-list">
             {reasons.map((reason, index) => (
-              <div key={index} className="reason-item">
+              <div key={(reason as any)?.id ?? index} className="reason-item">
                 <div className="reason-content">
                   <span className="reason-number">{index + 1}</span>
-                  <span className="reason-text">{reason}</span>
-                  {reason.toLowerCase() === 'other' && (
+                  <span className="reason-text">{getReasonText(reason)}</span>
+                  {getReasonText(reason).toLowerCase() === 'other' && (
                     <span className="required-badge">Required</span>
                   )}
                 </div>
                 <button
                   onClick={() => handleDeleteClick(reason)}
-                  disabled={reason.toLowerCase() === 'other'}
+                  disabled={getReasonText(reason).toLowerCase() === 'other'}
                   className="remove-button"
-                  title={reason.toLowerCase() === 'other' ? 'Cannot remove required reason' : `Remove "${reason}"`}
+                  title={getReasonText(reason).toLowerCase() === 'other' ? 'Cannot remove required reason' : `Remove "${getReasonText(reason)}"`}
                 >
                   <Trash2 size={16} />
                 </button>
@@ -229,7 +266,7 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
             <div className="delete-confirm-content">
               <p>Are you sure you want to remove this cancel reason?</p>
               <div className="reason-to-delete">
-                <strong>"{showDeleteConfirm.reason}"</strong>
+                <strong>"{getReasonText(showDeleteConfirm.reason)}"</strong>
               </div>
               <p className="warning-text">This action cannot be undone.</p>
             </div>
@@ -354,11 +391,19 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
           border-radius: 8px;
           font-size: 14px;
           transition: border-color 0.2s ease;
+          background: #ffffff;
+          color: #000000;
+          caret-color: #000000;
         }
 
         .add-reason-form input:focus {
           outline: none;
           border-color: #ED2024;
+        }
+
+        .add-reason-form input::placeholder {
+          color: #666666;
+          opacity: 1;
         }
 
         .add-button {

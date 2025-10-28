@@ -573,13 +573,16 @@ const saveBooking = async (bookingData: BookingData) => {
       console.log('⚠️ No occasion-specific fields were saved to database');
     }
     
+    // Import the new counter system
+    const { incrementCounter: incrementNewCounter } = await import('./counter-system');
+    
     // Increment appropriate counter based on booking status
     if (booking.status === 'confirmed') {
-      await incrementCounter('confirmed');
+      await incrementNewCounter('confirmed');
     } else if (booking.status === 'completed') {
-      await incrementCounter('completed');
+      await incrementNewCounter('completed');
     } else if (booking.status === 'manual') {
-      await incrementCounter('manual');
+      await incrementNewCounter('manual');
       
       // Also increment staff-specific counter if staffId is provided
       if (bookingData.staffId) {
@@ -706,8 +709,11 @@ const saveManualBooking = async (bookingData: BookingData) => {
       console.log('⚠️ No occasion-specific fields were saved for manual booking');
     }
     
+    // Import the new counter system
+    const { incrementCounter: incrementNewCounter } = await import('./counter-system');
+    
     // Increment manual booking counter
-    await incrementCounter('manual');
+    await incrementNewCounter('manual');
     
     // Also increment staff-specific counter if staffId is provided
     if (bookingData.staffId) {
@@ -814,8 +820,11 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
       status: incompleteBooking.status
     });
     
+    // Import the new counter system
+    const { incrementCounter: incrementNewCounter } = await import('./counter-system');
+    
     // Increment incomplete booking counter
-    await incrementCounter('incomplete');
+    await incrementNewCounter('incomplete');
     
     return {
       success: true,
@@ -1513,11 +1522,15 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
     
     console.log(`✅ Booking updated in MongoDB:`, bookingId);
     
+    // Import the new counter system
+    const { incrementCounter: incrementNewCounter } = await import('./counter-system');
+    const { decrementCounter: decrementNewCounter } = await import('./counter-system');
+    
     // Increment appropriate counter if status changed
     if (bookingData.status === 'completed') {
-      await incrementCounter('completed');
+      await incrementNewCounter('completed');
       // Decrement incomplete counter when a booking is completed
-      await decrementCounter('incomplete');
+      await decrementNewCounter('incomplete');
       console.log('📉 Decremented incomplete counter after booking completion');
     }
     
@@ -1931,8 +1944,11 @@ const moveBookingToCancelled = async (bookingId: string, cancellationData: { can
     
     console.log(`✅ Booking moved to cancelled collection:`, bookingId);
     
+    // Import the new counter system
+    const { incrementCounter: incrementNewCounter } = await import('./counter-system');
+    
     // Increment cancelled counter
-    await incrementCounter('cancelled');
+    await incrementNewCounter('cancelled');
     
     return {
       success: true,
@@ -2105,8 +2121,11 @@ const deleteExpiredBookings = async (currentDateTime: Date) => {
             }
           );
           
+          // Import the new counter system
+          const { incrementCounter: incrementNewCounter } = await import('./counter-system');
+          
           // Increment completed counter
-          await incrementCounter('completed');
+          await incrementNewCounter('completed');
           completedCount++;
           
           console.log(`✅ Auto-completed expired booking: ${expiredBooking.bookingId}`);
@@ -2311,8 +2330,11 @@ const moveBookingToCompleted = async (bookingId: string) => {
     
     console.log(`✅ Booking moved to completed collection:`, bookingId);
     
+    // Import the new counter system
+    const { incrementCounter: incrementNewCounter } = await import('./counter-system');
+    
     // Increment completed counter
-    await incrementCounter('completed');
+    await incrementNewCounter('completed');
     
     return {
       success: true,

@@ -328,6 +328,37 @@ export const resetTimeBasedCounters = async (): Promise<void> => {
   }
 };
 
+// Decrement counter
+export const decrementCounter = async (
+  type: keyof CounterData,
+  decrementTotal: boolean = true
+): Promise<void> => {
+  try {
+    // First check and reset if needed
+    const counters = await checkAndResetTimeBasedCounters();
+    
+    // Decrement time-based counters (ensure they don't go below 0)
+    counters[type].today = Math.max(0, counters[type].today - 1);
+    counters[type].week = Math.max(0, counters[type].week - 1);
+    counters[type].month = Math.max(0, counters[type].month - 1);
+    counters[type].year = Math.max(0, counters[type].year - 1);
+    
+    // Save time-based counters
+    await ExportsStorage.writeRaw('counters.json', counters);
+    
+    // Decrement total counter in database if requested
+    if (decrementTotal) {
+      const totals = await getTotalCounters();
+      totals[type] = Math.max(0, totals[type] - 1);
+      await saveTotalCounters(totals);
+    }
+    
+    console.log(`✅ ${type} counter decremented (total: ${decrementTotal})`);
+  } catch (error) {
+    console.error(`❌ Error decrementing ${type} counter:`, error);
+  }
+};
+
 // Reset ALL counters (both time-based and database totals)
 export const resetAllCounters = async (): Promise<void> => {
   try {

@@ -67,6 +67,16 @@ export const ExportsStorage = {
     } else {
       console.log(`❌ Blob storage not enabled - cannot read ${fileName}`);
     }
+    try {
+      await ensureDir();
+      const fullPath = path.join(DATA_DIR, fileName);
+      const txt = await fs.readFile(fullPath, 'utf8');
+      const trimmed = (txt || '').trim();
+      if (trimmed) {
+        console.log(`✅ Successfully read ${fileName} from filesystem`);
+        return JSON.parse(trimmed);
+      }
+    } catch {}
 
     console.log(`❌ ${fileName} not found in blob storage`);
     return null;
@@ -93,10 +103,10 @@ export const ExportsStorage = {
     return { type: 'manual', generatedAt: new Date().toISOString(), total: 0, records: [] };
   },
 
-  // Generic write raw JSON (replaces)
+  // Generic write raw JSON (replaces) - with overwrite to prevent multiple files
   async writeRaw(fileName: string, data: any): Promise<void> {
     const json = JSON.stringify(data, null, 2);
-    console.log(`📝 Writing ${fileName} to blob storage...`);
+    console.log(`📝 Writing ${fileName} to blob storage (overwrite mode)...`);
 
     // Only use Blob Storage (no file system backup)
     if (isBlobEnabled()) {
@@ -104,20 +114,38 @@ export const ExportsStorage = {
         const blobApi = await dynamicBlob();
         if (blobApi && blobApi.put) {
           const key = `data/exports/${fileName}`;
+          
+          // First, try to delete existing file to prevent duplicates
+          try {
+            const listRes = await blobApi.list({ prefix: key, token: process.env.BLOB_READ_WRITE_TOKEN });
+            const existingBlob = listRes?.blobs?.find((b: any) => b.pathname === key || b.key === key || b.name === key);
+            if (existingBlob && existingBlob.url && blobApi.del) {
+              await blobApi.del(existingBlob.url, { token: process.env.BLOB_READ_WRITE_TOKEN });
+              console.log(`🗑️ Deleted existing ${fileName} to prevent duplicates`);
+            }
+          } catch (deleteError) {
+            console.log(`⚠️ Could not delete existing ${fileName} (may not exist):`, deleteError instanceof Error ? deleteError.message : String(deleteError));
+          }
+          
+          // Now write the new file
           await blobApi.put(key, json, {
             access: 'public',
             contentType: 'application/json',
-            token: process.env.BLOB_READ_WRITE_TOKEN
+            token: process.env.BLOB_READ_WRITE_TOKEN,
+            addRandomSuffix: false // Prevent random suffix to maintain same filename
           });
-          console.log(`✅ Successfully wrote ${fileName} to blob storage`);
+          console.log(`✅ Successfully wrote ${fileName} to blob storage (single file)`);
         }
       } catch (error) {
         console.error(`❌ Failed to write ${fileName} to blob storage:`, error instanceof Error ? error.message : String(error));
         throw error; // Re-throw to handle the error properly
       }
     } else {
-      console.error(`❌ Blob storage not enabled - cannot write ${fileName}`);
-      throw new Error('Blob storage not enabled');
+      await ensureDir();
+      const fullPath = path.join(DATA_DIR, fileName);
+      await fs.writeFile(fullPath, json, 'utf8');
+      console.log(`✅ Successfully wrote ${fileName} to filesystem`);
+      return;
     }
   },
 
@@ -136,9 +164,29 @@ export const ExportsStorage = {
   },
 
   async appendToArray(fileName: string, record: any): Promise<void> {
+    console.log(`🔄 Appending to ${fileName}:`, JSON.stringify(record, null, 2));
+    
+    // First cleanup any duplicate files to ensure single file
+    await this.cleanupDuplicateFiles(fileName);
+    
+    // Read existing array
     const arr = await this.readArray(fileName);
-    arr.push(record);
+    console.log(`📊 Current ${fileName} has ${arr.length} records`);
+    
+    // Add new record with unique ID to prevent duplicates
+    const recordWithId = {
+      ...record,
+      _appendId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      _appendedAt: new Date().toISOString()
+    };
+    
+    arr.push(recordWithId);
+    console.log(`📊 After append, ${fileName} will have ${arr.length} records`);
+    
+    // Write back with overwrite to ensure single file
+    console.log(`📝 Writing updated ${fileName} (single file mode with cleanup)`);
     await this.writeArray(fileName, arr);
+    console.log(`✅ Successfully appended to ${fileName} - Entry #${arr.length} added to single file`);
   },
 
   async removeManualByBookingId(bookingId: string, fileName = 'manual-bookings.json'): Promise<void> {
@@ -147,5 +195,100 @@ export const ExportsStorage = {
     manual.total = manual.records.length;
     manual.generatedAt = new Date().toISOString();
     await this.writeManual(fileName, manual);
+  },
+
+  // Special function for pricing.json - ensures single file with updates
+  async updatePricing(pricingData: any): Promise<void> {
+    const fileName = 'pricing.json';
+    console.log(`💰 Updating pricing.json with new data`);
+    
+    try {
+      // Always write the complete pricing data (replace, don't append)
+      const pricingPayload = {
+        type: 'pricing',
+        lastUpdated: new Date().toISOString(),
+        version: Date.now(), // Version for tracking updates
+        data: pricingData
+      };
+      
+      await this.writeRaw(fileName, pricingPayload);
+      console.log(`✅ Pricing.json updated successfully`);
+    } catch (error) {
+      console.error(`❌ Failed to update pricing.json:`, error);
+      throw error;
+    }
+  },
+
+  // Read pricing data
+  async readPricing(): Promise<any> {
+    const fileName = 'pricing.json';
+    console.log(`💰 Reading pricing.json`);
+    
+    try {
+      const raw = await this.readRaw(fileName);
+      console.log(`💰 Raw pricing JSON:`, raw);
+      
+      if (raw && raw.data) {
+        console.log(`✅ Pricing data loaded successfully from data field`);
+        return raw.data;
+      } else if (raw && (raw.slotBookingFee !== undefined || raw.extraGuestFee !== undefined)) {
+        // Handle direct pricing format (legacy)
+        console.log(`✅ Pricing data loaded successfully from direct format`);
+        return raw;
+      }
+      
+      // Return null if file doesn't exist - no static defaults
+      console.log(`⚠️ Pricing.json not found, returning null`);
+      return null;
+    } catch (error) {
+      console.error(`❌ Failed to read pricing.json:`, error);
+      return null;
+    }
+  },
+
+  // Cleanup duplicate files - removes all files with same prefix except the latest
+  async cleanupDuplicateFiles(fileName: string): Promise<void> {
+    if (!isBlobEnabled()) {
+      console.log(`❌ Blob storage not enabled - cannot cleanup ${fileName}`);
+      return;
+    }
+
+    try {
+      const blobApi = await dynamicBlob();
+      if (!blobApi || !blobApi.list) return;
+
+      const key = `data/exports/${fileName}`;
+      const listRes = await blobApi.list({ prefix: key, token: process.env.BLOB_READ_WRITE_TOKEN });
+      const blobs = listRes?.blobs || [];
+      
+      if (blobs.length <= 1) {
+        console.log(`✅ No duplicate files found for ${fileName}`);
+        return;
+      }
+
+      // Sort by uploadedAt to keep the latest
+      const sortedBlobs = blobs.sort((a: any, b: any) => 
+        new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime()
+      );
+
+      // Keep the first (latest) and delete the rest
+      const toDelete = sortedBlobs.slice(1);
+      console.log(`🧹 Found ${toDelete.length} duplicate files for ${fileName}, cleaning up...`);
+
+      for (const blob of toDelete) {
+        try {
+          if (blob.url && blobApi.del) {
+            await blobApi.del(blob.url, { token: process.env.BLOB_READ_WRITE_TOKEN });
+            console.log(`🗑️ Deleted duplicate: ${blob.pathname || blob.key || blob.name}`);
+          }
+        } catch (deleteError) {
+          console.error(`❌ Failed to delete duplicate:`, deleteError);
+        }
+      }
+
+      console.log(`✅ Cleanup completed for ${fileName}`);
+    } catch (error) {
+      console.error(`❌ Failed to cleanup duplicates for ${fileName}:`, error);
+    }
   }
 };

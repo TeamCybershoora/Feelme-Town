@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
-import emailService from '@/lib/email-service';
 import { ExportsStorage } from '@/lib/exports-storage';
+import emailService from '@/lib/email-service';
 import { incrementCounter } from '@/lib/counter-system';
 
 // Global variable to track if cleanup is already running
@@ -270,7 +270,32 @@ async function performCleanup() {
           
           totalDeleted++;
           try {
-            await incrementCounter('completed');
+            // Import the new counter system
+            const { incrementCounter: incrementNewCounter } = await import('@/lib/counter-system');
+            await incrementNewCounter('completed');
+            
+            // Update completed-bookings.json
+            const completedRecord = {
+              id: booking._id || booking.id,
+              bookingId: booking.bookingId,
+              name: booking.name,
+              email: booking.email,
+              phone: booking.phone,
+              theaterName: booking.theaterName,
+              date: booking.date,
+              time: booking.time,
+              occasion: booking.occasion,
+              numberOfPeople: booking.numberOfPeople,
+              totalAmount: booking.totalAmount,
+              advancePayment: booking.advancePayment,
+              venuePayment: booking.venuePayment,
+              status: 'completed',
+              createdAt: booking.createdAt,
+              completedAt: new Date().toISOString()
+            };
+            
+            await ExportsStorage.appendToArray('completed-bookings.json', completedRecord);
+            console.log('✅ Cleanup completed booking written to completed-bookings.json:', booking.bookingId);
           } catch {}
           // Send invoice ready email (best-effort)
           try {
@@ -349,7 +374,34 @@ async function performCleanup() {
           }
           if (delRes && delRes.success) {
             totalDeleted++;
-            try { await incrementCounter('completed'); } catch {}
+            try { 
+              // Import the new counter system
+              const { incrementCounter: incrementNewCounter } = await import('@/lib/counter-system');
+              await incrementNewCounter('completed');
+              
+              // Update completed-bookings.json
+              const completedRecord = {
+                id: booking._id || booking.id,
+                bookingId: booking.bookingId,
+                name: booking.name,
+                email: booking.email,
+                phone: booking.phone,
+                theaterName: booking.theaterName,
+                date: booking.date,
+                time: booking.time,
+                occasion: booking.occasion,
+                numberOfPeople: booking.numberOfPeople,
+                totalAmount: booking.totalAmount,
+                advancePayment: booking.advancePayment,
+                venuePayment: booking.venuePayment,
+                status: 'completed',
+                createdAt: booking.createdAt,
+                completedAt: new Date().toISOString()
+              };
+              
+              await ExportsStorage.appendToArray('completed-bookings.json', completedRecord);
+              console.log('✅ Cleanup completed booking written to completed-bookings.json:', booking.bookingId);
+            } catch {}
             // Send invoice ready (best-effort)
             try {
               const mailData: any = {

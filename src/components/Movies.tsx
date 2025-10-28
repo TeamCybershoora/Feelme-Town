@@ -400,7 +400,7 @@ export default function Movies({
        <div className="loading-grid" style={{ height: `${containerHeight.desktop}px` }}>
          <div className="loading-center">
            <div className="loading-spinner"></div>
-           <p className="loading-text">फिल्में लोड हो रही हैं...</p>
+           <p className="loading-text">Movies loading...</p>
          </div>
          {Array.from({ length: itemsPerPage }).map((_, index) => (
            <div key={index} className="loading-card">

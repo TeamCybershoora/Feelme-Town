@@ -5,11 +5,11 @@ import database from '@/lib/db-connect';
 // GET /api/admin/pricing - Get current pricing settings (Blob-backed only)
 export async function GET() {
   try {
-    // Read from blob storage (public/data/exports/pricing.json)
-    let pricingData = await ExportsStorage.readRaw('pricing.json');
+    // Use the new readPricing function
+    let pricingData = await ExportsStorage.readPricing();
     
-    if (!pricingData) {
-      console.log('🔄 Pricing not found in blob storage, fetching from database...');
+    // If no pricing data exists, fetch from database and save
+    if (!pricingData || Object.keys(pricingData).length === 0) {
       
       try {
         // Try to get pricing from database (system settings)
@@ -24,38 +24,17 @@ export async function GET() {
             decorationFees: settings.decorationFees || 0
           };
           
-          // Save to blob storage for future use
-          await ExportsStorage.writeRaw('pricing.json', pricingData);
-          console.log('✅ Pricing fetched from database and saved to blob storage');
+          // Save to blob storage using new function
+          await ExportsStorage.updatePricing(pricingData);
         } else {
-          // Use default pricing if database is empty
-          pricingData = {
-            slotBookingFee: 0,
-            extraGuestFee: 0,
-            convenienceFee: 0,
-            decorationFees: 0
-          };
-          
-          // Save default to blob storage
-          await ExportsStorage.writeRaw('pricing.json', pricingData);
-          console.log('✅ Default pricing saved to blob storage');
+          // No default pricing - return empty if no data exists
+          pricingData = null;
         }
       } catch (dbError) {
-        console.error('❌ Database fetch failed, using default pricing:', dbError);
-        
-        // Fallback to default pricing
-        pricingData = {
-          slotBookingFee: 0,
-          extraGuestFee: 0,
-          convenienceFee: 0,
-          decorationFees: 0
-        };
-        
-        // Save fallback to blob storage
-        await ExportsStorage.writeRaw('pricing.json', pricingData);
+        console.error('❌ Database fetch failed, no pricing available:', dbError);
+        // No fallback - return null if database fails
+        pricingData = null;
       }
-    } else {
-      console.log('✅ Pricing loaded from blob storage');
     }
 
     return NextResponse.json({ 
@@ -79,17 +58,12 @@ export async function PUT(request: Request) {
       return NextResponse.json({ success: false, error: 'At least one pricing field is required' }, { status: 400 });
     }
 
-    // Read current pricing data from blob storage
-    let currentPricing = await ExportsStorage.readRaw('pricing.json');
+    // Read current pricing data using new function
+    let currentPricing = await ExportsStorage.readPricing();
     
-    if (!currentPricing) {
-      // If no pricing exists, create default
-      currentPricing = {
-        slotBookingFee: 0,
-        extraGuestFee: 0,
-        convenienceFee: 0,
-        decorationFees: 0
-      };
+    if (!currentPricing || Object.keys(currentPricing).length === 0) {
+      // If no pricing exists, start with empty object
+      currentPricing = {};
     }
 
     // Update only the provided fields
@@ -101,9 +75,8 @@ export async function PUT(request: Request) {
       ...(decorationFees !== undefined && { decorationFees: Number(decorationFees) })
     };
 
-    // Save updated pricing to blob storage (public/data/exports/pricing.json)
-    await ExportsStorage.writeRaw('pricing.json', updatedPricing);
-    console.log('✅ Pricing updated in blob storage');
+    // Save updated pricing using new function (ensures single file)
+    await ExportsStorage.updatePricing(updatedPricing);
     
     // Also save to database for backup/persistence
     try {
@@ -113,18 +86,15 @@ export async function PUT(request: Request) {
         convenienceFee: updatedPricing.convenienceFee,
         decorationFees: updatedPricing.decorationFees
       });
-      console.log('✅ Pricing also saved to database for backup');
     } catch (dbError) {
-      console.error('⚠️ Failed to save pricing to database:', dbError);
       // Don't fail the request if database save fails
     }
-
-    console.log('✅ Pricing updated successfully in blob storage');
     return NextResponse.json({ 
       success: true, 
       message: 'Pricing updated successfully!', 
       pricing: updatedPricing,
-      source: 'blob-storage'
+      source: 'blob-storage',
+      singleFile: true
     });
   } catch (error) {
     console.error('❌ PUT Pricing API Error:', error);
