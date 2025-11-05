@@ -162,6 +162,7 @@ export async function POST(request: NextRequest) {
       status: 'confirmed', // This is the key fix!
       bookingType: 'online',
       paymentMode: 'razorpay',
+      paymentStatus: 'paid',
       createdBy: 'Customer',
       createdAt: new Date(),
       

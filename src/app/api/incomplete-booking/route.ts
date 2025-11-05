@@ -198,13 +198,13 @@ export async function POST(request: NextRequest) {
     });
 
     if (result.success && result.booking) {
-      
+      const savedBooking = result.booking as any;
 
       return NextResponse.json({
         success: true,
         message: 'Incomplete booking saved successfully!',
-        bookingId: result.booking.id,
-        expiresAt: result.booking.expiresAt,
+        bookingId: savedBooking.id,
+        expiresAt: savedBooking.expiresAt,
         database: 'FeelME Town MongoDB',
         collection: 'incomplete_booking'
       }, { status: 200 });

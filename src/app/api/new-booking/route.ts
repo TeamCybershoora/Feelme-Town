@@ -170,6 +170,7 @@ export async function POST(request: NextRequest) {
       status: body.status || 'confirmed',
       bookingType: body.bookingType || 'online',
       paymentMode: body.paymentMode || 'pay_at_venue',
+      paymentStatus: (body.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
       createdBy: body.createdBy || 'Customer',
       isManualBooking: body.isManualBooking || false,
       createdAt: new Date(),
@@ -193,50 +194,9 @@ export async function POST(request: NextRequest) {
 
     if (result.success) {
       
-      // If this is a manual booking, write it to manual-bookings.json file
+      // Manual bookings are now only stored in database, not in JSON files
       if (completeBookingData.isManualBooking || completeBookingData.status === 'manual') {
-        try {
-          // Add new manual booking (only essential fields for Excel/PDF export)
-          const manualBookingRecord = {
-            bookingId: completeBookingData.bookingId || completeBookingData.id,
-            name: completeBookingData.name,
-            email: completeBookingData.email,
-            phone: completeBookingData.phone,
-            theaterName: completeBookingData.theaterName,
-            date: completeBookingData.date,
-            time: completeBookingData.time,
-            occasion: completeBookingData.occasion,
-            numberOfPeople: completeBookingData.numberOfPeople,
-            totalAmount: completeBookingData.totalAmount,
-            advancePayment: completeBookingData.advancePayment,
-            venuePayment: completeBookingData.venuePayment,
-            slotBookingFee: completeBookingData.pricingData?.slotBookingFee,
-            extraGuestFee: completeBookingData.pricingData?.extraGuestFee,
-            extraGuestsCount: completeBookingData.extraGuestsCount,
-            extraGuestCharges: completeBookingData.extraGuestCharges,
-            theaterBasePrice: completeBookingData.pricingData?.theaterBasePrice,
-            convenienceFee: completeBookingData.pricingData?.convenienceFee,
-            status: completeBookingData.status,
-            bookingType: completeBookingData.bookingType,
-            paymentMode: completeBookingData.paymentMode,
-            createdBy: {
-              type: completeBookingData.createdBy?.type,
-              staffId: completeBookingData.createdBy?.staffId,
-              staffName: completeBookingData.createdBy?.staffName,
-              adminName: completeBookingData.createdBy?.adminName
-            },
-            createdAt: completeBookingData.createdAt,
-            isManualBooking: true
-          };
-          const manual = await ExportsStorage.readManual('manual-bookings.json');
-          manual.records.push(manualBookingRecord);
-          manual.total = manual.records.length;
-          manual.generatedAt = new Date().toISOString();
-          await ExportsStorage.writeManual('manual-bookings.json', manual);
-          console.log('✅ Manual booking written to manual-bookings.json:', completeBookingData.bookingId);
-        } catch (jsonError) {
-          console.error('❌ Failed to write manual booking to JSON file:', jsonError);
-        }
+        console.log('✅ Manual booking saved to database only (no JSON file):', completeBookingData.bookingId);
       }
       
       // Sync Excel records after new booking

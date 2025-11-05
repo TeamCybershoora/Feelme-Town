@@ -4,6 +4,8 @@ import "./globals.css";
 import LoadingWrapper from "@/components/LoadingWrapper";
 import AdminLayoutWrapper from "@/components/AdminLayoutWrapper";
 
+// Initialize auto-cleanup scheduler (node-cron based)
+import '@/lib/background-scheduler';
 
 // MongoDB TTL indexes handle automatic deletion now
 

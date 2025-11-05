@@ -14,8 +14,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get all bookings from main booking collection
-    const result = await database.getAllBookings();
+    // Use optimized function to get only bookings for specific date and theater
+    const result = await (database as any).getBookingsByDateAndTheater(date, theaterName || undefined);
     
     if (!result.success) {
       return NextResponse.json(
@@ -26,37 +26,24 @@ export async function GET(request: NextRequest) {
 
     const allBookings = result.bookings || [];
     
-    // Also get incomplete bookings (they might be temporarily blocking slots)
-    const incompleteResult = await database.getAllIncompleteBookings();
+    // Also get incomplete bookings for the same date (optimized query)
+    const incompleteResult = await (database as any).getIncompleteBookingsByDateAndTheater(date, theaterName || undefined);
     const incompleteBookings = incompleteResult.success ? incompleteResult.incompleteBookings || [] : [];
 
-    // Combine all bookings (main + incomplete)
+    // Combine bookings (main + incomplete)
     const combinedBookings = [...allBookings, ...incompleteBookings];
 
-    // Filter bookings for the specific date and theater
+    const allowedStatuses = new Set(['completed', 'pending', 'manual', 'confirmed']);
+
+    // Filter by status
     const bookedSlots = combinedBookings.filter((booking) => {
       const bookingData = booking as Record<string, unknown>;
-      const matchesDate = bookingData.date === date;
-      const matchesStatus = ['completed', 'pending', 'incomplete', 'manual', 'confirmed'].includes(bookingData.status as string);
-      const matchesTheater = !theaterName || bookingData.theaterName === theaterName;
-      
-      // Debug log for each booking being checked
-      if (matchesDate && matchesTheater) {
-        
-      }
-      
-      return matchesDate && matchesStatus && matchesTheater;
+      const status = String(bookingData.status || '').toLowerCase();
+      return allowedStatuses.has(status);
     });
 
     // Extract time slots from booked slots
     const bookedTimeSlots = bookedSlots.map((booking) => (booking as Record<string, unknown>).time);
-
-    
-
-    // Debug: Show exact time format from database
-    if (bookedTimeSlots.length > 0) {
-      
-    }
 
     return NextResponse.json({
       success: true,
@@ -65,7 +52,7 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
-    
+    console.error('❌ Error in booked-slots API:', error);
     return NextResponse.json(
       { success: false, error: 'Failed to fetch booked slots' },
       { status: 500 }

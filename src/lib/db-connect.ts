@@ -71,6 +71,9 @@ const SETTINGS_COLLECTION_NAME = 'settings';
 const COUNTERS_COLLECTION_NAME = 'counters';
 const TIME_SLOTS_COLLECTION_NAME = 'time_slots';
 const FAQ_COLLECTION_NAME = 'faqs';
+const PRICING_COLLECTION_NAME = 'pricing';
+const CANCEL_REASONS_COLLECTION_NAME = 'cancel_reasons';
+const TRUSTED_CUSTOMERS_COLLECTION_NAME = 'trusted_customers';
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
@@ -486,7 +489,8 @@ const saveBooking = async (bookingData: BookingData) => {
       ...bookingData,
       bookingId: customBookingId,
       createdAt: new Date(),
-      status: bookingData.status || 'completed' // Use provided status or default to completed
+      status: bookingData.status || 'completed',
+      paymentStatus: (bookingData as any).paymentStatus || 'unpaid'
     };
     
     // Compress the booking data to save storage space
@@ -509,6 +513,7 @@ const saveBooking = async (bookingData: BookingData) => {
       time: bookingData.time,
       occasion: bookingData.occasion,
       totalAmount: bookingData.totalAmount,
+      paymentStatus: (bookingData as any).paymentStatus || 'unpaid',
       // Dynamic occasion-specific names for easy querying
       occasionPersonName: await getOccasionPersonName(bookingData),
       // Dynamic occasion-specific fields based on database configuration
@@ -524,7 +529,8 @@ const saveBooking = async (bookingData: BookingData) => {
       createdBy: bookingData.createdBy || 'Customer',
       staffId: bookingData.staffId || null,
       staffName: bookingData.staffName || null,
-      notes: bookingData.notes || ''
+      notes: bookingData.notes || '',
+      slotBookingFee: (bookingData as any)?.slotBookingFee ?? bookingData.pricingData?.slotBookingFee ?? bookingData.advancePayment ?? 0
     };
     
     // Get collection
@@ -630,10 +636,11 @@ const saveManualBooking = async (bookingData: BookingData) => {
       ...bookingData,
       bookingId: customBookingId,
       createdAt: new Date(),
-      status: bookingData.status || 'completed',
+      status: bookingData.status || 'manual', // Keep manual booking status as 'manual'
       isManualBooking: true,
       bookingType: 'Manual',
-      createdBy: 'Admin'
+      createdBy: 'Admin',
+      paymentStatus: (bookingData as any).paymentStatus || 'unpaid'
     };
     
     // Compress the booking data to save storage space
@@ -654,6 +661,7 @@ const saveManualBooking = async (bookingData: BookingData) => {
       time: booking.time,
       occasion: booking.occasion,
       totalAmount: booking.totalAmount,
+      paymentStatus: (booking as any).paymentStatus || 'unpaid',
       // Dynamic occasion-specific name for easy querying
       occasionPersonName: await getOccasionPersonName(booking),
       // Dynamic occasion-specific fields based on database configuration
@@ -672,12 +680,22 @@ const saveManualBooking = async (bookingData: BookingData) => {
       notes: booking.notes || ''
     };
     
-    // Save to manual_booking collection
+    // Save to both manual_booking collection AND main booking collection
     if (!db) {
       throw new Error('Database not connected');
     }
-    const collection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
-    const result = await collection.insertOne(compressedBooking);
+    
+    // Save to manual_booking collection (for manual booking specific queries)
+    const manualCollection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
+    const manualResult = await manualCollection.insertOne(compressedBooking);
+    
+    // Also save to main booking collection (for unified auto-cleanup processing)
+    const mainCollection = db.collection(COLLECTION_NAME);
+    const result = await mainCollection.insertOne({
+      ...compressedBooking,
+      _id: new ObjectId(), // Generate new ID for main collection
+      sourceCollection: 'manual_booking' // Track that this came from manual booking
+    });
     
     console.log('✅ Manual booking saved to FeelME Town database:', {
       id: customBookingId,
@@ -784,13 +802,80 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
     }
     
     console.log('💾 Saving incomplete booking to FeelME Town MongoDB database...');
+ 
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
     
-    // Generate custom incomplete booking ID
-    const customBookingId = await generateIncompleteBookingId();
-    
-    // Set expiry time to 12 hours from now
     const now = new Date();
     const expiresAt = new Date(now.getTime() + (12 * 60 * 60 * 1000));
+    
+    const matchFilter: Record<string, unknown> = { status: 'incomplete' };
+ 
+    if ('bookingId' in bookingData && bookingData.bookingId) {
+      matchFilter.bookingId = bookingData.bookingId;
+    }
+ 
+    if (bookingData.email) {
+      matchFilter.email = bookingData.email;
+    }
+ 
+    const potentialMatchKeys: Array<keyof typeof bookingData> = ['theaterName', 'date', 'time'];
+    potentialMatchKeys.forEach((key) => {
+      const value = bookingData[key];
+      if (value !== undefined && value !== null && value !== '') {
+        matchFilter[key as string] = value;
+      }
+    });
+ 
+    const existingBooking = await collection.findOne(matchFilter);
+ 
+    if (existingBooking) {
+      const updatePayload: Record<string, unknown> = {
+        expiresAt,
+        status: 'incomplete',
+        updatedAt: now,
+        paymentStatus: (bookingData as any)?.paymentStatus || existingBooking.paymentStatus || 'unpaid'
+      };
+ 
+      Object.entries(bookingData).forEach(([key, value]) => {
+        if (value !== undefined) {
+          updatePayload[key] = value;
+        }
+      });
+ 
+      const incomingBookingId = ('bookingId' in bookingData && bookingData.bookingId) ? bookingData.bookingId : undefined;
+      updatePayload.bookingId = existingBooking.bookingId || incomingBookingId || existingBooking.id;
+ 
+      await collection.updateOne({ _id: existingBooking._id }, { $set: updatePayload });
+ 
+      const mergedBooking = {
+        ...existingBooking,
+        ...updatePayload
+      };
+ 
+      console.log('ℹ️ Incomplete booking already existed. Updated existing record instead of inserting a duplicate.', {
+        bookingId: mergedBooking.bookingId,
+        mongoId: existingBooking._id,
+        customerEmail: mergedBooking.email,
+        expiresAt: mergedBooking.expiresAt
+      });
+ 
+      return {
+        success: true,
+        message: 'Incomplete booking already existed. Updated existing record.',
+        booking: {
+          id: mergedBooking.bookingId,
+          mongoId: existingBooking._id,
+          ...mergedBooking
+        }
+      };
+    }
+ 
+    // Generate custom incomplete booking ID
+    const incomingBookingId = ('bookingId' in bookingData && bookingData.bookingId) ? bookingData.bookingId : undefined;
+    const customBookingId = incomingBookingId || await generateIncompleteBookingId();
     
     // Add timestamp, status, custom booking ID, and expiry
     const incompleteBooking = {
@@ -798,14 +883,9 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
       bookingId: customBookingId,
       createdAt: bookingData.createdAt || now, // Use booking date if provided, otherwise current time
       expiresAt: expiresAt,
-      status: 'incomplete'
+      status: 'incomplete',
+      paymentStatus: (bookingData as any)?.paymentStatus || 'unpaid'
     };
-    
-    // Get collection
-    if (!db) {
-      throw new Error('Database not connected');
-    }
-    const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
     
     // Insert incomplete booking into MongoDB
     const result = await collection.insertOne(incompleteBooking);
@@ -1422,6 +1502,20 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
     } else {
       updateData.numberOfPeople = originalBooking.numberOfPeople;
     }
+    if (bookingData.paymentStatus !== undefined) {
+      updateData.paymentStatus = bookingData.paymentStatus;
+    } else {
+      updateData.paymentStatus = originalBooking.paymentStatus || 'unpaid';
+    }
+    if (bookingData.venuePaymentMethod !== undefined || bookingData.paymentMethod !== undefined) {
+      updateData.venuePaymentMethod = bookingData.venuePaymentMethod ?? bookingData.paymentMethod;
+      updateData.paymentMethod = bookingData.paymentMethod ?? bookingData.venuePaymentMethod ?? updateData.paymentMethod;
+    } else if ((originalBooking as any).venuePaymentMethod !== undefined) {
+      updateData.venuePaymentMethod = (originalBooking as any).venuePaymentMethod;
+      if ((originalBooking as any).paymentMethod !== undefined) {
+        updateData.paymentMethod = (originalBooking as any).paymentMethod;
+      }
+    }
     
     // Try to update by ObjectId first, then by custom bookingId
     let updateResult;
@@ -1611,7 +1705,7 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
     });
     
     // Create update object with compressed data
-    const updateData = {
+    const updateData: any = {
       compressedData: compressedData,
       updatedAt: new Date(),
       // Keep some basic fields uncompressed for quick queries
@@ -1622,7 +1716,12 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
       date: bookingData.date || (originalBooking as any).date,
       time: bookingData.time || (originalBooking as any).time,
       occasion: bookingData.occasion || (originalBooking as any).occasion,
-      totalAmount: bookingData.amount || bookingData.totalAmount || (originalBooking as any).totalAmount
+      totalAmount: bookingData.amount || bookingData.totalAmount || (originalBooking as any).totalAmount,
+      paymentStatus: bookingData.paymentStatus !== undefined
+        ? bookingData.paymentStatus
+        : (originalBooking as any).paymentStatus || 'unpaid',
+      venuePaymentMethod: bookingData.venuePaymentMethod ?? bookingData.paymentMethod ?? (originalBooking as any).venuePaymentMethod ?? (originalBooking as any).paymentMethod ?? null,
+      paymentMethod: bookingData.paymentMethod ?? bookingData.venuePaymentMethod ?? (originalBooking as any).paymentMethod ?? (originalBooking as any).venuePaymentMethod ?? null
     };
     
     // Try to update by ObjectId first, then by custom bookingId
@@ -1780,6 +1879,9 @@ const updateIncompleteBooking = async (bookingId: string, bookingData: Record<st
     }
     if (bookingData.status !== undefined) {
       updateData.status = bookingData.status;
+    }
+    if (bookingData.paymentStatus !== undefined) {
+      updateData.paymentStatus = bookingData.paymentStatus;
     }
     
     // Try to update by ObjectId first, then by custom bookingId
@@ -2626,7 +2728,9 @@ const saveTheater = async (theaterData: any) => {
       price: theaterData.price,
       capacity: theaterData.capacity,
       isActive: theaterData.isActive !== false,
-      displayOrder: typeof theaterData.displayOrder === 'number' ? theaterData.displayOrder : defaultOrder
+      displayOrder: typeof theaterData.displayOrder === 'number' ? theaterData.displayOrder : defaultOrder,
+      decorationCompulsory: theaterData.decorationCompulsory || false,
+      youtubeLink: theaterData.youtubeLink || null
       // No expiredAt field - theaters are manually deleted only
     };
     
@@ -2669,7 +2773,9 @@ const getAllTheaters = async () => {
             createdAt: theater.createdAt || decompressed.createdAt,
             updatedAt: theater.updatedAt || decompressed.updatedAt,
             isActive: theater.isActive !== false,
-            displayOrder: theater.displayOrder ?? decompressed.displayOrder ?? 9999
+            displayOrder: theater.displayOrder ?? decompressed.displayOrder ?? 9999,
+            decorationCompulsory: theater.decorationCompulsory ?? decompressed.decorationCompulsory ?? false,
+            youtubeLink: theater.youtubeLink ?? decompressed.youtubeLink
           };
           decompressedTheaters.push(mergedTheater);
         } catch (error) {
@@ -2740,24 +2846,33 @@ const updateTheater = async (theaterId: string, theaterData: any) => {
     console.log(`   New images: ${newImages.length}`, newImages);
     console.log(`   Merged images: ${mergedImages.length}`, mergedImages);
     
-    // Create updated theater data with merged images
+    // Merge existing data with new data to preserve all fields
     const updatedTheaterData = {
-      ...theaterData,
-      images: mergedImages
+      ...existingData,  // Start with existing data
+      ...theaterData,   // Override with new data
+      images: mergedImages  // Use merged images
     };
     
     const compressedData = await compressData(updatedTheaterData);
     
     const updateData: any = {
       compressedData: compressedData,
-      updatedAt: new Date(),
-      name: theaterData.name,
-      price: theaterData.price,
-      capacity: theaterData.capacity,
-      isActive: theaterData.isActive !== false
+      updatedAt: new Date()
     };
+    
+    // Only update fields that are provided
+    if (theaterData.name !== undefined) updateData.name = theaterData.name;
+    if (theaterData.price !== undefined) updateData.price = theaterData.price;
+    if (theaterData.capacity !== undefined) updateData.capacity = theaterData.capacity;
+    if (theaterData.isActive !== undefined) updateData.isActive = theaterData.isActive;
     if (typeof theaterData.displayOrder === 'number') {
       updateData.displayOrder = theaterData.displayOrder;
+    }
+    if (theaterData.decorationCompulsory !== undefined) {
+      updateData.decorationCompulsory = theaterData.decorationCompulsory;
+    }
+    if (theaterData.youtubeLink !== undefined) {
+      updateData.youtubeLink = theaterData.youtubeLink;
     }
     
     const result = await collection.updateOne(
@@ -3613,7 +3728,8 @@ const saveStaff = async (staffData: Record<string, unknown>) => {
     const collection = db.collection(USER_COLLECTION_NAME);
     
     const staffId = await getNextStaffId();
-    const compressedData = await compressData(staffData);
+    const normalizedAccess = staffData.bookingAccess === 'edit' ? 'edit' : 'view';
+    const compressedData = await compressData({ ...staffData, bookingAccess: normalizedAccess });
     
     const staff = {
       userId: staffId,
@@ -3627,6 +3743,7 @@ const saveStaff = async (staffData: Record<string, unknown>) => {
       role: staffData.role || 'staff',
       password: staffData.password, // Store password for staff login
       isActive: staffData.isActive !== undefined ? staffData.isActive : true,
+      bookingAccess: normalizedAccess,
       createdAt: new Date()
     };
     
@@ -3646,6 +3763,7 @@ const saveStaff = async (staffData: Record<string, unknown>) => {
         photoType: staff.photoType,
         role: staff.role,
         isActive: staff.isActive,
+        bookingAccess: staff.bookingAccess,
         createdAt: staff.createdAt
       }
     };
@@ -3680,6 +3798,9 @@ const getAllUsers = async () => {
           }
         }
         
+        const { bookingAccess: decompressedAccess, ...restDecompressed } = decompressedData || {};
+        const normalizedAccess = decompressedAccess === 'edit' || user.bookingAccess === 'edit' ? 'edit' : 'view';
+        
         return {
           _id: user._id,
           userId: user.userId,
@@ -3693,7 +3814,8 @@ const getAllUsers = async () => {
           isActive: user.isActive,
           createdAt: user.createdAt,
           password: user.password, // Include password for staff login authentication
-          ...decompressedData
+          ...restDecompressed,
+          bookingAccess: normalizedAccess
         };
       })
     );
@@ -3717,7 +3839,11 @@ const updateUser = async (id: string, userData: Record<string, unknown>) => {
     }
     
     const collection = db.collection(USER_COLLECTION_NAME);
-    const compressedData = await compressData(userData);
+    const normalizedUserData = {
+      ...userData,
+      ...(userData.bookingAccess !== undefined ? { bookingAccess: userData.bookingAccess === 'edit' ? 'edit' : 'view' } : {})
+    };
+    const compressedData = await compressData(normalizedUserData);
     
     const updateData: Record<string, unknown> = {
       compressedData: compressedData,
@@ -3733,6 +3859,7 @@ const updateUser = async (id: string, userData: Record<string, unknown>) => {
     if (userData.role !== undefined) updateData.role = userData.role;
     if (userData.isActive !== undefined) updateData.isActive = userData.isActive;
     if (userData.password !== undefined) updateData.password = userData.password;
+    if (userData.bookingAccess !== undefined) updateData.bookingAccess = userData.bookingAccess === 'edit' ? 'edit' : 'view';
     
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
@@ -3759,7 +3886,8 @@ const updateUser = async (id: string, userData: Record<string, unknown>) => {
         photoType: updatedUser?.photoType,
         role: updatedUser?.role,
         isActive: updatedUser?.isActive,
-        createdAt: updatedUser?.createdAt
+        createdAt: updatedUser?.createdAt,
+        bookingAccess: updatedUser?.bookingAccess
       }
     };
   } catch (error) {
@@ -4628,6 +4756,234 @@ const getCounterValue = async (counterType: string) => {
   }
 };
 
+// ============================================
+// TRUSTED CUSTOMERS MANAGEMENT FUNCTIONS
+// ============================================
+
+const getNextTrustedCustomerId = async (): Promise<string> => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(TRUSTED_CUSTOMERS_COLLECTION_NAME);
+    const lastCustomer = await collection
+      .find()
+      .sort({ customerId: -1 })
+      .limit(1)
+      .toArray();
+
+    if (lastCustomer.length === 0 || !lastCustomer[0].customerId) {
+      return 'TC0001';
+    }
+
+    const lastId = String(lastCustomer[0].customerId);
+    const numericPart = parseInt(lastId.replace(/\D/g, ''), 10);
+    const nextNumber = Number.isNaN(numericPart) ? 1 : numericPart + 1;
+
+    return `TC${nextNumber.toString().padStart(4, '0')}`;
+  } catch (error) {
+    console.error('❌ Error generating trusted customer ID:', error);
+    return 'TC0001';
+  }
+};
+
+const saveTrustedCustomer = async (customerData: Record<string, unknown>) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(TRUSTED_CUSTOMERS_COLLECTION_NAME);
+    const customerId = await getNextTrustedCustomerId();
+    const now = new Date();
+
+    const { _id: _ignored, tags, ...rest } = customerData as Record<string, unknown>;
+    const restData = rest as Record<string, any>;
+    const rawBillingPreference = restData.billingPreference;
+    delete restData.billingPreference;
+    const tagsArray = Array.isArray(tags)
+      ? tags
+      : typeof tags === 'string'
+        ? (tags as string)
+            .split(',')
+            .map(tag => tag.trim())
+            .filter(Boolean)
+        : [];
+    const billingPreference = rawBillingPreference === 'free' ? 'free' : 'paid';
+
+    const customer: Record<string, any> = {
+      _id: new ObjectId(),
+      customerId,
+      createdAt: now,
+      updatedAt: now,
+      ...restData,
+      tags: tagsArray,
+      isActive: restData.isActive !== undefined ? Boolean(restData.isActive) : true,
+      billingPreference
+    };
+
+    if (typeof customer.name === 'string') {
+      customer.name = customer.name.trim();
+    }
+    if (typeof customer.company === 'string') {
+      customer.company = customer.company.trim();
+    }
+    if (typeof customer.email === 'string') {
+      customer.email = customer.email.trim();
+    }
+    if (typeof customer.phone === 'string') {
+      customer.phone = customer.phone.trim();
+    }
+
+    await collection.insertOne(customer);
+
+    console.log('🤝 Trusted customer saved to MongoDB:', customerId, customer.name || 'Unnamed customer');
+
+    return {
+      success: true,
+      customer
+    };
+  } catch (error) {
+    console.error('❌ Error saving trusted customer to MongoDB:', error);
+    return { success: false, error: 'Failed to save trusted customer' };
+  }
+};
+
+const getAllTrustedCustomers = async () => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(TRUSTED_CUSTOMERS_COLLECTION_NAME);
+    const customers = await collection.find({}).sort({ createdAt: -1 }).toArray();
+
+    console.log(`🤝 Retrieved ${customers.length} trusted customers from MongoDB`);
+
+    return customers;
+  } catch (error) {
+    console.error('❌ Error fetching trusted customers from MongoDB:', error);
+    return [];
+  }
+};
+
+const updateTrustedCustomer = async (id: string, customerData: Record<string, unknown>) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(TRUSTED_CUSTOMERS_COLLECTION_NAME);
+
+    const filter = ObjectId.isValid(id) && id.length === 24
+      ? { _id: new ObjectId(id) }
+      : { customerId: id };
+
+    const { _id: _ignored, customerId: _ignoredCustomerId, tags, ...rest } = customerData as Record<string, unknown>;
+    const restData = rest as Record<string, any>;
+    const rawBillingPreference = restData.billingPreference;
+    delete restData.billingPreference;
+    const updatePayload: Record<string, unknown> = {
+      ...restData,
+      updatedAt: new Date()
+    };
+
+    if (tags !== undefined) {
+      const tagsArray = Array.isArray(tags)
+        ? tags
+        : typeof tags === 'string'
+          ? (tags as string)
+              .split(',')
+              .map(tag => tag.trim())
+              .filter(Boolean)
+          : [];
+      updatePayload.tags = tagsArray;
+    }
+
+    if (restData.name !== undefined && typeof restData.name === 'string') {
+      updatePayload.name = (restData.name as string).trim();
+    }
+    if (restData.company !== undefined && typeof restData.company === 'string') {
+      updatePayload.company = (restData.company as string).trim();
+    }
+    if (restData.email !== undefined && typeof restData.email === 'string') {
+      updatePayload.email = (restData.email as string).trim();
+    }
+    if (restData.phone !== undefined && typeof restData.phone === 'string') {
+      updatePayload.phone = (restData.phone as string).trim();
+    }
+    if (rawBillingPreference !== undefined) {
+      updatePayload.billingPreference = rawBillingPreference === 'free' ? 'free' : 'paid';
+    }
+
+    const result = await collection.updateOne(filter, { $set: updatePayload });
+
+    if (result.matchedCount === 0) {
+      return { success: false, error: 'Trusted customer not found' };
+    }
+
+    const updatedCustomer = await collection.findOne(filter);
+
+    console.log('✅ Trusted customer updated in MongoDB:', id);
+
+    return {
+      success: true,
+      customer: updatedCustomer
+    };
+  } catch (error) {
+    console.error('❌ Error updating trusted customer in MongoDB:', error);
+    return { success: false, error: 'Failed to update trusted customer' };
+  }
+};
+
+const deleteTrustedCustomer = async (id: string) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(TRUSTED_CUSTOMERS_COLLECTION_NAME);
+
+    const filter = ObjectId.isValid(id) && id.length === 24
+      ? { _id: new ObjectId(id) }
+      : { customerId: id };
+
+    const result = await collection.deleteOne(filter);
+
+    if (result.deletedCount === 0) {
+      return { success: false, error: 'Trusted customer not found' };
+    }
+
+    console.log('🗑️ Trusted customer deleted from MongoDB:', id);
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error deleting trusted customer from MongoDB:', error);
+    return { success: false, error: 'Failed to delete trusted customer' };
+  }
+};
+
 const database = {
   connect: connectToDatabase,
   connectToDatabase: connectToDatabase,
@@ -4957,7 +5313,11 @@ const resetActions: string[] = [];
   },
   deleteFAQ: async (faqId: string) => {
     return await deleteFAQ(faqId);
-  }
+  },
+  saveTrustedCustomer: saveTrustedCustomer,
+  getAllTrustedCustomers: getAllTrustedCustomers,
+  updateTrustedCustomer: updateTrustedCustomer,
+  deleteTrustedCustomer: deleteTrustedCustomer
 };
 
 // Get bookings by occasion from MongoDB database
@@ -5479,6 +5839,483 @@ const deleteExcelRecord = async function(recordId: string) {
 (database as any).getAllExcelRecords = getAllExcelRecords;
 (database as any).saveExcelRecord = saveExcelRecord;
 (database as any).deleteExcelRecord = deleteExcelRecord;
+
+// ===== PRICING COLLECTION FUNCTIONS =====
+
+// Get all pricing data from MongoDB database
+const getAllPricing = async () => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(PRICING_COLLECTION_NAME);
+    
+    // Find all pricing data
+    const pricingData = await collection.find({}).toArray();
+    
+    console.log(`📊 Retrieved ${pricingData.length} pricing records from database`);
+    
+    return {
+      success: true,
+      pricing: pricingData,
+      total: pricingData.length,
+      database: DB_NAME,
+      collection: PRICING_COLLECTION_NAME
+    };
+    
+  } catch (error) {
+    console.error('❌ Error getting pricing data from MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to get pricing data from MongoDB'
+    };
+  }
+};
+
+// Save pricing data to MongoDB database
+const savePricing = async (pricingData: any) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(PRICING_COLLECTION_NAME);
+    
+    // Add timestamp and ID
+    const pricing = {
+      ...pricingData,
+      _id: new ObjectId(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      isActive: pricingData.isActive !== undefined ? pricingData.isActive : true
+    };
+    
+    // Insert pricing data into MongoDB
+    const result = await collection.insertOne(pricing);
+    
+    console.log('💰 New pricing data saved to MongoDB:', {
+      database: DB_NAME,
+      collection: PRICING_COLLECTION_NAME,
+      mongoId: result.insertedId,
+      pricingName: pricing.name || 'Unnamed Pricing',
+      isActive: pricing.isActive
+    });
+    
+    return {
+      success: true,
+      message: 'Pricing data saved to MongoDB database',
+      pricing: {
+        id: result.insertedId,
+        ...pricing
+      }
+    };
+    
+  } catch (error) {
+    console.error('❌ Error saving pricing data to MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to save pricing data to MongoDB database'
+    };
+  }
+};
+
+// Update pricing data in MongoDB database
+const updatePricing = async (pricingId: string, pricingData: any) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(PRICING_COLLECTION_NAME);
+    
+    // Update pricing data
+    const updateData = {
+      ...pricingData,
+      updatedAt: new Date()
+    };
+    
+    let result;
+    if (ObjectId.isValid(pricingId) && pricingId.length === 24) {
+      result = await collection.updateOne(
+        { _id: new ObjectId(pricingId) },
+        { $set: updateData }
+      );
+    } else {
+      result = await collection.updateOne(
+        { pricingId: pricingId },
+        { $set: updateData }
+      );
+    }
+    
+    if (result.matchedCount === 0) {
+      return {
+        success: false,
+        error: 'Pricing data not found'
+      };
+    }
+    
+    console.log('✅ Pricing data updated in MongoDB:', pricingId);
+    
+    return {
+      success: true,
+      message: 'Pricing data updated successfully'
+    };
+    
+  } catch (error) {
+    console.error('❌ Error updating pricing data in MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to update pricing data in MongoDB'
+    };
+  }
+};
+
+// Delete pricing data from MongoDB database
+const deletePricing = async (pricingId: string) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(PRICING_COLLECTION_NAME);
+    
+    let result;
+    if (ObjectId.isValid(pricingId) && pricingId.length === 24) {
+      result = await collection.deleteOne({ _id: new ObjectId(pricingId) });
+    } else {
+      result = await collection.deleteOne({ pricingId: pricingId });
+    }
+    
+    if (result.deletedCount === 0) {
+      return {
+        success: false,
+        error: 'Pricing data not found'
+      };
+    }
+    
+    console.log('🗑️ Pricing data deleted from MongoDB:', pricingId);
+    
+    return {
+      success: true,
+      message: 'Pricing data deleted successfully'
+    };
+    
+  } catch (error) {
+    console.error('❌ Error deleting pricing data from MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to delete pricing data from MongoDB'
+    };
+  }
+};
+
+// ===== CANCEL REASONS COLLECTION FUNCTIONS =====
+
+// Get all cancel reasons from MongoDB database
+const getAllCancelReasons = async () => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(CANCEL_REASONS_COLLECTION_NAME);
+    
+    // Find all cancel reasons
+    const cancelReasons = await collection.find({}).toArray();
+    
+    console.log(`📝 Retrieved ${cancelReasons.length} cancel reasons from database`);
+    
+    return {
+      success: true,
+      cancelReasons: cancelReasons,
+      total: cancelReasons.length,
+      database: DB_NAME,
+      collection: CANCEL_REASONS_COLLECTION_NAME
+    };
+    
+  } catch (error) {
+    console.error('❌ Error getting cancel reasons from MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to get cancel reasons from MongoDB'
+    };
+  }
+};
+
+// Save cancel reason to MongoDB database
+const saveCancelReason = async (cancelReasonData: any) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(CANCEL_REASONS_COLLECTION_NAME);
+    
+    // Add timestamp and ID
+    const cancelReason = {
+      ...cancelReasonData,
+      _id: new ObjectId(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      isActive: cancelReasonData.isActive !== undefined ? cancelReasonData.isActive : true
+    };
+    
+    // Insert cancel reason into MongoDB
+    const result = await collection.insertOne(cancelReason);
+    
+    console.log('📝 New cancel reason saved to MongoDB:', {
+      database: DB_NAME,
+      collection: CANCEL_REASONS_COLLECTION_NAME,
+      mongoId: result.insertedId,
+      reason: cancelReason.reason || 'Unnamed Reason',
+      isActive: cancelReason.isActive
+    });
+    
+    return {
+      success: true,
+      message: 'Cancel reason saved to MongoDB database',
+      cancelReason: {
+        id: result.insertedId,
+        ...cancelReason
+      }
+    };
+    
+  } catch (error) {
+    console.error('❌ Error saving cancel reason to MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to save cancel reason to MongoDB database'
+    };
+  }
+};
+
+// Update cancel reason in MongoDB database
+const updateCancelReason = async (reasonId: string, cancelReasonData: any) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(CANCEL_REASONS_COLLECTION_NAME);
+    
+    // Update cancel reason data
+    const updateData = {
+      ...cancelReasonData,
+      updatedAt: new Date()
+    };
+    
+    let result;
+    if (ObjectId.isValid(reasonId) && reasonId.length === 24) {
+      result = await collection.updateOne(
+        { _id: new ObjectId(reasonId) },
+        { $set: updateData }
+      );
+    } else {
+      result = await collection.updateOne(
+        { reasonId: reasonId },
+        { $set: updateData }
+      );
+    }
+    
+    if (result.matchedCount === 0) {
+      return {
+        success: false,
+        error: 'Cancel reason not found'
+      };
+    }
+    
+    console.log('✅ Cancel reason updated in MongoDB:', reasonId);
+    
+    return {
+      success: true,
+      message: 'Cancel reason updated successfully'
+    };
+    
+  } catch (error) {
+    console.error('❌ Error updating cancel reason in MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to update cancel reason in MongoDB'
+    };
+  }
+};
+
+// Delete cancel reason from MongoDB database
+const deleteCancelReason = async (reasonId: string) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(CANCEL_REASONS_COLLECTION_NAME);
+    
+    let result;
+    if (ObjectId.isValid(reasonId) && reasonId.length === 24) {
+      result = await collection.deleteOne({ _id: new ObjectId(reasonId) });
+    } else {
+      result = await collection.deleteOne({ reasonId: reasonId });
+    }
+    
+    if (result.deletedCount === 0) {
+      return {
+        success: false,
+        error: 'Cancel reason not found'
+      };
+    }
+    
+    console.log('🗑️ Cancel reason deleted from MongoDB:', reasonId);
+    
+    return {
+      success: true,
+      message: 'Cancel reason deleted successfully'
+    };
+    
+  } catch (error) {
+    console.error('❌ Error deleting cancel reason from MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to delete cancel reason from MongoDB'
+    };
+  }
+};
+
+// Get bookings by date and theater (optimized for booked-slots API)
+const getBookingsByDateAndTheater = async (date: string, theaterName?: string) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(COLLECTION_NAME);
+    
+    // Build query filter
+    const query: any = { date };
+    if (theaterName) {
+      query.theaterName = theaterName;
+    }
+    
+    // Only fetch bookings for the specific date (and theater if provided)
+    const bookings = await collection.find(query).toArray();
+    
+    // Decompress booking data
+    const decompressedBookings = [];
+    for (const booking of bookings) {
+      if (booking.compressedData) {
+        try {
+          const decompressed: any = await decompressData(booking.compressedData);
+          const mergedBooking = {
+            ...decompressed,
+            _id: booking._id,
+            bookingId: booking.bookingId || decompressed.bookingId,
+            status: booking.status || decompressed.status,
+            date: booking.date || decompressed.date,
+            time: booking.time || decompressed.time,
+            theaterName: booking.theaterName || decompressed.theaterName || decompressed.theater
+          };
+          decompressedBookings.push(mergedBooking);
+        } catch (error) {
+          console.error('❌ Error decompressing booking:', booking.bookingId, error);
+          decompressedBookings.push(booking);
+        }
+      } else {
+        decompressedBookings.push(booking);
+      }
+    }
+    
+    return {
+      success: true,
+      bookings: decompressedBookings,
+      total: decompressedBookings.length
+    };
+    
+  } catch (error) {
+    console.error('❌ Error getting bookings by date and theater:', error);
+    return {
+      success: false,
+      error: 'Failed to get bookings',
+      bookings: []
+    };
+  }
+};
+
+// Add Pricing and Cancel Reasons functions to database object
+(database as any).getAllPricing = getAllPricing;
+(database as any).savePricing = savePricing;
+(database as any).updatePricing = updatePricing;
+(database as any).deletePricing = deletePricing;
+
+(database as any).getAllCancelReasons = getAllCancelReasons;
+(database as any).saveCancelReason = saveCancelReason;
+(database as any).updateCancelReason = updateCancelReason;
+(database as any).deleteCancelReason = deleteCancelReason;
+
+// Get incomplete bookings by date and theater (optimized)
+const getIncompleteBookingsByDateAndTheater = async (date: string, theaterName?: string) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
+    
+    // Build query filter
+    const query: any = { date };
+    if (theaterName) {
+      query.theaterName = theaterName;
+    }
+    
+    // Only fetch incomplete bookings for the specific date (and theater if provided)
+    const incompleteBookings = await collection.find(query).toArray();
+    
+    return {
+      success: true,
+      incompleteBookings,
+      total: incompleteBookings.length
+    };
+    
+  } catch (error) {
+    console.error('❌ Error getting incomplete bookings by date and theater:', error);
+    return {
+      success: false,
+      error: 'Failed to get incomplete bookings',
+      incompleteBookings: []
+    };
+  }
+};
+
+(database as any).getBookingsByDateAndTheater = getBookingsByDateAndTheater;
+(database as any).getIncompleteBookingsByDateAndTheater = getIncompleteBookingsByDateAndTheater;
 
 // Functions are now part of database object definition above
 

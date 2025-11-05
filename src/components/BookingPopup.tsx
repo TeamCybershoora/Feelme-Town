@@ -10,6 +10,7 @@ import { useDatePicker } from '@/contexts/DatePickerContext';
 import GlobalDatePicker from './GlobalDatePicker';
 import MoviesModal from './MoviesModal';
 import { useToast } from '@/hooks/useToast';
+import Toast from './Toast';
 
 declare global {
   interface Window {
@@ -80,7 +81,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     // Date change tracking
   }, [selectedDate]);
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions'>('Overview');
+  const [activeTab, setActiveTab] = useState<string>('Overview');
   const [isLoaded, setIsLoaded] = useState(false);
   const [isBookingSuccessful, setIsBookingSuccessful] = useState(false);
   const [bookingResult, setBookingResult] = useState<{ success: boolean; message: string; bookingId?: string } | null>(null);
@@ -101,7 +102,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [realTheaterData, setRealTheaterData] = useState<any[]>([]);
   const [showEditRequestPopup, setShowEditRequestPopup] = useState(false);
-  const { showSuccess, showError } = useToast();
+  const { showSuccess, showError, toasts, removeToast } = useToast();
   const [isSendingEditRequest, setIsSendingEditRequest] = useState(false);
 
   const [formData, setFormData] = useState<BookingForm>({
@@ -134,22 +135,29 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   useEffect(() => {
     const fetchPricingData = async () => {
       try {
-        const response = await fetch('/api/pricing');
+        console.log('💰 BookingPopup: Fetching pricing from /api/pricing...');
+        const response = await fetch('/api/pricing', { cache: 'no-store' });
+        console.log('💰 BookingPopup: Response status:', response.status);
+        
         const data = await response.json();
+        console.log('💰 BookingPopup: API response:', data);
         
         if (data.success && data.pricing) {
+          console.log('✅ BookingPopup: Setting pricing data:', data.pricing);
           setPricingData(data.pricing);
           setPricingLoaded(true);
         } else {
-          console.error('Failed to fetch pricing data:', data.error);
+          console.error('❌ BookingPopup: Failed to fetch pricing data:', data.error);
+          console.error('❌ BookingPopup: Full response:', data);
           setPricingLoaded(false);
         }
       } catch (error) {
-        console.error('Error fetching pricing data:', error);
+        console.error('❌ BookingPopup: Error fetching pricing data:', error);
       }
     };
 
     if (isOpen) {
+      console.log('💰 BookingPopup: Popup opened, triggering pricing fetch');
       fetchPricingData();
     }
   }, [isOpen]);
@@ -232,6 +240,14 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       return false;
     }
 
+    // Validate decoration selection
+    if (!selectedServices['__decoration__']) {
+      setValidationErrorName('Decoration Selection Required');
+      setValidationMessage('Please choose whether you want decoration (Yes or No) to continue.');
+      setShowValidationPopup(true);
+      return false;
+    }
+
     // Validate dynamic occasion required fields
     if (selectedOccasionData && selectedOccasionData.requiredFields) {
       for (const fieldKey of selectedOccasionData.requiredFields) {
@@ -251,30 +267,43 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     // Cakes validation is now handled by decoration dropdown
     if ((formData.wantDecorItems === 'Yes' || formData.wantGifts === 'Yes') && formData.selectedCakes.length === 0) {
       setValidationErrorName('Cake Selection Required');
-      setValidationMessage('Cakes are automatically included with decoration & gifts. Please select cake items.');
+      setValidationMessage('Cakes are automatically included with decoration & gifts. Please select cake items or click "Skip" to skip this service.');
       setShowValidationPopup(true);
       return false;
     }
 
     if (formData.wantDecorItems === 'Yes' && formData.selectedDecorItems.length === 0) {
       setValidationErrorName('Decoration Items Selection Required');
-      setValidationMessage('You selected "Yes" for decoration items. Please select at least one decoration item to continue.');
+      setValidationMessage('You selected "Yes" for decoration items. Please select at least one decoration item or click "Skip" to skip this service.');
       setShowValidationPopup(true);
       return false;
     }
 
     if (formData.wantGifts === 'Yes' && formData.selectedGifts.length === 0) {
       setValidationErrorName('Gift Items Selection Required');
-      setValidationMessage('You selected "Yes" for gift items but didn&apos;t choose any gift items. Please select gift items or change to "No".');
+      setValidationMessage('You selected "Yes" for gift items but didn&apos;t choose any gift items. Please select gift items or click "Skip" to skip this service.');
       setShowValidationPopup(true);
       return false;
     }
 
     if (formData.wantMovies === 'Yes' && formData.selectedMovies.length === 0) {
       setValidationErrorName('Movie Selection Required');
-      setValidationMessage('You selected "Yes" for movies but didn&apos;t choose any movies. Please select movies or change to "No".');
+      setValidationMessage('You selected "Yes" for movies but didn&apos;t choose any movies. Please select movies or click "Skip" to skip this service.');
       setShowValidationPopup(true);
       return false;
+    }
+
+    // Validate dynamic services - check if "Yes" but no items selected
+    for (const service of allServices) {
+      if (selectedServices[service.name] === 'Yes') {
+        const serviceItems = selectedServiceItems[service.name] || [];
+        if (serviceItems.length === 0) {
+          setValidationErrorName(`${service.name} Selection Required`);
+          setValidationMessage(`You selected "Yes" for ${service.name} but didn't choose any items. Please select at least one item or click "Skip" to skip this service.`);
+          setShowValidationPopup(true);
+          return false;
+        }
+      }
     }
 
     // Check terms agreement
@@ -875,28 +904,6 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     }
   }, [isOpen]);
 
-
-  // Dynamic tabs based on selections
-  const getAvailableTabs = () => {
-    const availableTabs: ('Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions')[] = ['Overview', 'Occasion'];
-
-    // Cakes tab is now controlled by decoration dropdown
-    if (formData.wantDecorItems === 'Yes' || formData.wantGifts === 'Yes') {
-      availableTabs.push('Cakes');
-    }
-    if (formData.wantDecorItems === 'Yes') {
-      availableTabs.push('Decor Items');
-    }
-    if (formData.wantGifts === 'Yes') {
-      availableTabs.push('Gifts Items');
-    }
-
-    // Always add Terms & Conditions as the last tab
-    availableTabs.push('Terms & Conditions');
-
-    return availableTabs;
-  };
-
   // Auto-close success popup after 2 seconds if user doesn't interact
   useEffect(() => {
     if (isBookingSuccessful && bookingResult) {
@@ -928,12 +935,36 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     };
   }, [isBookingSuccessful, bookingResult]);
 
-  const tabs = getAvailableTabs();
-
   // State for occasions from database (dynamic)
   const [occasionOptions, setOccasionOptions] = useState<OccasionOption[]>([]);
   const [isLoadingOccasions, setIsLoadingOccasions] = useState(true);
   const [selectedOccasionData, setSelectedOccasionData] = useState<OccasionOption | null>(null);
+
+  // State for dynamic services from database
+  const [allServices, setAllServices] = useState<any[]>([]);
+  const [selectedServices, setSelectedServices] = useState<{ [serviceName: string]: 'Yes' | 'No' }>({});
+  const [selectedServiceItems, setSelectedServiceItems] = useState<{ [serviceName: string]: string[] }>({});
+
+  // Dynamic tabs based on selections
+  const getAvailableTabs = () => {
+    const availableTabs: string[] = ['Overview', 'Occasion'];
+
+    // Add dynamic service tabs based on user selection
+    allServices.forEach(service => {
+      if (selectedServices[service.name] === 'Yes') {
+        console.log(`📑 Adding tab: ${service.name}`);
+        availableTabs.push(service.name);
+      }
+    });
+
+    // Always add Terms & Conditions as the last tab
+    availableTabs.push('Terms & Conditions');
+
+    console.log('📑 Available tabs:', availableTabs);
+    return availableTabs;
+  };
+
+  const tabs = getAvailableTabs();
 
   // Fetch occasions from database
   useEffect(() => {
@@ -1048,6 +1079,26 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             return null;
           };
 
+          // Store all services for dynamic tabs (only active services)
+          const activeServices = services.filter((s: any) => s.isActive === true);
+          console.log('📦 Fetched services from database:', activeServices);
+          console.log('📦 Active service names:', activeServices.map((s: any) => s.name));
+          console.log('📦 Service items count:', activeServices.map((s: any) => ({ 
+            name: s.name, 
+            itemsCount: s.items?.length || 0,
+            includeInDecoration: s.includeInDecoration || false
+          })));
+          
+          setAllServices(activeServices);
+          
+          // Initialize selectedServices state
+          const initialSelectedServices: { [key: string]: 'Yes' | 'No' } = {};
+          activeServices.forEach((s: any) => {
+            initialSelectedServices[s.name] = 'No';
+            console.log(`📦 Initialized service: ${s.name} (includeInDecoration: ${s.includeInDecoration || false})`);
+          });
+          setSelectedServices(initialSelectedServices);
+
           const categorized: Record<'cake' | 'decor' | 'gift', any[]> = { cake: [], decor: [], gift: [] };
           services.forEach((s: any) => {
             const cat = detectCategory(s.name);
@@ -1124,6 +1175,81 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         setActiveTab('Overview');
       }
     }
+  };
+
+  // Handle service selection changes
+  const handleServiceSelection = (serviceName: string, value: 'Yes' | 'No') => {
+    console.log(`🔄 Service selection changed: ${serviceName} = ${value}`);
+    
+    setSelectedServices(prev => ({
+      ...prev,
+      [serviceName]: value
+    }));
+    
+    // Reset to Overview if current tab is being disabled
+    if (value === 'No' && activeTab === serviceName) {
+      console.log(`🔄 Resetting to Overview (service disabled)`);
+      setActiveTab('Overview');
+    }
+  };
+
+  // Handle service item selection
+  const handleServiceItemToggle = (serviceName: string, itemName: string) => {
+    // Get item price
+    const service = allServices.find(s => s.name === serviceName);
+    const item = service?.items?.find((i: any) => (i.name || i.title) === itemName);
+    const itemPrice = Number(item?.price ?? item?.cost ?? 0);
+    
+    setSelectedServiceItems(prev => {
+      const currentItems = prev[serviceName] || [];
+      const isSelected = currentItems.includes(itemName);
+      
+      // Calculate new total
+      const currentTotal = getFinalTotal();
+      const newTotal = isSelected ? currentTotal - itemPrice : currentTotal + itemPrice;
+      
+      // Show toast notifications - 2 separate toasts
+      setTimeout(() => {
+        if (isSelected) {
+          // Toast 1: Item removed with price
+          showSuccess(`${itemName} removed - ₹${itemPrice}`);
+          // Toast 2: Total amount
+          setTimeout(() => {
+            showSuccess(`Total Amount: ₹${newTotal.toFixed(2)}`);
+          }, 300);
+        } else {
+          // Toast 1: Item added with price
+          showSuccess(`${itemName} added - ₹${itemPrice}`);
+          // Toast 2: Total amount
+          setTimeout(() => {
+            showSuccess(`Total Amount: ₹${newTotal.toFixed(2)}`);
+          }, 300);
+        }
+      }, 100);
+      
+      // Scroll down to show Continue button after item selection
+      setTimeout(() => {
+        const popupContent = document.querySelector('.booking-popup-content');
+        if (popupContent) {
+          popupContent.scrollTo({ 
+            top: popupContent.scrollHeight, 
+            behavior: 'smooth' 
+          });
+        }
+      }, 200);
+      
+      return {
+        ...prev,
+        [serviceName]: isSelected
+          ? currentItems.filter(i => i !== itemName)
+          : [...currentItems, itemName]
+      };
+    });
+  };
+
+  // Check if service item is selected
+  const isServiceItemSelected = (serviceName: string, itemName: string) => {
+    return (selectedServiceItems[serviceName] || []).includes(itemName);
 
   };
 
@@ -1162,25 +1288,47 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     }
   }, [isOpen, selectedTheater, selectedDate]);
 
-  // Auto-set decoration for couple theaters (optimized)
+  // Auto-set decoration for theaters with decorationCompulsory flag
   useEffect(() => {
-    if (selectedTheater?.name && isOpen) {
-      // Check if it's a couple theater (EROS or COUPLES or FMT-Hall-1)
-      const isCoupleTheater = selectedTheater.name.includes('EROS') || 
-                             selectedTheater.name.includes('COUPLES') || 
-                             selectedTheater.name.includes('FMT-Hall-1');
+    if (selectedTheater && isOpen && realTheaterData.length > 0) {
+      // Find the theater in real database data
+      const realTheater = realTheaterData.find(theater => 
+        (selectedTheater.name && theater.name === selectedTheater.name) || 
+        (selectedTheater.id && theater.theaterId === selectedTheater.id) ||
+        (selectedTheater.name && theater.name.includes(selectedTheater.name.split(' ')[0]))
+      );
       
-      if (isCoupleTheater && formData.wantDecorItems !== 'Yes') {
-        // Auto-set decoration to Yes for couple theaters (only if not already set)
-        setFormData(prev => ({
-          ...prev,
-          wantDecorItems: 'Yes',
-          wantGifts: 'Yes',
-          wantCakes: 'Yes'
-        }));
+      // Check if decoration is compulsory for this theater (from database)
+      const isDecorationCompulsory = realTheater?.decorationCompulsory === true;
+      
+      console.log('🎨 Checking decoration compulsory:', {
+        theaterName: selectedTheater.name,
+        realTheater: realTheater?.name,
+        decorationCompulsory: realTheater?.decorationCompulsory,
+        isDecorationCompulsory
+      });
+      
+      if (isDecorationCompulsory && selectedServices['__decoration__'] !== 'Yes') {
+        // Auto-set decoration dropdown to Yes for theaters with decorationCompulsory flag
+        console.log('🎨 Auto-setting decoration to Yes for', selectedTheater.name);
+        
+        // Set decoration dropdown to Yes
+        const updatedServices: { [key: string]: 'Yes' | 'No' } = { '__decoration__': 'Yes' };
+        
+        // Auto-enable all services with includeInDecoration
+        allServices.forEach(service => {
+          if (service.includeInDecoration) {
+            updatedServices[service.name] = 'Yes';
+            console.log(`  ✅ Auto-enabled service: ${service.name}`);
+          } else {
+            updatedServices[service.name] = selectedServices[service.name] || 'No';
+          }
+        });
+        
+        setSelectedServices(updatedServices);
       }
     }
-  }, [selectedTheater, isOpen, formData.wantDecorItems]);
+  }, [selectedTheater, isOpen, realTheaterData, selectedServices, allServices]);
 
   // Auto-adjust numberOfPeople when theater changes (set to theater's minimum capacity)
   useEffect(() => {
@@ -1348,19 +1496,21 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     const extraGuestCharges = extraGuests * extraGuestFee;
     total += extraGuestCharges;
 
-    formData.selectedCakes.forEach(cakeName => {
-      const cake = cakeOptions.find(c => c.name === cakeName);
-      if (cake) total += cake.price;
-    });
+    // Add decoration fee if decoration is selected
+    if (selectedServices['__decoration__'] === 'Yes') {
+      total += pricingData.decorationFees || 0;
+    }
 
-    formData.selectedDecorItems.forEach(decorName => {
-      const decor = decorOptions.find(d => d.name === decorName);
-      if (decor) total += decor.price;
-    });
-
-    formData.selectedGifts.forEach(giftName => {
-      const gift = giftOptions.find(g => g.name === giftName);
-      if (gift) total += gift.price;
+    // Add dynamic service items costs
+    allServices.forEach(service => {
+      const serviceItems = selectedServiceItems[service.name] || [];
+      serviceItems.forEach(itemName => {
+        const item = service.items?.find((i: any) => (i.name || i.title) === itemName);
+        if (item) {
+          const itemPrice = Number(item.price ?? item.cost ?? 0);
+          total += itemPrice;
+        }
+      });
     });
 
     // Movies are free - no cost added
@@ -1489,6 +1639,140 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     return fee;
   };
 
+  // Render Booking Summary - Reusable component for all tabs
+  const renderBookingSummary = () => {
+    return (
+      <div className="booking-popup-overview-summary">
+        <div className="booking-popup-overview-summary-header">
+          <h4 className="booking-popup-overview-summary-title">Booking Summary</h4>
+          <div className="booking-popup-overview-summary-badge">Live Pricing</div>
+        </div>
+        <div className="booking-popup-overview-summary-content">
+          {/* Theatre Booking Section */}
+          <div className="booking-popup-overview-summary-section">
+            <h5 className="booking-popup-overview-summary-section-title">Theatre Booking</h5>
+            <div className="booking-popup-overview-summary-item">
+              <span>{selectedTheater ? selectedTheater.name : 'EROS Theatre'}</span>
+              <span>{selectedTheater ? selectedTheater.price : '₹1,399.00'}</span>
+            </div>
+            {(() => {
+              const capacity = getTheaterCapacity();
+              return (
+                <>
+                  <div className="booking-popup-overview-summary-item">
+                    <span>Base Guests ({capacity.min})</span>
+                    <span>Included</span>
+                  </div>
+                  {formData.numberOfPeople > capacity.min && (
+                    <div className="booking-popup-overview-summary-item">
+                      <span>Extra Guests ({formData.numberOfPeople - capacity.min} × ₹{pricingData.extraGuestFee || 0})</span>
+                      <span>₹{(formData.numberOfPeople - capacity.min) * (pricingData.extraGuestFee || 0)}</span>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+
+          {/* Divider Line - Only when movies are selected */}
+          {formData.wantMovies === 'Yes' && formData.selectedMovies.length > 0 && (
+            <div className="booking-popup-overview-summary-divider-line"></div>
+          )}
+
+          {/* Movies Section */}
+          {formData.wantMovies === 'Yes' && formData.selectedMovies.length > 0 && (
+            <div className="booking-popup-overview-summary-section">
+              <h5 className="booking-popup-overview-summary-section-title">Movies</h5>
+              <div className="booking-popup-overview-summary-item">
+                <span>{formData.selectedMovies[0]}</span>
+                <span>Free</span>
+              </div>
+            </div>
+          )}
+
+          {/* Decoration Fee Section */}
+          {selectedServices['__decoration__'] === 'Yes' && (
+            <div className="booking-popup-overview-summary-section">
+              <h5 className="booking-popup-overview-summary-section-title">Decoration</h5>
+              <div className="booking-popup-overview-summary-item">
+                <span>Decoration Fees</span>
+                <span>₹{pricingData.decorationFees || 0}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Dynamic Service Items Sections */}
+          {allServices.map((service) => {
+            const serviceItems = selectedServiceItems[service.name] || [];
+            if (selectedServices[service.name] === 'Yes' && serviceItems.length > 0) {
+              return (
+                <div key={service.serviceId || service.name} className="booking-popup-overview-summary-section">
+                  <h5 className="booking-popup-overview-summary-section-title">{service.name}</h5>
+                  {serviceItems.map((itemName) => {
+                    const item = service.items?.find((i: any) => (i.name || i.title) === itemName);
+                    if (item) {
+                      const itemPrice = Number(item.price ?? item.cost ?? 0);
+                      return (
+                        <div key={itemName} className="booking-popup-overview-summary-item">
+                          <span>{itemName}</span>
+                          <span>₹{itemPrice}</span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
+                </div>
+              );
+            }
+            return null;
+          })}
+
+          {/* Totals Section */}
+          <div className="booking-popup-overview-summary-totals">
+            {/* Upper Section - Slot Booking Fee & At Venue Fee */}
+            <div className="booking-popup-overview-summary-upper">
+              <div className="booking-popup-overview-summary-item">
+                <span>Slot Booking Fee</span>
+                <span>₹{getPayableAmount().toFixed(2)}</span>
+              </div>
+              <div className="booking-popup-overview-summary-item">
+                <span>At Venue Fee</span>
+                <span>₹{(getFinalTotal() - getPayableAmount()).toFixed(2)}</span>
+              </div>
+              {appliedDiscount > 0 && (
+                <div className="booking-popup-overview-summary-item">
+                  <span>Coupon Discount</span>
+                  <span>-₹{appliedDiscount.toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Divider Line */}
+            <div className="booking-popup-overview-summary-divider-line"></div>
+
+            {/* Lower Section - Pay Now & At Venue */}
+            <div className="booking-popup-overview-summary-lower">
+              <div className="booking-popup-overview-summary-item">
+                <span>Subtotal</span>
+                <span>₹{calculateTotal().toFixed(2)}</span>
+              </div>
+              {appliedDiscount > 0 && (
+                <div className="booking-popup-overview-summary-item">
+                  <span>Coupon Discount</span>
+                  <span>-₹{appliedDiscount.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="booking-popup-overview-summary-item booking-popup-overview-summary-total">
+                <span>Total Amount</span>
+                <span>₹{getFinalTotal().toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const handleNextStep = async () => {
     // Check if this is the last tab (Complete Booking)
     const isLastTab = activeTab === tabs[tabs.length - 1];
@@ -1597,12 +1881,30 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           setShowValidationPopup(true);
           return;
         }
+
+        // Validate decoration selection on Overview tab
+        if (!selectedServices['__decoration__']) {
+          setValidationErrorName('Decoration Selection Required');
+          setValidationMessage('Please choose whether you want decoration (Yes or No) to continue.');
+          setShowValidationPopup(true);
+          return;
+        }
       }
 
-      if (activeTab === 'Occasion' && !formData.occasion.trim()) {
-        setValidationMessage('Please select an occasion to continue.');
-        setShowValidationPopup(true);
-        return;
+      if (activeTab === 'Occasion') {
+        if (!formData.occasion.trim()) {
+          setValidationMessage('Please select an occasion to continue.');
+          setShowValidationPopup(true);
+          return;
+        }
+        
+        // Validate decoration selection on Occasion tab
+        if (!selectedServices['__decoration__']) {
+          setValidationErrorName('Decoration Selection Required');
+          setValidationMessage('Please choose whether you want decoration (Yes or No) to continue.');
+          setShowValidationPopup(true);
+          return;
+        }
       }
 
       if (activeTab === 'Terms & Conditions' && !formData.agreeToTerms) {
@@ -1614,7 +1916,14 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
     const currentIndex = tabs.indexOf(activeTab);
     if (currentIndex < tabs.length - 1) {
-      setActiveTab(tabs[currentIndex + 1] as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions');
+      setActiveTab(tabs[currentIndex + 1]);
+      // Scroll to top of popup content
+      setTimeout(() => {
+        const popupContent = document.querySelector('.booking-popup-content');
+        if (popupContent) {
+          popupContent.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }, 100);
     } else {
       // Final step - save booking to database
       try {
@@ -1789,9 +2098,29 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   };
 
   const handleSkip = () => {
+    console.log(`⏭️ Skip button clicked for tab: ${activeTab}`);
+    
+    // Check if current tab is a dynamic service
+    const isServiceTab = allServices.some(s => s.name === activeTab);
+    
+    if (isServiceTab) {
+      console.log(`⏭️ Skipping service: ${activeTab}`);
+      // Set service to No and clear selected items
+      setSelectedServices(prev => ({ ...prev, [activeTab]: 'No' }));
+      setSelectedServiceItems(prev => ({ ...prev, [activeTab]: [] }));
+    }
+    
+    // Move to next tab
     const currentIndex = tabs.indexOf(activeTab);
     if (currentIndex < tabs.length - 1) {
-      setActiveTab(tabs[currentIndex + 1] as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions');
+      setActiveTab(tabs[currentIndex + 1]);
+      // Scroll to top of popup content
+      setTimeout(() => {
+        const popupContent = document.querySelector('.booking-popup-content');
+        if (popupContent) {
+          popupContent.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }, 100);
     }
   };
 
@@ -2121,7 +2450,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             {tabs.map((tab, index) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab as 'Overview' | 'Occasion' | 'Cakes' | 'Decor Items' | 'Gifts Items' | 'Terms & Conditions')}
+                onClick={() => setActiveTab(tab)}
                 className={`booking-popup-tab ${activeTab === tab ? 'booking-popup-tab-active' : ''}`}
               >
                 <span className="booking-popup-tab-number">{index + 1}</span>
@@ -2285,54 +2614,82 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                           </div>
                         </div>
 
-                        <div className="booking-popup-field">
-                          <label>Want Decoration & Gifts?</label>
-                          <select
-                            value={formData.wantDecorItems === 'Yes' || formData.wantGifts === 'Yes' ? 'Yes' : 'No'}
-                            onChange={(e) => {
-                              const value = e.target.value as 'Yes' | 'No';
-                              setFormData(prev => ({
-                                ...prev,
-                                wantDecorItems: value,
-                                wantGifts: value,
-                                wantCakes: value // Also control cakes selection
-                              }));
-                            }}
-                            className="booking-popup-select"
-                            disabled={(() => {
-                              // Disable for couple theaters - decoration is mandatory
-                              const isCoupleTheater = selectedTheater?.name && (
-                                selectedTheater.name.includes('EROS') || 
-                                selectedTheater.name.includes('COUPLES') || 
-                                selectedTheater.name.includes('FMT-Hall-1')
-                              );
-                              return Boolean(isCoupleTheater);
-                            })()}
-                            style={(() => {
-                              const isCoupleTheater = selectedTheater?.name && (
-                                selectedTheater.name.includes('EROS') || 
-                                selectedTheater.name.includes('COUPLES') || 
-                                selectedTheater.name.includes('FMT-Hall-1')
-                              );
-                              return isCoupleTheater ? { opacity: 0.7, cursor: 'not-allowed' } : {};
-                            })()}
-                          >
-                            <option value="No">No</option>
-                            <option value="Yes">Yes (₹{pricingData.decorationFees} Decoration)</option>
-                          </select>
-                          {(() => {
-                            const isCoupleTheater = selectedTheater?.name && (
-                              selectedTheater.name.includes('EROS') || 
-                              selectedTheater.name.includes('COUPLES') || 
-                              selectedTheater.name.includes('FMT-Hall-1')
-                            );
-                            return isCoupleTheater ? (
-                              <small style={{ color: '#10b981', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>
-                                ✨ Decoration & Gifts are included with couple theaters
-                              </small>
-                            ) : null;
-                          })()}
-                        </div>
+                        {/* Decoration Dropdown - Only show if there are services with includeInDecoration */}
+                        {allServices.some(service => service.includeInDecoration) && (() => {
+                          // Check if decoration is compulsory for selected theater
+                          const realTheater = realTheaterData.find(theater => 
+                            (selectedTheater?.name && theater.name === selectedTheater.name) || 
+                            (selectedTheater?.id && theater.theaterId === selectedTheater.id)
+                          );
+                          const isDecorationCompulsory = realTheater?.decorationCompulsory === true;
+                          
+                          return (
+                            <div className="booking-popup-field">
+                              <label>
+                                Want Decoration?
+                                {isDecorationCompulsory && <span style={{ color: '#10b981', marginLeft: '0.5rem', fontSize: '0.85rem', fontWeight: '600' }}>(Compulsory)</span>}
+                              </label>
+                              <select
+                                value={selectedServices['__decoration__'] || ''}
+                                onChange={(e) => {
+                                  const value = e.target.value as 'Yes' | 'No' | '';
+                                  if (!value) return; // Don't process empty selection
+                                  
+                                  console.log(`🎨 Decoration selection changed: ${value}`);
+                                  
+                                  // If decoration is selected, automatically enable services with includeInDecoration
+                                  if (value === 'Yes') {
+                                    const updatedServices: { [key: string]: 'Yes' | 'No' } = { '__decoration__': value };
+                                    allServices.forEach(service => {
+                                      if (service.includeInDecoration) {
+                                        updatedServices[service.name] = 'Yes';
+                                        console.log(`  ✅ Auto-enabled service: ${service.name}`);
+                                      } else {
+                                        updatedServices[service.name] = selectedServices[service.name] || 'No';
+                                      }
+                                    });
+                                    setSelectedServices(updatedServices);
+                                  } else {
+                                    // Reset all decoration-included services
+                                    const updatedServices: { [key: string]: 'Yes' | 'No' } = { '__decoration__': value };
+                                    allServices.forEach(service => {
+                                      if (service.includeInDecoration) {
+                                        updatedServices[service.name] = 'No';
+                                        console.log(`  ❌ Disabled service: ${service.name}`);
+                                      } else {
+                                        updatedServices[service.name] = selectedServices[service.name] || 'No';
+                                      }
+                                    });
+                                    setSelectedServices(updatedServices);
+                                  }
+                                }}
+                                className="booking-popup-select"
+                                disabled={isDecorationCompulsory}
+                              >
+                                <option value="" disabled>Choose</option>
+                                <option value="No">No</option>
+                                <option value="Yes">Yes (₹{pricingData.decorationFees} Decoration)</option>
+                              </select>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Dynamic Service Selection Dropdowns - Only for services NOT included in decoration */}
+                        {allServices
+                          .filter(service => !service.includeInDecoration)
+                          .map((service) => (
+                            <div key={service.serviceId || service.name} className="booking-popup-field">
+                              <label>Want {service.name}?</label>
+                              <select
+                                value={selectedServices[service.name] || 'No'}
+                                onChange={(e) => handleServiceSelection(service.name, e.target.value as 'Yes' | 'No')}
+                                className="booking-popup-select"
+                              >
+                                <option value="No">No</option>
+                                <option value="Yes">Yes</option>
+                              </select>
+                            </div>
+                          ))}
 
 
                       </div>
@@ -2361,8 +2718,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                   </div>
                                   {formData.numberOfPeople > capacity.min && (
                                     <div className="booking-popup-overview-summary-item">
-                                      <span>Extra Guests ({formData.numberOfPeople - capacity.min} × ₹{pricingData.extraGuestFee || 400})</span>
-                                      <span>₹{(formData.numberOfPeople - capacity.min) * (pricingData.extraGuestFee || 400)}</span>
+                                      <span>Extra Guests ({formData.numberOfPeople - capacity.min} × ₹{pricingData.extraGuestFee || 0})</span>
+                                      <span>₹{(formData.numberOfPeople - capacity.min) * (pricingData.extraGuestFee || 0)}</span>
                                     </div>
                                   )}
                                 </>
@@ -2386,65 +2743,69 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                             </div>
                           )}
 
-
-                          {/* Cakes Section */}
-                          {(formData.wantDecorItems === 'Yes' || formData.wantGifts === 'Yes') && formData.selectedCakes.length > 0 && (
+                          {/* Decoration Fee Section */}
+                          {selectedServices['__decoration__'] === 'Yes' && (
                             <div className="booking-popup-overview-summary-section">
-                              <h5 className="booking-popup-overview-summary-section-title">Cakes</h5>
-                              {formData.selectedCakes.map((cakeName) => {
-                                const cake = cakeOptions.find(c => c.name === cakeName);
-                                return cake ? (
-                                  <div key={cakeName} className="booking-popup-overview-summary-item">
-                                    <span>{cake.name}</span>
-                                    <span>₹{cake.price}</span>
-                                  </div>
-                                ) : null;
-                              })}
+                              <h5 className="booking-popup-overview-summary-section-title">Decoration</h5>
+                              <div className="booking-popup-overview-summary-item">
+                                <span>Decoration Fees</span>
+                                <span>₹{pricingData.decorationFees || 0}</span>
+                              </div>
                             </div>
                           )}
 
-                          {/* Decorations Section */}
-                          {formData.wantDecorItems === 'Yes' && (
-                            <div className="booking-popup-overview-summary-section">
-                              <h5 className="booking-popup-overview-summary-section-title">Decorations</h5>
-                              {pricingData.decorationFees > 0 && (
-                                <div className="booking-popup-overview-summary-item">
-                                  <span>Decoration Fees</span>
-                                  <span>₹{pricingData.decorationFees}</span>
+                          {/* Dynamic Service Items Sections */}
+                          {allServices.map((service) => {
+                            const serviceItems = selectedServiceItems[service.name] || [];
+                            if (selectedServices[service.name] === 'Yes' && serviceItems.length > 0) {
+                              return (
+                                <div key={service.serviceId || service.name} className="booking-popup-overview-summary-section">
+                                  <h5 className="booking-popup-overview-summary-section-title">{service.name}</h5>
+                                  {serviceItems.map((itemName) => {
+                                    const item = service.items?.find((i: any) => (i.name || i.title) === itemName);
+                                    if (item) {
+                                      const itemPrice = Number(item.price ?? item.cost ?? 0);
+                                      return (
+                                        <div key={itemName} className="booking-popup-overview-summary-item">
+                                          <span>{itemName}</span>
+                                          <span>₹{itemPrice}</span>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })}
                                 </div>
-                              )}
-                              {formData.selectedDecorItems.map((decorName) => {
-                                const decor = decorOptions.find(d => d.name === decorName);
-                                return decor ? (
-                                  <div key={decorName} className="booking-popup-overview-summary-item">
-                                    <span>{decor.name}</span>
-                                    <span>₹{decor.price}</span>
-                                  </div>
-                                ) : null;
-                              })}
-                            </div>
-                          )}
-
-                          {/* Gifts Section */}
-                          {formData.wantGifts === 'Yes' && formData.selectedGifts.length > 0 && (
-                            <div className="booking-popup-overview-summary-section">
-                              <h5 className="booking-popup-overview-summary-section-title">Gifts</h5>
-                              {formData.selectedGifts.map((giftName) => {
-                                const gift = giftOptions.find(g => g.name === giftName);
-                                return gift ? (
-                                  <div key={giftName} className="booking-popup-overview-summary-item">
-                                    <span>{gift.name}</span>
-                                    <span>₹{gift.price}</span>
-                                  </div>
-                                ) : null;
-                              })}
-                            </div>
-                          )}
+                              );
+                            }
+                            return null;
+                          })}
 
                           {/* Totals Section */}
                           <div className="booking-popup-overview-summary-totals">
-                            {/* Upper Section - Subtotal & Total Amount */}
+                            {/* Upper Section - Slot Booking Fee & At Venue Fee */}
                             <div className="booking-popup-overview-summary-upper">
+                              <div className="booking-popup-overview-summary-item">
+                                <span>Slot Booking Fee</span>
+                                <span>₹{getPayableAmount().toFixed(2)}</span>
+                              </div>
+                              <div className="booking-popup-overview-summary-item">
+                                <span>At Venue Fee</span>
+                                <span>₹{(getFinalTotal() - getPayableAmount()).toFixed(2)}</span>
+                              </div>
+                              {appliedDiscount > 0 && (
+                                <div className="booking-popup-overview-summary-item">
+                                  <span>Coupon Discount</span>
+                                  <span>-₹{appliedDiscount.toFixed(2)}</span>
+                                </div>
+                              )}
+                             
+                            </div>
+
+                            {/* Divider Line */}
+                            <div className="booking-popup-overview-summary-divider-line"></div>
+
+                            {/* Lower Section - Pay Now & At Venue */}
+                            <div className="booking-popup-overview-summary-lower">
                               <div className="booking-popup-overview-summary-item">
                                 <span>Subtotal</span>
                                 <span>₹{calculateTotal().toFixed(2)}</span>
@@ -2460,53 +2821,13 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                 <span>₹{getFinalTotal().toFixed(2)}</span>
                               </div>
                             </div>
-
-                            {/* Divider Line */}
-                            <div className="booking-popup-overview-summary-divider-line"></div>
-
-                            {/* Lower Section - Pay Now & At Venue */}
-                            <div className="booking-popup-overview-summary-lower">
-                              <div className="booking-popup-overview-summary-item booking-popup-overview-summary-advance">
-                                <span>Slot Booking Fee</span>
-                                <span>₹{pricingData.slotBookingFee || 10}</span>
-                              </div>
-                              {getDecorationFee() > 0 && (
-                                <>
-                                  {pricingData.decorationFees > 0 && (
-                                    <div className="booking-popup-overview-summary-item booking-popup-overview-summary-advance">
-                                      <span>Decoration Fees</span>
-                                      <span>₹{pricingData.decorationFees}</span>
-                                    </div>
-                                  )}
-                                  {(() => {
-                                    let itemsFee = 0;
-                                    formData.selectedDecorItems.forEach(decorName => {
-                                      const decor = decorOptions.find(d => d.name === decorName);
-                                      if (decor) itemsFee += decor.price;
-                                    });
-                                    return itemsFee > 0 ? (
-                                      <div className="booking-popup-overview-summary-item booking-popup-overview-summary-advance">
-                                        <span>Decoration Items</span>
-                                        <span>₹{itemsFee}</span>
-                                      </div>
-                                    ) : null;
-                                  })()}
-                                </>
-                              )}
-                              <div className="booking-popup-overview-summary-item booking-popup-overview-summary-total-advance">
-                                <span>Total Advance Payment</span>
-                                <span>₹{getPayableAmount()}</span>
-                              </div>
-                              <div className="booking-popup-overview-summary-item booking-popup-overview-summary-balance">
-                                <span>At Venue</span>
-                                <span>₹{getBalanceAmount().toFixed(2)}</span>
-                              </div>
+                             
                             </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  
                 )}
 
                 {activeTab === 'Occasion' && (
@@ -2617,101 +2938,72 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                         </div>
                       </div>
                     )}
+
+                    {/* Booking Summary on Occasion Tab */}
+                    {renderBookingSummary()}
                   </div>
                 )}
 
-                {activeTab === 'Cakes' && formData.wantCakes === 'Yes' && (
-                  <div className="booking-popup-section">
-                    <h3 className="booking-popup-section-title">
-                      <Cake className="w-5 h-5" />
-                      Delicious Cakes
-                    </h3>
-                    <div className="booking-popup-items">
-                      {cakeOptions.map((cake) => (
-                        <div
-                          key={cake.name}
-                          onClick={() => handleItemSelection('selectedCakes', cake.name)}
-                          className={`booking-popup-item ${formData.selectedCakes.includes(cake.name) ? 'selected' : ''}`}
-                        >
-                          {cake.bestseller && <div className="booking-popup-badge">Bestseller</div>}
-                          <div className="booking-popup-item-image" style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', background: '#0f0f10' }}>{renderItemImage(String(cake.image), cake.name)}</div>
-                          <div className="booking-popup-item-content">
-                            <h4>{cake.name}</h4>
-                            <div className="booking-popup-rating">
-                              <Star className="w-4 h-4" />
-                              <span>{cake.rating}</span>
+                {/* Dynamic Service Tabs */}
+                {allServices.map((service) => {
+                  if (activeTab === service.name && selectedServices[service.name] === 'Yes') {
+                    console.log(`🎨 Rendering service tab: ${service.name}`);
+                    console.log(`🎨 Service has ${service.items?.length || 0} items`);
+                    console.log(`🎨 Service items:`, service.items);
+                    
+                    return (
+                      <div key={service.serviceId || service.name} className="booking-popup-section">
+                        <h3 className="booking-popup-section-title">
+                          <Sparkles className="w-5 h-5" />
+                          {service.name}
+                        </h3>
+                        <div className="booking-popup-items">
+                          {Array.isArray(service.items) && service.items.length > 0 ? (
+                            service.items.map((item: any) => {
+                              const itemName = item.name || item.title || 'Item';
+                              const itemPrice = Number(item.price ?? item.cost ?? 0);
+                              const itemRating = Number(item.rating ?? 4.5);
+                              const itemImage = item.image || item.imageUrl || item.emoji || '🎁';
+                              const isSelected = isServiceItemSelected(service.name, itemName);
+                              
+                              console.log(`  🎁 Item: ${itemName}, Price: ₹${itemPrice}, Image: ${itemImage}`);
+                              
+                              return (
+                                <div
+                                  key={item.id || item.itemId || itemName}
+                                  onClick={() => handleServiceItemToggle(service.name, itemName)}
+                                  className={`booking-popup-item ${isSelected ? 'selected' : ''}`}
+                                >
+                                  {item.bestseller && <div className="booking-popup-badge">Bestseller</div>}
+                                  <div className="booking-popup-item-image" style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', background: '#0f0f10' }}>
+                                    {renderItemImage(String(itemImage), itemName)}
+                                  </div>
+                                  <div className="booking-popup-item-content">
+                                    <h4>{itemName}</h4>
+                                    <div className="booking-popup-rating">
+                                      <Star className="w-4 h-4" />
+                                      <span>{itemRating}</span>
+                                    </div>
+                                    <div className="booking-popup-price">₹{itemPrice}</div>
+                                  </div>
+                                  {isSelected && <Check className="w-5 h-5" />}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>
+                              <p>No items available for this service</p>
                             </div>
-                            <div className="booking-popup-price">₹{cake.price}</div>
-                          </div>
-                          {formData.selectedCakes.includes(cake.name) && <Check className="w-5 h-5" />}
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
-                {activeTab === 'Decor Items' && formData.wantDecorItems === 'Yes' && (
-                  <div className="booking-popup-section">
-                    <h3 className="booking-popup-section-title">
-                      <Sparkles className="w-5 h-5" />
-                      Decoration Items
-                    </h3>
-                    <div className="booking-popup-section-note">
-                      <p>Select at least one decoration item to continue.</p>
-                    </div>
-                    <div className="booking-popup-items">
-                      {decorOptions.map((decor) => (
-                        <div
-                          key={decor.name}
-                          onClick={() => handleItemSelection('selectedDecorItems', decor.name)}
-                          className={`booking-popup-item ${formData.selectedDecorItems.includes(decor.name) ? 'selected' : ''}`}
-                        >
-                          <div className="booking-popup-category">{decor.category}</div>
-                          <div className="booking-popup-item-image" style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', background: '#0f0f10' }}>{renderItemImage(String(decor.image), decor.name)}</div>
-                          <div className="booking-popup-item-content">
-                            <h4>{decor.name}</h4>
-                            <div className="booking-popup-rating">
-                              <Star className="w-4 h-4" />
-                              <span>{decor.rating}</span>
-                            </div>
-                            <div className="booking-popup-price">₹{decor.price}</div>
-                          </div>
-                          {formData.selectedDecorItems.includes(decor.name) && <Check className="w-5 h-5" />}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'Gifts Items' && formData.wantGifts === 'Yes' && (
-                  <div className="booking-popup-section">
-                    <h3 className="booking-popup-section-title">
-                      <Gift className="w-5 h-5" />
-                      Special Gifts
-                    </h3>
-                    <div className="booking-popup-items">
-                      {giftOptions.map((gift) => (
-                        <div
-                          key={gift.name}
-                          onClick={() => handleItemSelection('selectedGifts', gift.name)}
-                          className={`booking-popup-item ${formData.selectedGifts.includes(gift.name) ? 'selected' : ''}`}
-                        >
-                          <div className="booking-popup-category">{gift.category}</div>
-                          <div className="booking-popup-item-image" style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', background: '#0f0f10' }}>{renderItemImage(String(gift.image), gift.name)}</div>
-                          <div className="booking-popup-item-content">
-                            <h4>{gift.name}</h4>
-                            <div className="booking-popup-rating">
-                              <Star className="w-4 h-4" />
-                              <span>{gift.rating}</span>
-                            </div>
-                            <div className="booking-popup-price">₹{gift.price}</div>
-                          </div>
-                          {formData.selectedGifts.includes(gift.name) && <Check className="w-5 h-5" />}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                        {/* Booking Summary on Service Tab */}
+                        {renderBookingSummary()}
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
 
 
                 {activeTab === 'Terms & Conditions' && (
@@ -2813,41 +3105,51 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                         </label>
                       </div>
                     </div>
+
+                    {/* Booking Summary on Terms & Conditions Tab */}
+                    {renderBookingSummary()}
                   </div>
                 )}
               </div>
 
               {/* Action Buttons */}
               <div className="booking-popup-action">
-                {/* Show skip button for optional sections when no items selected */}
-                {((activeTab === 'Cakes' && formData.selectedCakes.length === 0) ||
-                  (activeTab === 'Gifts Items' && formData.selectedGifts.length === 0)) &&
-                  activeTab !== tabs[tabs.length - 1] ? (
-                  <div className="booking-popup-buttons">
-                    <button onClick={handleSkip} className="booking-popup-btn skip">
-                      <span>Skip</span>
-                    </button>
+                {/* Show skip button for service tabs when no items selected */}
+                {(() => {
+                  const isServiceTab = allServices.some(s => s.name === activeTab);
+                  const hasNoItemsSelected = isServiceTab && (!selectedServiceItems[activeTab] || selectedServiceItems[activeTab].length === 0);
+                  
+                  // Check if decoration is compulsory for this theater
+                  const realTheater = realTheaterData.find(
+                    (theater) =>
+                      (selectedTheater?.name && theater.name === selectedTheater.name) || 
+                      (selectedTheater?.id && theater.theaterId === selectedTheater.id)
+                  );
+                  const isDecorationCompulsory = realTheater?.decorationCompulsory === true;
+                  
+                  // If decoration is compulsory, don't show skip button for service tabs
+                  // Show skip button only if: service tab, no items selected, decoration NOT compulsory, not last tab
+                  if (hasNoItemsSelected && !isDecorationCompulsory && activeTab !== tabs[tabs.length - 1]) {
+                    return (
+                      <div className="booking-popup-buttons">
+                        <button onClick={handleSkip} className="booking-popup-btn skip">
+                          <span>Skip</span>
+                        </button>
+                        <button onClick={handleNextStep} className="booking-popup-btn">
+                          <span>Continue</span>
+                          <ArrowRight className="w-5 h-5" />
+                        </button>
+                      </div>
+                    );
+                  }
+                  
+                  return (
                     <button onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} className="booking-popup-btn">
                       <span>{activeTab === tabs[tabs.length - 1] ? 'Confirm Booking' : 'Continue'}</span>
                       <ArrowRight className="w-5 h-5" />
                     </button>
-                  </div>
-                ) : activeTab === 'Decor Items' && formData.selectedDecorItems.length === 0 ? (
-                  <div className="booking-popup-buttons">
-                    <button onClick={handleSkip} className="booking-popup-btn skip">
-                      <span>Skip</span>
-                    </button>
-                    <button onClick={handleNextStep} className="booking-popup-btn">
-                      <span>Continue</span>
-                      <ArrowRight className="w-5 h-5" />
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} className="booking-popup-btn">
-                    <span>{activeTab === tabs[tabs.length - 1] ? 'Confirm Booking' : 'Continue'}</span>
-                    <ArrowRight className="w-5 h-5" />
-                  </button>
-                )}
+                  );
+                })()}
               </div>
             </div>
 
@@ -3041,7 +3343,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                       `Time: ${selectedTimeSlot || 'N/A'}`
                     ].join('\n');
                     const name = formData.bookingName ? `Hi ${formData.bookingName},` : 'Hi,';
-                    const message = `${name}\nWe’d like to edit your booking.\n${details}\nPlease reply to confirm.`;
+                    const message = `${name}\nWe'd like to edit your booking.\n${details}\nPlease reply to confirm.`;
                     const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
                     window.open(whatsappUrl, '_blank');
                   }}
@@ -4874,8 +5176,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             }
 
             .booking-popup-items {
-              grid-template-columns: 1fr;
-              gap: 0.4rem;
+              grid-template-columns: repeat(2, 1fr);
+              gap: 0.5rem;
             }
 
             .booking-popup-occasion,
@@ -5977,6 +6279,30 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             }
           }
 
+          /* Toast Notifications Container */
+          .booking-popup-toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999999;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            pointer-events: none;
+          }
+
+          .booking-popup-toast-container > * {
+            pointer-events: auto;
+          }
+
+          @media (max-width: 480px) {
+            .booking-popup-toast-container {
+              top: 10px;
+              right: 10px;
+              left: 10px;
+            }
+          }
+
         `}</style>
       </div>
 
@@ -6134,6 +6460,20 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         onMovieSelect={handleMovieSelect}
         selectedMovies={formData.selectedMovies}
       />
+
+      {/* Toast Notifications */}
+      <div className="booking-popup-toast-container">
+        {toasts.map((toast) => (
+          <Toast
+            key={toast.id}
+            id={toast.id}
+            type={toast.type}
+            message={toast.message}
+            duration={toast.duration || 4000}
+            onClose={removeToast}
+          />
+        ))}
+      </div>
     </div>
   );
 

@@ -1,49 +1,55 @@
 import { NextResponse } from 'next/server';
-import { ExportsStorage } from '@/lib/exports-storage';
+import { connectToDatabase } from '@/lib/db-connect';
 
-// GET /api/cancel-reasons - Get cancel reasons (Blob-backed)
+// GET /api/cancel-reasons - Get cancel reasons from database
 export async function GET() {
   try {
-    // First try to read from blob storage
-    let cancelReasons = await ExportsStorage.readArray('cancel-reasons.json');
+    console.log('📋 Fetching cancel reasons from database...');
+    const database = await connectToDatabase();
+    
+    // Get cancel reasons from database
+    const cancelReasons = await (database as any).getAllCancelReasons();
     
     if (!cancelReasons || cancelReasons.length === 0) {
-      // If not found in blob, use default reasons and save to blob
-      console.log('🔄 Cancel reasons not found in blob, using defaults...');
+      console.log('⚠️ No cancel reasons found in database, returning defaults...');
       
-      cancelReasons = [
-        "Change of plans",
-        "Booked wrong date/time", 
-        "Found a better price",
-        "Personal emergency",
-        "Weather concerns",
-        "Transportation issues",
+      const defaultReasons = [
+        "Personal Emergency",
+        "Transportation Issue",
+        "Weather Conditions",
+        "Health Issue", 
+        "Work Commitment",
+        "Family Emergency",
         "Other"
       ];
       
-      // Save default to blob storage for future use
-      await ExportsStorage.writeArray('cancel-reasons.json', cancelReasons);
-      console.log('✅ Default cancel reasons saved to blob');
-    } else {
-      console.log('✅ Cancel reasons loaded from blob storage');
+      return NextResponse.json({ 
+        success: true, 
+        reasons: defaultReasons,
+        source: 'defaults'
+      });
     }
 
+    // Convert database format to simple array for backward compatibility
+    const reasonsList = cancelReasons.map((item: any) => item.reason);
+    
+    console.log('✅ Cancel reasons loaded from database:', reasonsList.length);
     return NextResponse.json({ 
       success: true, 
-      reasons: cancelReasons,
-      source: 'blob-storage'
+      reasons: reasonsList,
+      source: 'database'
     });
   } catch (error) {
     console.error('❌ GET Cancel Reasons API Error:', error);
     
     // Emergency fallback
     const fallbackReasons = [
-      "Change of plans",
-      "Booked wrong date/time",
-      "Found a better price", 
-      "Personal emergency",
-      "Weather concerns",
-      "Transportation issues",
+      "Personal Emergency",
+      "Transportation Issue", 
+      "Weather Conditions",
+      "Health Issue",
+      "Work Commitment",
+      "Family Emergency",
       "Other"
     ];
     
@@ -55,7 +61,7 @@ export async function GET() {
   }
 }
 
-// POST /api/cancel-reasons - Add new cancel reason (Admin only)
+// POST /api/cancel-reasons - Add new cancel reason (Admin only) - Database only
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -69,26 +75,14 @@ export async function POST(request: Request) {
     }
 
     const trimmedReason = reason.trim();
+    console.log('📝 Adding new cancel reason to database:', trimmedReason);
 
-    // Get current reasons from blob storage
-    let currentReasons = await ExportsStorage.readArray('cancel-reasons.json');
+    const database = await connectToDatabase();
     
-    if (!currentReasons || currentReasons.length === 0) {
-      // Initialize with defaults if empty
-      currentReasons = [
-        "Change of plans",
-        "Booked wrong date/time",
-        "Found a better price",
-        "Personal emergency", 
-        "Weather concerns",
-        "Transportation issues",
-        "Other"
-      ];
-    }
-
-    // Check if reason already exists (case-insensitive)
-    const reasonExists = currentReasons.some(
-      existingReason => existingReason.toLowerCase() === trimmedReason.toLowerCase()
+    // Check if reason already exists
+    const existingReasons = await (database as any).getAllCancelReasons();
+    const reasonExists = existingReasons.some(
+      (item: any) => item.reason.toLowerCase() === trimmedReason.toLowerCase()
     );
 
     if (reasonExists) {
@@ -98,24 +92,20 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
-    // Add new reason (insert before "Other" if it exists, otherwise append)
-    const otherIndex = currentReasons.findIndex(r => r.toLowerCase() === 'other');
-    if (otherIndex !== -1) {
-      currentReasons.splice(otherIndex, 0, trimmedReason);
-    } else {
-      currentReasons.push(trimmedReason);
-    }
-
-    // Save updated reasons to blob storage
-    await ExportsStorage.writeArray('cancel-reasons.json', currentReasons);
+    // Save to database
+    const result = await (database as any).saveCancelReason({
+      reason: trimmedReason,
+      category: 'General',
+      description: '',
+      isActive: true
+    });
     
-    console.log(`✅ New cancel reason added: "${trimmedReason}"`);
+    console.log(`✅ New cancel reason added to database: "${trimmedReason}"`);
     return NextResponse.json({ 
       success: true, 
       message: 'Cancel reason added successfully',
       reason: trimmedReason,
-      reasons: currentReasons,
-      source: 'blob-storage'
+      source: 'database'
     });
   } catch (error) {
     console.error('❌ POST Cancel Reasons API Error:', error);
@@ -126,61 +116,48 @@ export async function POST(request: Request) {
   }
 }
 
-// DELETE /api/cancel-reasons - Remove cancel reason (Admin only)
+// DELETE /api/cancel-reasons - Remove cancel reason (Admin only) - Database only
 export async function DELETE(request: Request) {
   try {
-    const body = await request.json();
-    const { reason } = body;
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    const reason = searchParams.get('reason');
 
-    if (!reason || typeof reason !== 'string') {
+    if (!id && !reason) {
       return NextResponse.json({ 
         success: false, 
-        error: 'Reason is required' 
+        error: 'Either id or reason is required' 
       }, { status: 400 });
     }
 
     // Protect "Other" reason from deletion
-    if (reason.toLowerCase() === 'other') {
+    if (reason && reason.toLowerCase() === 'other') {
       return NextResponse.json({ 
         success: false, 
         error: 'Cannot remove "Other" reason as it is required for the system' 
       }, { status: 403 });
     }
 
-    // Get current reasons from blob storage
-    let currentReasons = await ExportsStorage.readArray('cancel-reasons.json');
+    console.log('🗑️ Deleting cancel reason from database:', { id, reason });
+    const database = await connectToDatabase();
     
-    if (!currentReasons || currentReasons.length === 0) {
+    // Delete from database
+    const result = await (database as any).deleteCancelReason(id || reason);
+    
+    if (result.success) {
+      console.log(`✅ Cancel reason deleted from database: "${reason || id}"`);
       return NextResponse.json({ 
-        success: false, 
-        error: 'No cancel reasons found' 
-      }, { status: 404 });
-    }
-
-    // Find and remove the reason (case-insensitive)
-    const initialLength = currentReasons.length;
-    currentReasons = currentReasons.filter(
-      existingReason => existingReason.toLowerCase() !== reason.toLowerCase()
-    );
-
-    if (currentReasons.length === initialLength) {
+        success: true, 
+        message: 'Cancel reason removed successfully',
+        removedReason: reason || id,
+        source: 'database'
+      });
+    } else {
       return NextResponse.json({ 
         success: false, 
         error: 'Cancel reason not found' 
       }, { status: 404 });
     }
-
-    // Save updated reasons to blob storage
-    await ExportsStorage.writeArray('cancel-reasons.json', currentReasons);
-    
-    console.log(`✅ Cancel reason removed: "${reason}"`);
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Cancel reason removed successfully',
-      removedReason: reason,
-      reasons: currentReasons,
-      source: 'blob-storage'
-    });
   } catch (error) {
     console.error('❌ DELETE Cancel Reasons API Error:', error);
     return NextResponse.json({ 

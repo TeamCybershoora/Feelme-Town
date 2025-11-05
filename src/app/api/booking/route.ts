@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
-import { ExportsStorage } from '@/lib/exports-storage';
+import { ExportsStorage } from '@/lib/exports-storage'; // Dummy - no longer used
 
 // Helper function to get occasion specific fields with exact database field names
 async function getOccasionFields(occasionName: string, body: any) {
@@ -304,6 +304,8 @@ export async function POST(request: NextRequest) {
       totalAmount: totalAmount,
       advancePayment: advancePayment, // Amount paid now (25%)
       venuePayment: venuePayment, // Amount to be paid at venue
+      slotBookingFee: body.pricingData?.slotBookingFee ?? advancePayment,
+      paymentStatus: (body.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
       status: body.isManualBooking ? 'manual' : 'confirmed', // Booking status
       // Store pricing data used at time of booking
       pricingData: body.pricingData || {
@@ -391,36 +393,8 @@ export async function POST(request: NextRequest) {
       // Update blob storage JSON files
       try {
         if (body.isManualBooking) {
-          // Update manual-bookings.json
-          const manual = await ExportsStorage.readManual('manual-bookings.json');
-          const manualBookingRecord = {
-            id: result.booking.id,
-            bookingId: result.booking.bookingId,
-            name: result.booking.name,
-            email: result.booking.email,
-            phone: result.booking.phone,
-            theaterName: result.booking.theaterName,
-            date: result.booking.date,
-            time: result.booking.time,
-            occasion: result.booking.occasion,
-            numberOfPeople: result.booking.numberOfPeople,
-            totalAmount: result.booking.totalAmount,
-            advancePayment: result.booking.advancePayment,
-            venuePayment: result.booking.venuePayment,
-            status: result.booking.status,
-            createdAt: result.booking.createdAt,
-            staffId: result.booking.staffId,
-            staffName: result.booking.staffName,
-            createdBy: result.booking.createdBy,
-            notes: result.booking.notes,
-            ...occasionFields
-          };
-          
-          manual.records.push(manualBookingRecord);
-          manual.total = manual.records.length;
-          manual.generatedAt = new Date().toISOString();
-          await ExportsStorage.writeManual('manual-bookings.json', manual);
-          console.log('✅ Manual booking written to manual-bookings.json:', result.booking.bookingId);
+          // Manual bookings are now only stored in database, not in JSON files
+          console.log('✅ Manual booking saved to database only (no JSON file):', result.booking.bookingId);
         } else {
           // Update confirmed bookings JSON (if it exists)
           try {

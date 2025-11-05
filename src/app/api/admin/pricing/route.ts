@@ -1,103 +1,178 @@
 import { NextResponse } from 'next/server';
-import { ExportsStorage } from '@/lib/exports-storage';
 import database from '@/lib/db-connect';
 
-// GET /api/admin/pricing - Get current pricing settings (Blob-backed only)
+// GET /api/admin/pricing - Get all pricing data from database
 export async function GET() {
   try {
-    // Use the new readPricing function
-    let pricingData = await ExportsStorage.readPricing();
+    console.log('📊 Fetching pricing data from database...');
     
-    // If no pricing data exists, fetch from database and save
-    if (!pricingData || Object.keys(pricingData).length === 0) {
-      
-      try {
-        // Try to get pricing from database (system settings)
-        const systemSettings = await database.getSystemSettings();
-        
-        if (systemSettings.success && systemSettings.settings) {
-          const settings = systemSettings.settings;
-          pricingData = {
-            slotBookingFee: settings.slotBookingFee || 0,
-            extraGuestFee: settings.extraGuestFee || 0,
-            convenienceFee: settings.convenienceFee || 0,
-            decorationFees: settings.decorationFees || 0
-          };
-          
-          // Save to blob storage using new function
-          await ExportsStorage.updatePricing(pricingData);
-        } else {
-          // No default pricing - return empty if no data exists
-          pricingData = null;
-        }
-      } catch (dbError) {
-        console.error('❌ Database fetch failed, no pricing available:', dbError);
-        // No fallback - return null if database fails
-        pricingData = null;
-      }
+    // Get all pricing data from database
+    const result = await (database as any).getAllPricing();
+    
+    if (!result.success) {
+      console.error('❌ Failed to fetch pricing from database:', result.error);
+      return NextResponse.json({ 
+        success: false, 
+        error: result.error || 'Failed to fetch pricing data' 
+      }, { status: 500 });
     }
+
+    console.log(`✅ Retrieved ${result.total} pricing records from database`);
 
     return NextResponse.json({ 
       success: true, 
-      pricing: pricingData,
-      source: 'blob-storage'
+      pricing: result.pricing,
+      total: result.total,
+      source: 'database'
     });
   } catch (error) {
     console.error('❌ GET Admin Pricing API Error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to fetch pricing' }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Failed to fetch pricing data' 
+    }, { status: 500 });
   }
 }
 
-// PUT /api/admin/pricing - Update pricing settings (Blob-backed)
+// POST /api/admin/pricing - Create new pricing data
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { name, description, slotBookingFee, extraGuestFee, convenienceFee, decorationFees, isActive } = body;
+
+    if (!name) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Pricing name is required' 
+      }, { status: 400 });
+    }
+
+    console.log('💰 Creating new pricing data:', name);
+
+    // Save pricing data to database
+    const result = await (database as any).savePricing({
+      name,
+      description: description || '',
+      slotBookingFee: Number(slotBookingFee) || 0,
+      extraGuestFee: Number(extraGuestFee) || 0,
+      convenienceFee: Number(convenienceFee) || 0,
+      decorationFees: Number(decorationFees) || 0,
+      isActive: isActive !== undefined ? isActive : true
+    });
+
+    if (!result.success) {
+      console.error('❌ Failed to save pricing to database:', result.error);
+      return NextResponse.json({ 
+        success: false, 
+        error: result.error || 'Failed to save pricing data' 
+      }, { status: 500 });
+    }
+
+    console.log('✅ Pricing data saved successfully:', result.pricing.id);
+
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Pricing data created successfully!', 
+      pricing: result.pricing,
+      source: 'database'
+    });
+  } catch (error) {
+    console.error('❌ POST Pricing API Error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Failed to create pricing data' 
+    }, { status: 500 });
+  }
+}
+
+// PUT /api/admin/pricing - Update pricing data
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { slotBookingFee, extraGuestFee, convenienceFee, decorationFees } = body;
+    const { id, name, description, slotBookingFee, extraGuestFee, convenienceFee, decorationFees, isActive } = body;
 
-    if (slotBookingFee === undefined && extraGuestFee === undefined && convenienceFee === undefined && decorationFees === undefined) {
-      return NextResponse.json({ success: false, error: 'At least one pricing field is required' }, { status: 400 });
+    if (!id) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Pricing ID is required for update' 
+      }, { status: 400 });
     }
 
-    // Read current pricing data using new function
-    let currentPricing = await ExportsStorage.readPricing();
-    
-    if (!currentPricing || Object.keys(currentPricing).length === 0) {
-      // If no pricing exists, start with empty object
-      currentPricing = {};
-    }
+    console.log('📝 Updating pricing data:', id);
 
-    // Update only the provided fields
-    const updatedPricing = {
-      ...currentPricing,
+    // Update pricing data in database
+    const result = await (database as any).updatePricing(id, {
+      ...(name && { name }),
+      ...(description !== undefined && { description }),
       ...(slotBookingFee !== undefined && { slotBookingFee: Number(slotBookingFee) }),
       ...(extraGuestFee !== undefined && { extraGuestFee: Number(extraGuestFee) }),
       ...(convenienceFee !== undefined && { convenienceFee: Number(convenienceFee) }),
-      ...(decorationFees !== undefined && { decorationFees: Number(decorationFees) })
-    };
+      ...(decorationFees !== undefined && { decorationFees: Number(decorationFees) }),
+      ...(isActive !== undefined && { isActive })
+    });
 
-    // Save updated pricing using new function (ensures single file)
-    await ExportsStorage.updatePricing(updatedPricing);
-    
-    // Also save to database for backup/persistence
-    try {
-      await database.saveSettings({
-        slotBookingFee: updatedPricing.slotBookingFee,
-        extraGuestFee: updatedPricing.extraGuestFee,
-        convenienceFee: updatedPricing.convenienceFee,
-        decorationFees: updatedPricing.decorationFees
-      });
-    } catch (dbError) {
-      // Don't fail the request if database save fails
+    if (!result.success) {
+      console.error('❌ Failed to update pricing in database:', result.error);
+      return NextResponse.json({ 
+        success: false, 
+        error: result.error || 'Failed to update pricing data' 
+      }, { status: 500 });
     }
+
+    console.log('✅ Pricing data updated successfully:', id);
+
     return NextResponse.json({ 
       success: true, 
-      message: 'Pricing updated successfully!', 
-      pricing: updatedPricing,
-      source: 'blob-storage',
-      singleFile: true
+      message: 'Pricing data updated successfully!', 
+      source: 'database'
     });
   } catch (error) {
     console.error('❌ PUT Pricing API Error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to update pricing' }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Failed to update pricing data' 
+    }, { status: 500 });
+  }
+}
+
+// DELETE /api/admin/pricing - Delete pricing data
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Pricing ID is required for deletion' 
+      }, { status: 400 });
+    }
+
+    console.log('🗑️ Deleting pricing data:', id);
+
+    // Delete pricing data from database
+    const result = await (database as any).deletePricing(id);
+
+    if (!result.success) {
+      console.error('❌ Failed to delete pricing from database:', result.error);
+      return NextResponse.json({ 
+        success: false, 
+        error: result.error || 'Failed to delete pricing data' 
+      }, { status: 500 });
+    }
+
+    console.log('✅ Pricing data deleted successfully:', id);
+
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Pricing data deleted successfully!', 
+      source: 'database'
+    });
+  } catch (error) {
+    console.error('❌ DELETE Pricing API Error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Failed to delete pricing data' 
+    }, { status: 500 });
   }
 }

@@ -66,13 +66,21 @@ export async function POST(request: NextRequest) {
 // PUT /api/admin/theaters - Update theater
 export async function PUT(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const theaterIdFromQuery = searchParams.get('theaterId');
+    
     const body = await request.json();
-    const { theaterId, ...theaterData } = body;
+    const { theaterId: theaterIdFromBody, ...theaterData } = body;
+    
+    // Use theaterId from query parameter or body
+    const theaterId = theaterIdFromQuery || theaterIdFromBody;
     
     // Debug logging to see what's being received
     console.log('🎭 API PUT /admin/theaters received:');
-    console.log('   Theater ID:', theaterId);
-    console.log('   Images in request:', theaterData.images?.length || 0, theaterData.images);
+    console.log('   Theater ID (query):', theaterIdFromQuery);
+    console.log('   Theater ID (body):', theaterIdFromBody);
+    console.log('   Theater ID (final):', theaterId);
+    console.log('   Theater Data:', theaterData);
     
     if (!theaterId) {
       return NextResponse.json(

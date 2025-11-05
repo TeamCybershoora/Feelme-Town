@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    const { name, email, phone, gender, profilePhoto, photoType, password } = body;
+    const { name, email, phone, gender, profilePhoto, photoType, password, bookingAccess } = body;
     
     if (!name || !email || !phone || !gender || !profilePhoto || !password) {
       return NextResponse.json(
@@ -40,7 +40,8 @@ export async function POST(request: NextRequest) {
       photoType: photoType || 'upload',
       password, // Include password for staff login
       role: 'staff',
-      isActive: true
+      isActive: true,
+      bookingAccess: bookingAccess === 'edit' ? 'edit' : 'view'
     };
 
     const result = await database.saveStaff(staffData); // Save new staff member
@@ -79,7 +80,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, email, phone, gender, profilePhoto, photoType, isActive, password } = body;
+    const { name, email, phone, gender, profilePhoto, photoType, isActive, password, bookingAccess } = body;
 
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
@@ -90,6 +91,7 @@ export async function PUT(request: NextRequest) {
     if (photoType !== undefined) updateData.photoType = photoType;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (password !== undefined && password.trim() !== '') updateData.password = password;
+    if (bookingAccess !== undefined) updateData.bookingAccess = bookingAccess === 'edit' ? 'edit' : 'view';
 
     const result = await database.updateStaff(id, updateData); // Update staff member
 

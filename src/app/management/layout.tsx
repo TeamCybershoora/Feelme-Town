@@ -24,17 +24,31 @@ export default function ManagementLayout({
       const staffUserData = localStorage.getItem('staffUser');
 
       if (staffToken === 'authenticated' && loginTime && staffUserData) {
-        // Check if session is valid using configurable lifetime (days)
-        const checkSession = async () => {
-          try {
-            const res = await fetch('/api/admin/settings');
-            const data = await res.json();
-            const sessionTimeoutDays = Number(data?.settings?.sessionTimeout) || 1; // default 1 day
-            const sessionDuration = sessionTimeoutDays * 24 * 60 * 60 * 1000;
-
-            const currentTime = Date.now();
-            if (currentTime - parseInt(loginTime) < sessionDuration) {
-              setStaffUser(JSON.parse(staffUserData));
+         // Check if session is valid using configurable lifetime (days)
+         const checkSession = async () => {
+           try {
+             const res = await fetch('/api/admin/settings');
+             const data = await res.json();
+             const sessionTimeoutDays = Number(data?.settings?.sessionTimeout) || 1; // default 1 day
+             const sessionDuration = sessionTimeoutDays * 24 * 60 * 60 * 1000;
+ 
+             const currentTime = Date.now();
+             if (currentTime - parseInt(loginTime) < sessionDuration) {
+              const parsedUser = JSON.parse(staffUserData);
+              try {
+                const staffRes = await fetch('/api/admin/staff');
+                const staffData = await staffRes.json();
+                if (staffData.success && Array.isArray(staffData.staff)) {
+                  const match = staffData.staff.find((member: any) => String(member.userId || member._id) === String(parsedUser.userId || parsedUser._id));
+                  if (match) {
+                    parsedUser.bookingAccess = match.bookingAccess === 'edit' ? 'edit' : 'view';
+                    localStorage.setItem('staffUser', JSON.stringify(parsedUser));
+                  }
+                }
+              } catch (error) {
+                // Ignore refresh errors; fallback to stored data
+              }
+              setStaffUser(parsedUser);
               setIsLoading(false);
             } else {
               localStorage.removeItem('staffToken');

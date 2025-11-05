@@ -16,6 +16,7 @@ interface Service {
   name: string;
   items: ServiceItem[];
   isActive: boolean;
+  includeInDecoration?: boolean;
   createdAt?: Date;
 }
 
@@ -27,8 +28,8 @@ export default function ServicesPage() {
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; type?: 'service' | 'item'; serviceId?: string; service?: Service; itemId?: string }>({ show: false });
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   
   const [serviceName, setServiceName] = useState('');
   const [itemName, setItemName] = useState('');
@@ -42,16 +43,23 @@ export default function ServicesPage() {
   }, []);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+    if (typeof window !== 'undefined' && (window as any).showToast) {
+      (window as any).showToast({
+        type: type,
+        message: message,
+        duration: 3000
+      });
+    }
   };
 
   const fetchServices = async () => {
     try {
-      const response = await fetch('/api/admin/services');
+      // Fetch all services including inactive ones for admin panel
+      const response = await fetch('/api/admin/services?includeInactive=true');
       const data = await response.json();
       
       if (data.success) {
+        console.log('📦 Admin fetched all services:', data.services);
         setServices(data.services);
       }
     } catch (error) {
@@ -123,26 +131,48 @@ export default function ServicesPage() {
     }
 
     try {
-      const serviceData = {
-        name: serviceName.trim(),
-        items: []
-      };
+      if (editingService) {
+        // Update existing service
+        const response = await fetch(`/api/admin/services?id=${editingService._id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: serviceName.trim() })
+        });
 
-      const response = await fetch('/api/admin/services', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(serviceData)
-      });
+        const data = await response.json();
 
-      const data = await response.json();
-
-      if (data.success) {
-        showToast('Service added successfully!', 'success');
-        setShowAddServicePopup(false);
-        setServiceName('');
-        fetchServices();
+        if (data.success) {
+          showToast('Service updated successfully!', 'success');
+          setShowAddServicePopup(false);
+          setServiceName('');
+          setEditingService(null);
+          fetchServices();
+        } else {
+          showToast(data.error || 'Failed to update service', 'error');
+        }
       } else {
-        showToast(data.error || 'Failed to add service', 'error');
+        // Add new service
+        const serviceData = {
+          name: serviceName.trim(),
+          items: []
+        };
+
+        const response = await fetch('/api/admin/services', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(serviceData)
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          showToast('Service added successfully!', 'success');
+          setShowAddServicePopup(false);
+          setServiceName('');
+          fetchServices();
+        } else {
+          showToast(data.error || 'Failed to add service', 'error');
+        }
       }
     } catch (error) {
       
@@ -299,6 +329,122 @@ export default function ServicesPage() {
     });
   };
 
+  const handleEditServiceClick = (service: Service) => {
+    setEditingService(service);
+    setServiceName(service.name);
+    setShowAddServicePopup(true);
+  };
+
+  const handleToggleDecoration = async (service: Service) => {
+    try {
+      const newValue = !service.includeInDecoration;
+      console.log(`🎨 Toggling includeInDecoration for ${service.name}:`, {
+        currentValue: service.includeInDecoration,
+        newValue: newValue,
+        serviceId: service._id
+      });
+      
+      // Optimistic UI update
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, includeInDecoration: newValue }
+            : s
+        )
+      );
+      
+      const response = await fetch(`/api/admin/services?id=${service._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ includeInDecoration: newValue })
+      });
+
+      const data = await response.json();
+      console.log('🎨 Toggle response:', data);
+
+      if (data.success) {
+        showToast(`Service ${newValue ? 'included in' : 'removed from'} decoration`, 'success');
+        fetchServices(); // Refresh to ensure sync
+      } else {
+        // Revert on error
+        setServices(prevServices => 
+          prevServices.map(s => 
+            s._id === service._id 
+              ? { ...s, includeInDecoration: !newValue }
+              : s
+          )
+        );
+        showToast(data.error || 'Failed to update service', 'error');
+      }
+    } catch (error) {
+      console.error('🎨 Toggle error:', error);
+      // Revert on error
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, includeInDecoration: service.includeInDecoration }
+            : s
+        )
+      );
+      showToast('Failed to update service', 'error');
+    }
+  };
+
+  const handleToggleActive = async (service: Service) => {
+    try {
+      const newValue = !service.isActive;
+      console.log(`⚡ Toggling isActive for ${service.name}:`, {
+        currentValue: service.isActive,
+        newValue: newValue,
+        serviceId: service._id
+      });
+      
+      // Optimistic UI update
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, isActive: newValue }
+            : s
+        )
+      );
+      
+      const response = await fetch(`/api/admin/services?id=${service._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: newValue })
+      });
+
+      const data = await response.json();
+      console.log('⚡ Toggle response:', data);
+
+      if (data.success) {
+        showToast(`Service ${newValue ? 'activated' : 'deactivated'}`, 'success');
+        fetchServices(); // Refresh to ensure sync
+      } else {
+        // Revert on error
+        setServices(prevServices => 
+          prevServices.map(s => 
+            s._id === service._id 
+              ? { ...s, isActive: !newValue }
+              : s
+          )
+        );
+        showToast(data.error || 'Failed to update service', 'error');
+      }
+    } catch (error) {
+      console.error('⚡ Toggle error:', error);
+      // Revert on error
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, isActive: service.isActive }
+            : s
+        )
+      );
+      showToast('Failed to update service', 'error');
+    }
+  };
+
   if (loading) {
     return (
       <div className="services-page">
@@ -307,14 +453,23 @@ export default function ServicesPage() {
     );
   }
 
+  // Filter services based on status
+  const filteredServices = services.filter(service => {
+    if (filterStatus === 'active') return service.isActive;
+    if (filterStatus === 'inactive') return !service.isActive;
+    return true; // 'all'
+  });
+
   return (
     <div className="services-page">
       <div className="page-header">
         <h1>Extra Services Management</h1>
         <div className="header-actions">
           <div className="total-count">
-            <span className="count-number">{services.length}</span>
-            <span className="count-label">Total Services</span>
+            <span className="count-number">{filteredServices.length}</span>
+            <span className="count-label">
+              {filterStatus === 'all' ? 'Total' : filterStatus === 'active' ? 'Active' : 'Inactive'} Services
+            </span>
           </div>
           <button className="add-btn" onClick={handleAddService}>
             <Plus size={20} />
@@ -323,20 +478,64 @@ export default function ServicesPage() {
         </div>
       </div>
 
+      {/* Filter Buttons */}
+      <div className="filter-buttons">
+        <button 
+          className={`filter-btn ${filterStatus === 'all' ? 'active' : ''}`}
+          onClick={() => setFilterStatus('all')}
+        >
+          All Services ({services.length})
+        </button>
+        <button 
+          className={`filter-btn ${filterStatus === 'active' ? 'active' : ''}`}
+          onClick={() => setFilterStatus('active')}
+        >
+          Active ({services.filter(s => s.isActive).length})
+        </button>
+        <button 
+          className={`filter-btn ${filterStatus === 'inactive' ? 'active' : ''}`}
+          onClick={() => setFilterStatus('inactive')}
+        >
+          Inactive ({services.filter(s => !s.isActive).length})
+        </button>
+      </div>
+
       <div className="services-list">
-        {services.map((service) => (
-          <div key={service._id} className="service-card">
+        {filteredServices.map((service) => (
+          <div key={service._id} className={`service-card ${!service.isActive ? 'inactive' : ''}`}>
             <div className="service-header">
               <div className="service-title">
-                <h3>{service.name}</h3>
+                <h3>
+                  {service.name}
+                  {!service.isActive && <span className="inactive-badge">Inactive</span>}
+                </h3>
                 <span className="items-count">{service.items.length} items</span>
               </div>
               <div className="service-actions">
+                <label className="toggle-container">
+                  <input
+                    type="checkbox"
+                    checked={service.isActive}
+                    onChange={() => handleToggleActive(service)}
+                  />
+                  <span className="toggle-label">{service.isActive ? 'Active' : 'Inactive'}</span>
+                </label>
+                <label className="toggle-container">
+                  <input
+                    type="checkbox"
+                    checked={service.includeInDecoration || false}
+                    onChange={() => handleToggleDecoration(service)}
+                  />
+                  <span className="toggle-label">Include in Decoration</span>
+                </label>
                 <button 
                   className="expand-btn" 
                   onClick={() => toggleExpand(service._id!)}
                 >
                   {expandedServices.has(service._id!) ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                </button>
+                <button className="edit-btn" onClick={() => handleEditServiceClick(service)}>
+                  <Edit size={18} />
                 </button>
                 <button className="add-item-btn" onClick={() => handleAddItemClick(service)}>
                   <Plus size={18} />
@@ -378,8 +577,8 @@ export default function ServicesPage() {
         <div className="popup-overlay" onClick={() => setShowAddServicePopup(false)}>
           <div className="popup-content" onClick={(e) => e.stopPropagation()}>
             <div className="popup-header">
-              <h2>Add New Service</h2>
-              <button className="close-btn" onClick={() => setShowAddServicePopup(false)}>×</button>
+              <h2>{editingService ? 'Edit Service' : 'Add New Service'}</h2>
+              <button className="close-btn" onClick={() => { setShowAddServicePopup(false); setEditingService(null); setServiceName(''); }}>×</button>
             </div>
             
             <div className="popup-body">
@@ -510,13 +709,6 @@ export default function ServicesPage() {
         </div>
       )}
 
-      {/* Toast Notification */}
-      {toast && (
-        <div className={`toast toast-${toast.type}`}>
-          {toast.message}
-        </div>
-      )}
-
       <style jsx>{`
         .services-page {
           padding: 2rem;
@@ -586,6 +778,40 @@ export default function ServicesPage() {
           background: #c41e3a;
         }
 
+        .filter-buttons {
+          display: flex;
+          gap: 1rem;
+          margin-bottom: 2rem;
+          padding: 0.5rem;
+          background: #f9fafb;
+          border-radius: 12px;
+          width: fit-content;
+        }
+
+        .filter-btn {
+          padding: 0.75rem 1.5rem;
+          border: 2px solid transparent;
+          border-radius: 8px;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.95rem;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          background: white;
+          color: #64748b;
+        }
+
+        .filter-btn:hover {
+          border-color: #e2e8f0;
+          color: #475569;
+        }
+
+        .filter-btn.active {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border-color: transparent;
+          box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
         .services-list {
           display: flex;
           flex-direction: column;
@@ -597,6 +823,12 @@ export default function ServicesPage() {
           border-radius: 12px;
           padding: 1.5rem;
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          transition: opacity 0.3s ease;
+        }
+
+        .service-card.inactive {
+          opacity: 0.6;
+          background: #f9fafb;
         }
 
         .service-header {
@@ -610,6 +842,19 @@ export default function ServicesPage() {
           font-size: 1.5rem;
           color: #333;
           margin-bottom: 0.25rem;
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .inactive-badge {
+          font-size: 0.75rem;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          padding: 0.25rem 0.75rem;
+          background: #ef4444;
+          color: white;
+          border-radius: 12px;
+          font-weight: 600;
         }
 
         .items-count {
@@ -620,9 +865,58 @@ export default function ServicesPage() {
         .service-actions {
           display: flex;
           gap: 0.5rem;
+          align-items: center;
         }
 
-        .expand-btn, .add-item-btn, .delete-btn {
+        .toggle-container {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.5rem 1rem;
+          background: #f9fafb;
+          border-radius: 6px;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .toggle-container input[type="checkbox"] {
+          position: relative;
+          width: 44px;
+          height: 24px;
+          appearance: none;
+          background: #cbd5e1;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: background 0.3s ease;
+        }
+
+        .toggle-container input[type="checkbox"]:checked {
+          background: #10b981;
+        }
+
+        .toggle-container input[type="checkbox"]::before {
+          content: '';
+          position: absolute;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: white;
+          top: 3px;
+          left: 3px;
+          transition: transform 0.3s ease;
+        }
+
+        .toggle-container input[type="checkbox"]:checked::before {
+          transform: translateX(20px);
+        }
+
+        .toggle-label {
+          font-size: 0.85rem;
+          color: #475569;
+          white-space: nowrap;
+        }
+
+        .expand-btn, .edit-btn, .add-item-btn, .delete-btn {
           padding: 0.5rem 1rem;
           border: none;
           border-radius: 6px;
@@ -641,6 +935,16 @@ export default function ServicesPage() {
 
         .expand-btn:hover {
           background: #e5e7eb;
+        }
+
+        .edit-btn {
+          background: #fef3c7;
+          color: #d97706;
+        }
+
+        .edit-btn:hover {
+          background: #d97706;
+          color: white;
         }
 
         .add-item-btn {
@@ -995,38 +1299,6 @@ export default function ServicesPage() {
           border-top: 1px solid #e5e7eb;
         }
 
-        /* Toast Notification */
-        .toast {
-          position: fixed;
-          top: 2rem;
-          right: 2rem;
-          padding: 1rem 1.5rem;
-          border-radius: 8px;
-          color: white;
-          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-          z-index: 2000;
-          animation: slideIn 0.3s ease;
-        }
-
-        .toast-success {
-          background: #10b981;
-        }
-
-        .toast-error {
-          background: #ef4444;
-        }
-
-        @keyframes slideIn {
-          from {
-            transform: translateX(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
       `}</style>
     </div>
   );

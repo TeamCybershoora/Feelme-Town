@@ -21,7 +21,8 @@ import {
   DollarSign,
   FileSpreadsheet,
   Edit,
-  X
+  X,
+  ShieldCheck
 } from 'lucide-react';
 
 interface AdminSidebarProps {
@@ -172,6 +173,13 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       icon: Users,
       path: '/Administrator/requests',
       badge: pendingRequestsCount > 0 ? pendingRequestsCount : null
+    },
+    {
+      id: 'trusted-customers',
+      label: 'Trusted Customers',
+      icon: ShieldCheck,
+      path: '/Administrator/trusted-customers',
+      badge: null
     },
     {
       id: 'staff-bookings',

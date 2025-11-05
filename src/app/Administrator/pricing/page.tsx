@@ -18,37 +18,40 @@ const PricingManagement: React.FC = () => {
     convenienceFee: 0,
     decorationFees: 0
   });
+  const [pricingId, setPricingId] = useState<string | null>(null); // Store pricing ID for updates
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { showSuccess, showError, toasts, removeToast } = useToast();
 
   useEffect(() => {
-    loadPricingFromJSON();
+    loadPricingFromDatabase();
   }, []);
 
-  const loadPricingFromJSON = async () => {
+  const loadPricingFromDatabase = async () => {
     try {
       setLoading(true);
-      console.log('🔄 Loading pricing from JSON...');
+      console.log('📊 Loading pricing from database...');
       
       const response = await fetch(`/api/admin/pricing?cache=${Date.now()}`, { cache: 'no-store' });
       const data = await response.json();
       console.log('📊 Pricing API response:', data);
       
-      if (data.success && data.pricing) {
-        console.log('✅ Setting pricing state:', data.pricing);
+      if (data.success && data.pricing && data.pricing.length > 0) {
+        // Use the first pricing configuration
+        const firstPricing = data.pricing[0];
+        console.log('✅ Setting pricing data:', firstPricing);
         setPricing({
-          slotBookingFee: data.pricing.slotBookingFee || 0,
-          extraGuestFee: data.pricing.extraGuestFee || 0,
-          convenienceFee: data.pricing.convenienceFee || 0,
-          decorationFees: data.pricing.decorationFees || 0
+          slotBookingFee: firstPricing.slotBookingFee || 0,
+          extraGuestFee: firstPricing.extraGuestFee || 0,
+          convenienceFee: firstPricing.convenienceFee || 0,
+          decorationFees: firstPricing.decorationFees || 0
         });
-      } else if (data.success && !data.pricing) {
-        console.log('⚠️ No pricing data in JSON - keeping current state');
-        // Keep current state if no pricing data exists
+        // Store the pricing ID for updates
+        setPricingId(firstPricing._id || firstPricing.id || null);
+        console.log('✅ Stored pricing ID:', firstPricing._id || firstPricing.id);
       } else {
-        console.error('❌ Failed to load pricing:', data.error);
-        showError('Failed to load pricing data');
+        console.log('⚠️ No pricing data in database - using defaults');
+        setPricingId(null); // No existing pricing
       }
     } catch (error) {
       console.error('❌ Error loading pricing:', error);
@@ -61,59 +64,60 @@ const PricingManagement: React.FC = () => {
   const handleSave = async () => {
     try {
       setSaving(true);
-      console.log('💾 Saving pricing to JSON:', pricing);
-      
+      console.log('💾 Saving pricing to database:', pricing);
+      console.log('💾 Pricing ID:', pricingId);
+
+      // Use PUT if pricing exists, POST if creating new
+      const method = pricingId ? 'PUT' : 'POST';
+      const body = pricingId 
+        ? {
+            id: pricingId,
+            ...pricing
+          }
+        : {
+            name: 'Standard Pricing',
+            description: 'Default pricing configuration',
+            ...pricing,
+            isActive: true
+          };
+
+      console.log(`💾 Using ${method} method with body:`, body);
+
       const response = await fetch('/api/admin/pricing', {
-        method: 'PUT',
+        method,
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(pricing),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
       console.log('💾 Save response:', data);
       
       if (data.success) {
-        showSuccess('Pricing updated successfully!');
-        console.log('✅ Pricing saved successfully - real-time update');
-        
-        // Real-time update: Use the returned pricing data directly
-        if (data.pricing) {
-          console.log('🔄 Real-time updating pricing state:', data.pricing);
-          setPricing({
-            slotBookingFee: data.pricing.slotBookingFee || 0,
-            extraGuestFee: data.pricing.extraGuestFee || 0,
-            convenienceFee: data.pricing.convenienceFee || 0,
-            decorationFees: data.pricing.decorationFees || 0
-          });
-        }
+        showSuccess(pricingId ? 'Pricing updated successfully!' : 'Pricing created successfully!');
+        console.log('✅ Pricing saved successfully');
+        loadPricingFromDatabase();
       } else {
         console.error('❌ Save failed:', data.error);
-        showError('Failed to update pricing: ' + data.error);
+        showError('Failed to save pricing: ' + data.error);
       }
     } catch (error) {
       console.error('❌ Save error:', error);
-      showError('Failed to update pricing');
+      showError('Failed to save pricing');
     } finally {
       setSaving(false);
     }
   };
 
   const handleInputChange = (field: keyof PricingData, value: string) => {
-    // Allow any number including negative, empty string becomes 0
-    const numValue = value === '' ? 0 : parseInt(value);
-    console.log(`💰 Real-time input change - ${field}: ${value} → ${numValue}`);
+    console.log(`💰 Input change - ${field}: ${value}`);
     
-    // Real-time state update
-    setPricing(prev => {
-      const newPricing = {
-        ...prev,
-        [field]: isNaN(numValue) ? 0 : numValue
-      };
-      console.log(`🔄 Real-time pricing state updated:`, newPricing);
-      return newPricing;
-    });
+    const numValue = value === '' ? 0 : parseInt(value) || 0;
+    setPricing(prev => ({
+      ...prev,
+      [field]: numValue
+    }));
   };
 
   if (loading) {
@@ -237,7 +241,7 @@ const PricingManagement: React.FC = () => {
             <button
               onClick={() => {
                 console.log('🔄 Manual refresh clicked');
-                loadPricingFromJSON();
+                loadPricingFromDatabase();
               }}
               disabled={loading}
               className="refresh-button"
@@ -249,7 +253,7 @@ const PricingManagement: React.FC = () => {
         </div>
 
         <div className="pricing-preview">
-          <h3>Real-time Pricing Summary</h3>
+          <h3>Current Pricing Summary</h3>
           <div className="pricing-summary">
             <div className="summary-item">
               <span className="label">Slot Booking Fee:</span>
@@ -376,7 +380,8 @@ const PricingManagement: React.FC = () => {
           font-size: 0.95rem;
         }
 
-        .pricing-field input {
+        .pricing-field input,
+        .pricing-field textarea {
           padding: 0.875rem 1rem;
           border: 2px solid #e5e7eb;
           border-radius: 8px;
@@ -385,6 +390,13 @@ const PricingManagement: React.FC = () => {
           transition: all 0.3s ease;
           background: white;
           color: #000;
+          width: 100%;
+          box-sizing: border-box;
+        }
+
+        .pricing-field textarea {
+          resize: vertical;
+          min-height: 80px;
         }
 
         /* Hide number input spinners (Chrome, Safari, Edge) */
@@ -472,6 +484,198 @@ const PricingManagement: React.FC = () => {
           transform: none;
         }
 
+        .cancel-button {
+          background: #6c757d;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          padding: 0.875rem 2rem;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.95rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .cancel-button:hover:not(:disabled) {
+          background: #5a6268;
+          transform: translateY(-1px);
+        }
+
+        .cancel-button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
+        }
+
+        .pricing-list {
+          background: white;
+          border-radius: 15px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+          padding: 2rem;
+          margin-top: 2rem;
+        }
+
+        .pricing-list h3 {
+          font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+          font-size: 1.5rem;
+          font-weight: 600;
+          color: #333;
+          margin-bottom: 1.5rem;
+        }
+
+        .empty-state {
+          text-align: center;
+          padding: 3rem;
+          color: #666;
+        }
+
+        .empty-state p {
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 1.1rem;
+        }
+
+        .pricing-items {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .pricing-item {
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          padding: 1.5rem;
+          transition: all 0.3s ease;
+          background: #f8f9fa;
+        }
+
+        .pricing-item:hover {
+          border-color: #d1d5db;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          transform: translateY(-2px);
+        }
+
+        .pricing-item-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1rem;
+        }
+
+        .pricing-item-header h4 {
+          font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+          font-size: 1.2rem;
+          font-weight: 600;
+          color: #333;
+          margin: 0;
+        }
+
+        .pricing-item-actions {
+          display: flex;
+          gap: 0.5rem;
+        }
+
+        .edit-button {
+          background: #28a745;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          padding: 0.5rem 1rem;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.85rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .edit-button:hover {
+          background: #218838;
+          transform: translateY(-1px);
+        }
+
+        .delete-button {
+          background: #dc3545;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          padding: 0.5rem 1rem;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.85rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .delete-button:hover {
+          background: #c82333;
+          transform: translateY(-1px);
+        }
+
+        .pricing-description {
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          color: #666;
+          font-size: 0.9rem;
+          margin-bottom: 1rem;
+          font-style: italic;
+        }
+
+        .pricing-details {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 0.75rem;
+          margin-bottom: 1rem;
+        }
+
+        .pricing-detail {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          background: white;
+          padding: 0.75rem;
+          border-radius: 6px;
+          border-left: 3px solid var(--accent-color);
+        }
+
+        .pricing-detail .label {
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-weight: 500;
+          color: #374151;
+          font-size: 0.85rem;
+        }
+
+        .pricing-detail .value {
+          font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+          font-weight: 600;
+          color: var(--accent-color);
+          font-size: 0.9rem;
+        }
+
+        .pricing-status {
+          display: flex;
+          justify-content: flex-end;
+        }
+
+        .status-badge {
+          padding: 0.25rem 0.75rem;
+          border-radius: 12px;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: uppercase;
+        }
+
+        .status-badge.active {
+          background: #d4edda;
+          color: #155724;
+        }
+
+        .status-badge.inactive {
+          background: #f8d7da;
+          color: #721c24;
+        }
 
         .pricing-preview {
           background: white;

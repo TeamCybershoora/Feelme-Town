@@ -14,6 +14,25 @@ import GlobalDatePicker from '@/components/GlobalDatePicker';
 function ManualBookingContent() {
     const { openBookingPopup, setIncompleteBookingData, openCancelBookingPopup, resetPopupState, isBookingPopupOpen, closeBookingPopup, isCancelBookingPopupOpen, closeCancelBookingPopup, cancelBookingData } = useBooking();
     const searchParams = useSearchParams();
+    const trustedCustomerPrefill = useMemo(() => {
+        const customerId = searchParams.get('trustedCustomerId') || undefined;
+        const name = searchParams.get('trustedCustomerName') || undefined;
+        const phone = searchParams.get('trustedCustomerPhone') || undefined;
+        const email = searchParams.get('trustedCustomerEmail') || undefined;
+        const billing = searchParams.get('trustedBilling') || undefined;
+
+        if (customerId || name || phone || email || billing) {
+            return {
+                customerId,
+                name,
+                phone,
+                email,
+                billingPreference: (billing === 'free' ? 'free' : billing === 'paid' ? 'paid' : undefined) as 'paid' | 'free' | undefined
+            };
+        }
+
+        return null;
+    }, [searchParams]);
     const [selectedTheater, setSelectedTheater] = useState(0);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [searchTerm, setSearchTerm] = useState('');
@@ -644,7 +663,9 @@ function ManualBookingContent() {
             // Reset popup state and open fresh booking popup without any pre-filled data
             setTimeout(() => {
                 resetPopupState();
-                openBookingPopup();
+                if (!trustedCustomerPrefill) {
+                    openBookingPopup();
+                }
             }, 500);
         } else if (cancelBookingId && email && !fetchedCancelBookingIds.has(cancelBookingId)) {
             
@@ -681,7 +702,7 @@ function ManualBookingContent() {
         } else {
             
         }
-    }, [searchParams, fetchIncompleteBooking, openBookingPopup, openCancelBookingPopup, isFetchingIncompleteBooking, fetchedBookingIds, fetchedCancelBookingIds, selectedTheater, selectedDate, selectedTimeSlot]);
+    }, [searchParams, fetchIncompleteBooking, openBookingPopup, openCancelBookingPopup, isFetchingIncompleteBooking, fetchedBookingIds, fetchedCancelBookingIds, selectedTheater, selectedDate, selectedTimeSlot, resetPopupState, trustedCustomerPrefill]);
 
     const handleTheaterSelection = (index: number) => {
         setSelectedTheater(index);
@@ -4783,7 +4804,7 @@ function ManualBookingContent() {
             `}</style>
 
             {/* Manual Booking Popups */}
-            <ManualBookingPopup isOpen={isBookingPopupOpen} onClose={closeBookingPopup} isManualMode={true} userInfo={userInfo} />
+            <ManualBookingPopup isOpen={isBookingPopupOpen} onClose={closeBookingPopup} isManualMode={true} userInfo={userInfo} prefillCustomer={trustedCustomerPrefill} />
             <CancelBookingPopup isOpen={isCancelBookingPopupOpen} onClose={closeCancelBookingPopup} bookingData={cancelBookingData} />
             
             {/* Global Date Picker */}

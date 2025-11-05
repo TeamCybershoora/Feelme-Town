@@ -146,6 +146,10 @@ export default function BookingsPage() {
   const [selectedDate, setSelectedDate] = useState('');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isManualBookingOpen, setIsManualBookingOpen] = useState(false);
+  const [paymentUpdatingId, setPaymentUpdatingId] = useState<string | null>(null);
+  const [isPaymentMethodModalOpen, setIsPaymentMethodModalOpen] = useState(false);
+  const [bookingPendingPayment, setBookingPendingPayment] = useState<any | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'cash'>('online');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -224,72 +228,80 @@ export default function BookingsPage() {
         }
       };
 
+      // Completed bookings from GoDaddy SQL (no fallback to JSON files)
       let completedArray = (completedData.bookings || []) as any[];
-      if (!completedArray || completedArray.length === 0) {
-        completedArray = await getPublicJson('/data/exports/completed-bookings.json');
-        if (!completedArray || completedArray.length === 0) {
-          completedArray = await getPublicJson('/exports/completed-bookings.json');
-        }
-      }
 
-      let manualArray = (manualData.bookings || []) as any[];
-      if (!manualArray || manualArray.length === 0) {
-        manualArray = await getPublicJson('/data/exports/manual-bookings.json');
-        if (!manualArray || manualArray.length === 0) {
-          manualArray = await getPublicJson('/exports/manual-bookings.json');
-        }
-      }
+      // Manual bookings are now fetched from database, not JSON files
+      let manualArray = (manualData.manualBookings || []) as any[];
 
+      // Cancelled bookings from GoDaddy SQL (no fallback to JSON files)
       let cancelledArray = (cancelledData.bookings || []) as any[];
-      if (!cancelledArray || cancelledArray.length === 0) {
-        cancelledArray = await getPublicJson('/data/exports/cancelled-bookings.json');
-        if (!cancelledArray || cancelledArray.length === 0) {
-          cancelledArray = await getPublicJson('/exports/cancelled-bookings.json');
-        }
-      }
 
-      // Process confirmed bookings from database (only confirmed/pending status)
+      // Process confirmed bookings from database (confirmed/pending/manual status)
       const confirmedBookings = (confirmedData.bookings || []).map((booking: any) => {
-        // Only include confirmed/pending bookings from database
-        if (booking.status === 'confirmed' || booking.status === 'pending') {
+        const rawPaymentStatus = (booking.paymentStatus || booking.payment_status || '').toString().toLowerCase();
+        const normalizedPaymentStatus = rawPaymentStatus === 'paid' ? 'paid' : 'unpaid';
+        // Include confirmed, pending, and manual bookings from database
+        if (booking.status === 'confirmed' || booking.status === 'pending' || booking.status === 'manual') {
           return {
             ...booking,
-            bookingType: 'online',
-            createdAtIST: convertToIST(booking.createdAt)
+            bookingType: booking.status === 'manual' ? 'manual' : 'online',
+            createdAtIST: convertToIST(booking.createdAt),
+            paymentStatus: normalizedPaymentStatus,
+            venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null
           };
         }
         return null;
       }).filter(Boolean);
 
-      // Process completed bookings from JSON file (data/exports/completed-bookings.json)
-      const completedBookings = (completedArray).map((booking: any) => ({
-        ...booking,
-        bookingType: 'online',
-        status: 'completed',
-        createdAtIST: convertToIST(booking.createdAt)
-      }));
+      // Process completed bookings from GoDaddy SQL
+      const completedBookings = (completedArray).map((booking: any) => {
+        const normalizedPaymentStatus = 'paid';
+        return {
+          ...booking,
+          bookingType: 'online',
+          status: 'completed',
+          paymentStatus: normalizedPaymentStatus,
+          venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null,
+          // Map SQL column names to expected field names
+          theaterName: booking.theater_name || booking.theaterName || booking.theater,
+          theater: booking.theater_name || booking.theaterName || booking.theater,
+          createdAtIST: convertToIST(booking.completed_at || booking.completedAt || booking.createdAt)
+        };
+      });
 
-      // Process manual bookings from JSON file (data/exports/manual-bookings.json)
+      // Process manual bookings from database (manual_booking collection)
       const manualBookings = (manualArray).map((booking: any) => ({
         ...booking,
         bookingType: 'manual',
         status: 'manual',
+        paymentStatus: (booking.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
+        venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null,
         createdAtIST: convertToIST(booking.createdAt)
       }));
 
-      // Process cancelled bookings from JSON file (data/exports/cancelled-bookings.json)
-      const cancelledBookings = (cancelledArray).map((booking: any) => ({
-        ...booking,
-        bookingType: 'online',
-        status: 'cancelled',
-        createdAtIST: convertToIST(booking.cancelledAt || booking.createdAt)
-      }));
+      // Process cancelled bookings from GoDaddy SQL
+      const cancelledBookings = (cancelledArray).map((booking: any) => {
+        const rawPaymentStatus = (booking.paymentStatus || booking.payment_status || '').toString().toLowerCase();
+        const normalizedPaymentStatus = rawPaymentStatus === 'paid' ? 'paid' : 'unpaid';
+        return {
+          ...booking,
+          bookingType: 'online',
+          status: 'cancelled',
+          paymentStatus: normalizedPaymentStatus,
+          // Map SQL column names to expected field names
+          theaterName: booking.theater_name || booking.theaterName || booking.theater,
+          theater: booking.theater_name || booking.theaterName || booking.theater,
+          createdAtIST: convertToIST(booking.cancelledAt || booking.cancelled_at || booking.createdAt)
+        };
+      });
 
       // Process incomplete bookings from database
       const incompleteBookings = (incompleteData.incompleteBookings || []).map((booking: any) => ({
         ...booking,
         bookingType: 'online',
         status: 'incomplete',
+        paymentStatus: (booking.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
         createdAtIST: convertToIST(booking.createdAt)
       }));
 
@@ -301,6 +313,7 @@ export default function BookingsPage() {
 
       // Transform data for display (keep status as-is from database)
       const transformedBookings = allBookingsToShow.map((booking: any, index: number) => {
+        const normalizedPaymentStatus = (booking.paymentStatus || booking.payment_status || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid';
         // Use MongoDB _id as unique key (always unique) or create composite key
         const uniqueId = booking._id ? booking._id.toString() : `${booking.bookingId || booking.id || 'unknown'}-${index}-${Date.now()}`;
         const transformedBooking = {
@@ -317,6 +330,7 @@ export default function BookingsPage() {
           bookingDate: booking.createdAt ? new Date(booking.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           bookingType: booking.bookingType || 'online',
           occasion: booking.occasion || '',
+          paymentStatus: (booking.status || '').toLowerCase() === 'completed' ? 'paid' : normalizedPaymentStatus,
           occasionPersonName: booking.occasionPersonName || '',
           birthdayName: booking.birthdayName || '',
           partner1Name: booking.partner1Name || '',
@@ -738,6 +752,85 @@ export default function BookingsPage() {
     }
   };
 
+  const handleTogglePaymentStatus = (booking: any) => {
+    const bookingId = booking.originalBookingId || booking.id;
+    if (!bookingId) {
+      showError('Booking ID missing');
+      return;
+    }
+
+    const currentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
+    if (currentStatus === 'paid') {
+      showSuccess('Payment already marked as paid.');
+      return;
+    }
+
+    setBookingPendingPayment(booking);
+    setSelectedPaymentMethod('online');
+    setIsPaymentMethodModalOpen(true);
+  };
+
+  const handleConfirmPaymentMethod = async () => {
+    if (!bookingPendingPayment) return;
+
+    const booking = bookingPendingPayment;
+    const bookingId = booking.originalBookingId || booking.id;
+    if (!bookingId) {
+      showError('Booking ID missing');
+      return;
+    }
+
+    const targetStatus = 'paid';
+
+    try {
+      setPaymentUpdatingId(booking.id);
+
+      const response = await fetch('/api/admin/update-booking', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          bookingId,
+          paymentStatus: targetStatus,
+          venuePaymentMethod: selectedPaymentMethod,
+          sendInvoice: targetStatus === 'paid',
+          isManualBooking: (booking.bookingType || '').toLowerCase() === 'manual'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setBookings(prev => prev.map(item => (
+          item.id === booking.id
+            ? { ...item, paymentStatus: targetStatus, venuePaymentMethod: selectedPaymentMethod }
+            : item
+        )));
+
+        const methodLabel = selectedPaymentMethod === 'cash' ? 'Cash' : 'Online';
+        showSuccess(`Payment marked as paid (${methodLabel}). Invoice email sent.`);
+        setIsPaymentMethodModalOpen(false);
+        setBookingPendingPayment(null);
+      } else {
+        showError(data.error || 'Failed to update payment status');
+      }
+    } catch (error) {
+      console.error('Error updating payment status:', error);
+      showError('Error updating payment status');
+    } finally {
+      setPaymentUpdatingId(null);
+    }
+  };
+
+  const handleClosePaymentMethodModal = () => {
+    if (paymentUpdatingId !== null && bookingPendingPayment && paymentUpdatingId === bookingPendingPayment.id) {
+      return;
+    }
+    setIsPaymentMethodModalOpen(false);
+    setBookingPendingPayment(null);
+  };
+
   // Handle booking update from modal
   const handleBookingUpdated = (updatedBooking: any) => {
     // Refresh bookings after update
@@ -966,6 +1059,7 @@ export default function BookingsPage() {
               <th>Theater</th>
               <th>Date & Time</th>
               <th>Amount</th>
+              <th>Payment</th>
               <th>Reason</th>
               <th>Status</th>
               <th>Actions</th>
@@ -974,7 +1068,7 @@ export default function BookingsPage() {
           <tbody>
             {paginatedBookings.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: '#6B7280' }}>
+                <td colSpan={11} style={{ textAlign: 'center', padding: '3rem', color: '#6B7280' }}>
                   {bookings.length === 0
                     ? 'No bookings found in database'
                     : `No bookings match your search criteria`}
@@ -989,6 +1083,10 @@ export default function BookingsPage() {
                   b.status.toLowerCase() === 'confirmed'
                 );
                 const currentDateConfirmedBookingNumber = currentDateConfirmedBookings.length;
+                const normalizedPaymentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
+                const isPaid = normalizedPaymentStatus === 'paid';
+                const canTogglePayment = (booking.status || '').toLowerCase() === 'confirmed';
+                const isPaymentUpdating = paymentUpdatingId === booking.id;
 
                 return (
                   <tr key={booking.id}>
@@ -1013,6 +1111,11 @@ export default function BookingsPage() {
                       </div>
                     </td>
                     <td>₹{booking.amount.toLocaleString()}</td>
+                    <td>
+                      <span className={`payment-badge ${isPaid ? 'paid' : 'unpaid'}`}>
+                        {isPaid ? 'Paid' : 'Unpaid'}
+                      </span>
+                    </td>
                     <td>{booking.cancelReason || '-'}</td>
                     <td>
                       <span className={`status-badge ${booking.status.toLowerCase()}`}>
@@ -1021,6 +1124,16 @@ export default function BookingsPage() {
                     </td>
                     <td>
                       <div className="action-buttons">
+                        {canTogglePayment && !isPaid && (
+                          <button
+                            className={`action-btn pay-btn ${isPaid ? 'paid' : ''}`}
+                            title='Mark as Paid'
+                            onClick={() => handleTogglePaymentStatus(booking)}
+                            disabled={isPaymentUpdating}
+                          >
+                            <CheckCircle size={16} />
+                          </button>
+                        )}
                         <button
                           className="action-btn view-btn"
                           title="View Details"
@@ -1431,6 +1544,30 @@ export default function BookingsPage() {
               color: rgb(255, 255, 255) !important;
             }
 
+        .payment-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0.25rem 0.75rem;
+          border-radius: 9999px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: capitalize;
+          border: 1px solid transparent;
+        }
+
+        .payment-badge.paid {
+          background: #d1fae5;
+          border-color: #10b981;
+          color: #047857;
+        }
+
+        .payment-badge.unpaid {
+          background: #fee2e2;
+          border-color: #f87171;
+          color: #b91c1c;
+        }
+
         .delete-btn:disabled {
           background: #f3f4f6;
           color: #9ca3af;
@@ -1452,6 +1589,20 @@ export default function BookingsPage() {
           display: flex;
           align-items: center;
           justify-content: center;
+        }
+
+        .action-btn.pay-btn {
+          background: #f59e0b;
+          color: white;
+        }
+
+        .action-btn.pay-btn.paid {
+          background: #10b981;
+        }
+
+        .action-btn.pay-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
         .view-btn {
@@ -1785,6 +1936,77 @@ export default function BookingsPage() {
           justify-content: flex-end;
         }
 
+        .payment-method-modal {
+          background: #ffffff;
+          width: min(420px, 90vw);
+          padding: 2rem;
+          border-radius: 18px;
+          box-shadow: 0 25px 60px rgba(15, 23, 42, 0.2);
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+        }
+
+        .payment-method-modal .modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+        }
+
+        .modal-subtitle {
+          color: #6B7280;
+          font-size: 0.95rem;
+          line-height: 1.5;
+        }
+
+        .payment-method-options {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .payment-method-option {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.75rem;
+          padding: 1.1rem 1.25rem;
+          border-radius: 14px;
+          border: 1.5px solid #E5E7EB;
+          background: #F9FAFB;
+          text-align: left;
+          transition: all 0.2s ease;
+          cursor: pointer;
+        }
+
+        .payment-method-option .method-icon {
+          font-size: 1.6rem;
+        }
+
+        .payment-method-option .method-title {
+          display: block;
+          font-weight: 600;
+          color: #111827;
+        }
+
+        .payment-method-option .method-subtitle {
+          display: block;
+          color: #6B7280;
+          font-size: 0.85rem;
+          margin-top: 0.2rem;
+        }
+
+        .payment-method-option.selected {
+          border-color: #8B5CF6;
+          background: rgba(139, 92, 246, 0.08);
+          box-shadow: 0 10px 20px rgba(139, 92, 246, 0.18);
+        }
+
+        .payment-method-option:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
         .save-btn,
         .cancel-btn {
           padding: 0.75rem 1.5rem;
@@ -1913,6 +2135,64 @@ export default function BookingsPage() {
         type="warning"
       />
 
+      {isPaymentMethodModalOpen && bookingPendingPayment && (
+        <div className="modal-overlay" onClick={handleClosePaymentMethodModal}>
+          <div className="payment-method-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>How was the payment received?</h2>
+              <button className="close-btn" onClick={handleClosePaymentMethodModal} disabled={paymentUpdatingId === bookingPendingPayment.id}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="modal-subtitle">
+              Select the payment method used for booking #{bookingPendingPayment.originalBookingId || bookingPendingPayment.id}.
+            </p>
+
+            <div className="payment-method-options">
+              <button
+                type="button"
+                className={`payment-method-option ${selectedPaymentMethod === 'online' ? 'selected' : ''}`}
+                onClick={() => setSelectedPaymentMethod('online')}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                <span className="method-icon">💳</span>
+                <span className="method-title">Paid Online</span>
+                <span className="method-subtitle">UPI, card, or any digital mode</span>
+              </button>
+
+              <button
+                type="button"
+                className={`payment-method-option ${selectedPaymentMethod === 'cash' ? 'selected' : ''}`}
+                onClick={() => setSelectedPaymentMethod('cash')}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                <span className="method-icon">💵</span>
+                <span className="method-title">Paid in Cash</span>
+                <span className="method-subtitle">Amount collected at the venue</span>
+              </button>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                className="cancel-btn"
+                onClick={handleClosePaymentMethodModal}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                Cancel
+              </button>
+              <button
+                className="save-btn"
+                onClick={handleConfirmPaymentMethod}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                Mark as Paid
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Global Date Picker */}
       {isDatePickerOpen && (
         <GlobalDatePicker
@@ -1929,174 +2209,6 @@ export default function BookingsPage() {
           allowPastDates={true}
         />
       )}
-
-      <style jsx>{`
-        /* Booking Detail Popup Styles */
-        .booking-detail-popup {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          z-index: 1000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .popup-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          cursor: pointer;
-        }
-
-        .popup-content {
-          position: relative;
-          background: white;
-          border-radius: 12px;
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-          max-width: 600px;
-          width: 90%;
-          max-height: 80vh;
-          overflow-y: auto;
-        }
-
-        .popup-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 1.5rem;
-          border-bottom: 1px solid #eee;
-        }
-
-        .popup-header h3 {
-          margin: 0;
-          color: #333;
-          font-size: 1.5rem;
-          font-weight: 600;
-        }
-
-        .header-actions {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .edit-btn-header {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 16px;
-          background: #007bff;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .edit-btn-header:hover {
-          background: #0056b3;
-          transform: translateY(-1px);
-        }
-
-        .edit-btn-header span {
-          font-size: 16px;
-        }
-
-        .popup-body {
-          padding: 1.5rem;
-        }
-
-        .detail-section {
-          margin-bottom: 2rem;
-        }
-
-        .detail-section h4 {
-          margin: 0 0 1rem 0;
-          color: #333;
-          font-size: 1.1rem;
-          font-weight: 600;
-          border-bottom: 2px solid #007bff;
-          padding-bottom: 0.5rem;
-        }
-
-        .detail-section .detail-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 1rem;
-        }
-
-        .detail-section .detail-item {
-          display: flex;
-          flex-direction: column;
-          gap: 0.25rem;
-        }
-
-        .detail-section .detail-item .label {
-          font-weight: 600;
-          color: #555;
-          font-size: 0.9rem;
-        }
-
-        .detail-section .detail-item .value {
-          color: #333;
-          font-size: 0.95rem;
-        }
-
-        .selected-items {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-        }
-
-        .selected-item {
-          background: #e9ecef;
-          color: #495057;
-          padding: 0.25rem 0.75rem;
-          border-radius: 15px;
-          font-size: 0.85rem;
-          font-weight: 500;
-        }
-
-        @media (max-width: 768px) {
-          .popup-content {
-            width: 95%;
-            margin: 1rem;
-          }
-
-          .detail-section .detail-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .popup-header {
-            padding: 1rem;
-          }
-
-          .popup-body {
-            padding: 1rem;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .popup-content {
-            width: 100%;
-            height: 100vh;
-            border-radius: 0;
-            max-height: none;
-          }
-
-          .popup-header h3 {
-            font-size: 1.25rem;
-          }
-        }
-      `}</style>
 
     </div>
   );

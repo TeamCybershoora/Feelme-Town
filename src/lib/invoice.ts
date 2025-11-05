@@ -12,6 +12,8 @@ interface InvoiceData {
   occasion: string;
   numberOfPeople: number;
   totalAmount: number;
+  slotBookingFee?: number;
+  venuePaymentMethod?: string;
   pricingData?: {
     theaterBasePrice?: number;
     extraGuestFee?: number;
@@ -70,14 +72,24 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
 
  
 
-  const theaterBasePrice = Number(pricing.theaterBasePrice );
+  const theaterBasePrice = Number(pricing.theaterBasePrice ?? 0);
   const extraGuestFee = Number(pricing.extraGuestFee ?? 400);
   const extraGuestsCount = Number(bd.extraGuestsCount ?? Math.max(0, people - 2));
   const extraGuestCharges = Number(bd.extraGuestCharges ?? (extraGuestsCount * extraGuestFee));
   const totalAmount = Number(bd.totalAmount ?? (theaterBasePrice + extraGuestCharges));
-  const slotBookingFee = Number(pricing.slotBookingFee ?? 600);
-  const advancePayment = Number(bd.advancePayment ?? slotBookingFee);
-  const venuePayment = Number(bd.venuePayment ?? Math.max(0, totalAmount - advancePayment));
+  const slotBookingFee = Number(bd.slotBookingFee ?? pricing.slotBookingFee ?? bd.advancePayment ?? 0);
+  const fallbackAdvance = Number(bd.advancePayment ?? 0);
+  const invoiceTotal = slotBookingFee > 0 ? slotBookingFee : (fallbackAdvance > 0 ? fallbackAdvance : totalAmount);
+  const venuePayment = Number(bd.venuePayment ?? Math.max(0, totalAmount - invoiceTotal));
+  const venuePaymentMethodRaw = String(bd.venuePaymentMethod || bd.paymentMethod || '').toLowerCase();
+  const venuePaymentMethodLabel = venuePaymentMethodRaw === 'cash'
+    ? 'Paid in Cash'
+    : venuePaymentMethodRaw === 'online'
+      ? 'Paid Online'
+      : '';
+  const venuePaymentRowLabel = venuePaymentMethodLabel
+    ? `At Venue Payment (${venuePaymentMethodLabel})`
+    : 'At Venue Payment';
 
   // Format numbers with Indian number format
   const fmt = (n: number) => new Intl.NumberFormat('en-IN').format(Math.round(Number(n || 0)));
@@ -259,6 +271,21 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
       font-family: 'Paralucent-DemiBold', sans-serif;
     }
 
+    .occasion-names {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .occasion-names .divider {
+      color: rgba(255, 255, 255, 0.6);
+      font-weight: 400;
+    }
+
     /* Table Section */
     .table-section {
       margin: 0 2rem 2rem 2rem;
@@ -364,14 +391,17 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
     }
 
     .payable-amount {
-      
       background-color: #F07E4B;
-      padding: 12px 20px;
-      border-radius: 999px;
+      padding: 16px 24px;
+      border-radius: 24px;
       font-weight: 700;
       font-family: 'Paralucent-DemiBold', sans-serif;
-      font-size: 16px;
+      font-size: 18px;
       color: #ffffff;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      letter-spacing: 0.5px;
     }
 
     /* Bottom Section */
@@ -536,7 +566,7 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
           <div class="label">Date</div>
           <div class="value">${invoiceDate}</div>
           <div style="margin-top: 16px;">
-            <span class="amount-chip">Rs. ${fmt(totalAmount)}</span>
+            <span class="amount-chip">Slot Booking Fee ₹${fmt(slotBookingFee)}</span>
           </div>
         </div>
       </div>
@@ -546,6 +576,35 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
         <div>
           <div class="label">Occasion</div>
           <div class="value">${bookingData.occasion || 'Couple'}</div>
+          ${(() => {
+            const occasionData = bd.occasionData || {};
+            const candidates = [
+              bd.occasionPersonName,
+              bd.occasionPerson,
+              bd['Your Nickname_value'],
+              bd['Your Nickname'],
+              bd["Your Partner's Name_value"],
+              bd["Your Partner's Name"],
+              bd.birthdayName,
+              bd.birthdayPersonName,
+              bd.proposalPartnerName,
+              bd.proposerName,
+              occasionData.personName,
+              occasionData.partnerName,
+              occasionData.honoreeName,
+              occasionData.celebrantName,
+              occasionData.brideName,
+              occasionData.groomName
+            ];
+            const names = candidates
+              .map((val: any) => (typeof val === 'string' ? val.trim() : ''))
+              .filter((val: string) => val.length > 0);
+            if (names.length === 0) {
+              return '';
+            }
+            const uniqueNames = Array.from(new Set(names));
+            return `<div class="occasion-names">${uniqueNames.map(name => `<span>${name}</span>`).join('<span class="divider">•</span>')}</div>`;
+          })()}
         </div>
         <div>
           <div class="label">Date & Time</div>
@@ -625,25 +684,29 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
     })()}
           
           <tr class="table-row">
-            <td>Slot Booking Fee</td>
+            <td>Slot Booking Fee (Paid Online)</td>
+           
+            <td>${fmt((slotBookingFee))}</td>
             <td>-</td>
-            <td>-</td>
-            <td>${fmt(advancePayment)}</td>
+            <td>${fmt((slotBookingFee))}</td>
           </tr>
           
+          ${(venuePayment > 0 || venuePaymentMethodLabel) ? `
           <tr class="table-row">
-            <td>Balance Due</td>
+            <td>${venuePaymentRowLabel}</td>
             <td>-</td>
             <td>-</td>
-            <td>${fmt(venuePayment)}</td>
+            <td>${fmt(totalAmount - slotBookingFee)}</td>
           </tr>
+          ` : ''}
           
           <tr class="table-row" style="background: #F2B365; font-weight: bold; color: #0f0f0f;">
-            <td><strong>Total Amount</strong></td>
+            <td><strong>Total Amount </strong></td>
             <td>-</td>
             <td>-</td>
             <td><strong>${fmt(totalAmount)}</strong></td>
           </tr>
+         
         </tbody>
       </table>
     </div>
@@ -651,7 +714,7 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
     <!-- Footer Section -->
     <div class="invoice-footer">
       <div class="decorative-stars">✱ ✱ ✱</div>
-      <div class="payable-amount">Payable Amount : ₹${fmt(venuePayment)}</div>
+      <div class="payable-amount">Thank you for visiting! See you again soon.</div>
     </div>
 
     <!-- Bottom Section -->

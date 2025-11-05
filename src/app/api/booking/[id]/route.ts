@@ -21,15 +21,7 @@ export async function GET(
       );
     }
 
-    if (!email) {
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Missing email parameter' 
-        },
-        { status: 400 }
-      );
-    }
+    // Email is optional - if provided, it will be verified for security
 
     // Get booking from database
     const result = await database.getBookingById(bookingId);
@@ -46,8 +38,8 @@ export async function GET(
 
     const booking = result.booking;
 
-    // Verify email matches
-    if (booking.email.toLowerCase() !== email.toLowerCase()) {
+    // Verify email matches if email is provided
+    if (email && booking.email.toLowerCase() !== email.toLowerCase()) {
       return NextResponse.json(
         { 
           success: false, 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Filter, Eye, Edit, Trash2, CheckCircle, XCircle, Calendar, X } from 'lucide-react';
+import { Search, Filter, Eye, Edit, Trash2, CheckCircle, XCircle, Calendar, X, Check } from 'lucide-react';
 
 import { BookingProvider } from '@/contexts/BookingContext';
 import { DatePickerProvider } from '@/contexts/DatePickerContext';
@@ -31,6 +31,34 @@ export default function BookingsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [bookingAccess, setBookingAccess] = useState<'view' | 'edit'>('view');
+  const canEdit = bookingAccess === 'edit';
+
+  useEffect(() => {
+    const readAccessFromStorage = () => {
+      try {
+        const stored = localStorage.getItem('staffUser');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setBookingAccess(parsed?.bookingAccess === 'edit' ? 'edit' : 'view');
+        } else {
+          setBookingAccess('view');
+        }
+      } catch (error) {
+        setBookingAccess('view');
+      }
+    };
+
+    readAccessFromStorage();
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'staffUser') {
+        readAccessFromStorage();
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   // Helper function to convert UTC to IST
   const convertToIST = (utcDate: string) => {
@@ -146,6 +174,10 @@ export default function BookingsPage() {
   const [selectedDate, setSelectedDate] = useState('');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isManualBookingOpen, setIsManualBookingOpen] = useState(false);
+  const [paymentUpdatingId, setPaymentUpdatingId] = useState<string | null>(null);
+  const [isPaymentMethodModalOpen, setIsPaymentMethodModalOpen] = useState(false);
+  const [bookingPendingPayment, setBookingPendingPayment] = useState<any | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'cash'>('online');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -224,65 +256,65 @@ export default function BookingsPage() {
         }
       };
 
+      // Completed bookings from GoDaddy SQL (no fallback to JSON files)
       let completedArray = (completedData.bookings || []) as any[];
-      if (!completedArray || completedArray.length === 0) {
-        completedArray = await getPublicJson('/data/exports/completed-bookings.json');
-        if (!completedArray || completedArray.length === 0) {
-          completedArray = await getPublicJson('/exports/completed-bookings.json');
-        }
-      }
 
-      let manualArray = (manualData.bookings || []) as any[];
-      if (!manualArray || manualArray.length === 0) {
-        manualArray = await getPublicJson('/data/exports/manual-bookings.json');
-        if (!manualArray || manualArray.length === 0) {
-          manualArray = await getPublicJson('/exports/manual-bookings.json');
-        }
-      }
+      // Manual bookings are now fetched from database, not JSON files
+      let manualArray = (manualData.manualBookings || []) as any[];
 
+      // Cancelled bookings from GoDaddy SQL (no fallback to JSON files)
       let cancelledArray = (cancelledData.bookings || []) as any[];
-      if (!cancelledArray || cancelledArray.length === 0) {
-        cancelledArray = await getPublicJson('/data/exports/cancelled-bookings.json');
-        if (!cancelledArray || cancelledArray.length === 0) {
-          cancelledArray = await getPublicJson('/exports/cancelled-bookings.json');
-        }
-      }
 
-      // Process confirmed bookings from database (only confirmed/pending status)
+      // Process confirmed bookings from database (confirmed/pending/manual status)
       const confirmedBookings = (confirmedData.bookings || []).map((booking: any) => {
-        // Only include confirmed/pending bookings from database
-        if (booking.status === 'confirmed' || booking.status === 'pending') {
+        const rawPaymentStatus = (booking.paymentStatus || booking.payment_status || '').toString().toLowerCase();
+        const normalizedPaymentStatus = rawPaymentStatus === 'paid' ? 'paid' : 'unpaid';
+        // Include confirmed, pending, and manual bookings from database
+        if (booking.status === 'confirmed' || booking.status === 'pending' || booking.status === 'manual') {
           return {
             ...booking,
-            bookingType: 'online',
-            createdAtIST: convertToIST(booking.createdAt)
+            bookingType: booking.status === 'manual' ? 'manual' : 'online',
+            createdAtIST: convertToIST(booking.createdAt),
+            paymentStatus: normalizedPaymentStatus,
+            venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null
           };
         }
         return null;
       }).filter(Boolean);
 
-      // Process completed bookings from JSON file (data/exports/completed-bookings.json)
+      // Process completed bookings from GoDaddy SQL
       const completedBookings = (completedArray).map((booking: any) => ({
         ...booking,
         bookingType: 'online',
         status: 'completed',
-        createdAtIST: convertToIST(booking.createdAt)
+        paymentStatus: 'paid',
+        venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null,
+        // Map SQL column names to expected field names
+        theaterName: booking.theater_name || booking.theaterName || booking.theater,
+        theater: booking.theater_name || booking.theaterName || booking.theater,
+        createdAtIST: convertToIST(booking.completed_at || booking.completedAt || booking.createdAt)
       }));
 
-      // Process manual bookings from JSON file (data/exports/manual-bookings.json)
+      // Process manual bookings from database (manual_booking collection)
       const manualBookings = (manualArray).map((booking: any) => ({
         ...booking,
         bookingType: 'manual',
         status: 'manual',
+        paymentStatus: (booking.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
+        venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null,
         createdAtIST: convertToIST(booking.createdAt)
       }));
 
-      // Process cancelled bookings from JSON file (data/exports/cancelled-bookings.json)
+      // Process cancelled bookings from GoDaddy SQL
       const cancelledBookings = (cancelledArray).map((booking: any) => ({
         ...booking,
         bookingType: 'online',
         status: 'cancelled',
-        createdAtIST: convertToIST(booking.cancelledAt || booking.createdAt)
+        paymentStatus: (booking.paymentStatus || booking.payment_status || '').toString().toLowerCase() === 'paid' ? 'paid' : 'unpaid',
+        // Map SQL column names to expected field names
+        theaterName: booking.theater_name || booking.theaterName || booking.theater,
+        theater: booking.theater_name || booking.theaterName || booking.theater,
+        createdAtIST: convertToIST(booking.cancelledAt || booking.cancelled_at || booking.createdAt)
       }));
 
       // Process incomplete bookings from database
@@ -290,6 +322,7 @@ export default function BookingsPage() {
         ...booking,
         bookingType: 'online',
         status: 'incomplete',
+        paymentStatus: (booking.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
         createdAtIST: convertToIST(booking.createdAt)
       }));
 
@@ -314,6 +347,7 @@ export default function BookingsPage() {
           time: booking.time || '',
           status: booking.status || 'pending', // Keep exact status from database
           amount: booking.totalAmount || booking.amount || 0,
+          paymentStatus: (booking.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
           bookingDate: booking.createdAt ? new Date(booking.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           bookingType: booking.bookingType || 'online',
           occasion: booking.occasion || '',
@@ -365,6 +399,9 @@ export default function BookingsPage() {
   // Open edit modal when coming from Edit Booking Requests page
   const [pendingOpenEditIdChecked, setPendingOpenEditIdChecked] = useState(false);
   useEffect(() => {
+    if (!canEdit) {
+      return;
+    }
     if (pendingOpenEditIdChecked) return;
     const targetBookingId = sessionStorage.getItem('openEditBookingId');
     const targetMongoId = sessionStorage.getItem('openEditBookingMongoId');
@@ -395,7 +432,7 @@ export default function BookingsPage() {
         setPendingOpenEditIdChecked(true);
       }
     }
-  }, [bookings, pendingOpenEditIdChecked]);
+  }, [bookings, pendingOpenEditIdChecked, canEdit]);
 
   // Real-time clock update every second
   useEffect(() => {
@@ -408,6 +445,10 @@ export default function BookingsPage() {
 
   // Check if we need to reopen the manual booking popup
   useEffect(() => {
+    if (!canEdit) {
+      return;
+    }
+
     const checkAndReopenPopup = () => {
       const shouldReopen = sessionStorage.getItem('reopenAdminBookingPopup') === 'true';
       const hasFormData = sessionStorage.getItem('adminBookingFormData');
@@ -444,7 +485,7 @@ export default function BookingsPage() {
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [canEdit]);
 
   // Calculate status counts
   const statusCounts = {
@@ -562,33 +603,82 @@ export default function BookingsPage() {
   }, [searchTerm, statusFilter, showTodayOnly, showTomorrowOnly, selectedDate]);
 
   const handleStatusChange = async (id: number, newStatus: string) => {
+    if (!canEdit) {
+      showError('You have view-only access. Ask an administrator to enable edits.');
+      return;
+    }
     try {
+      // Get current staff info from localStorage
+      let cancelledBy = 'Staff'; // Management page is for staff only
+      let staffName = 'Staff Member'; // Default fallback
+      let userId = null;
+      
+      const staffUser = localStorage.getItem('staffUser');
+      console.log('🔍 [BOOKINGS PAGE] staffUser from localStorage:', staffUser);
+      
+      if (staffUser) {
+        try {
+          const staffData = JSON.parse(staffUser);
+          console.log('🔍 [BOOKINGS PAGE] Parsed staff data:', staffData);
+          
+          staffName = staffData.name || 'Staff Member';
+          userId = staffData.userId || staffData.id;
+          
+          console.log('🔍 [BOOKINGS PAGE] Staff info extracted:', { cancelledBy, staffName, userId });
+        } catch (e) {
+          console.error('❌ [BOOKINGS PAGE] Failed to parse staff user data:', e);
+        }
+      } else {
+        console.warn('⚠️ [BOOKINGS PAGE] No staffUser found in localStorage');
+      }
+
+      const requestBody = {
+        bookingId: id.toString(),
+        status: newStatus.toLowerCase(),
+        // Add staff tracking info for cancellations
+        ...(newStatus.toLowerCase() === 'cancelled' && {
+          cancelledBy: cancelledBy,
+          staffName: staffName,
+          userId: userId
+        })
+      };
+      
+      console.log('📤 [BOOKINGS PAGE] Sending request to API:', requestBody);
+
       const response = await fetch('/api/admin/update-booking', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          bookingId: id.toString(),
-          status: newStatus.toLowerCase()
-        })
+        body: JSON.stringify(requestBody)
       });
 
       const data = await response.json();
 
       if (data.success) {
-        // Refresh the bookings list
-        await fetchBookings();
-
+        // Update bookings state directly without page reload
+        setBookings(prevBookings => 
+          prevBookings.map(booking => 
+            booking.id === id
+              ? { ...booking, status: newStatus.toLowerCase() }
+              : booking
+          )
+        );
+        
+        console.log(`✅ Booking ${id} status updated to ${newStatus}`);
       } else {
-
+        console.error('Failed to update booking status:', data.error);
       }
     } catch (error) {
-
+      console.error('Error updating booking status:', error);
     }
   };
 
   const handleManualBooking = () => {
+    if (!canEdit) {
+      showError('You currently have view-only access. Ask an administrator to enable booking edits.');
+      return;
+    }
     // Redirect to ManualBooking page instead of opening popup
     window.open('/ManualBooking', '_blank');
   };
@@ -684,6 +774,11 @@ export default function BookingsPage() {
   };
 
   const handleEditBooking = (booking: any) => {
+    if (!canEdit) {
+      showError('You have view-only access. Switch to Edit in Staff Management to modify bookings.');
+      void handleViewBooking(booking);
+      return;
+    }
     const query = new URLSearchParams({
       bookingId: String(booking.originalBookingId || booking.id || ''),
       email: String(booking.email || ''),
@@ -696,6 +791,10 @@ export default function BookingsPage() {
 
   // Delete/Cancel booking
   const handleDeleteBooking = async (booking: any) => {
+    if (!canEdit) {
+      showError('You have view-only access. Contact an administrator to delete bookings.');
+      return;
+    }
     setBookingToDelete(booking);
     setShowConfirmModal(true);
   };
@@ -704,12 +803,40 @@ export default function BookingsPage() {
     if (!bookingToDelete) return;
 
     try {
+      // Get current staff info from localStorage
+      let cancelledBy = 'Staff'; // Management page is for staff only
+      let staffName = 'Staff Member'; // Default fallback
+      let userId = null;
+      
+      const staffUser = localStorage.getItem('staffUser');
+      console.log('🔍 [DELETE BOOKING] staffUser from localStorage:', staffUser);
+      
+      if (staffUser) {
+        try {
+          const staffData = JSON.parse(staffUser);
+          console.log('🔍 [DELETE BOOKING] Parsed staff data:', staffData);
+          
+          staffName = staffData.name || 'Staff Member';
+          userId = staffData.userId || staffData.id;
+          
+          console.log('🔍 [DELETE BOOKING] Staff info extracted:', { cancelledBy, staffName, userId });
+        } catch (e) {
+          console.error('❌ [DELETE BOOKING] Failed to parse staff user data:', e);
+        }
+      } else {
+        console.warn('⚠️ [DELETE BOOKING] No staffUser found in localStorage');
+      }
+
       const requestBody = {
         bookingId: bookingToDelete.originalBookingId || bookingToDelete.id.toString(), // Use original booking ID for API call
-        status: 'cancelled'
+        status: 'cancelled',
+        // Add staff tracking info
+        cancelledBy: cancelledBy,
+        staffName: staffName,
+        userId: userId
       };
 
-
+      console.log('📤 [DELETE BOOKING] Sending request to API:', requestBody);
 
       const response = await fetch('/api/admin/update-booking', {
         method: 'PUT',
@@ -723,14 +850,21 @@ export default function BookingsPage() {
 
 
       if (data.success) {
-        // Refresh bookings after cancellation
-        await fetchBookings();
+        // Update bookings state directly without page reload
+        setBookings(prevBookings => 
+          prevBookings.map(booking => 
+            (booking.id === bookingToDelete.id || booking.originalBookingId === bookingToDelete.originalBookingId)
+              ? { ...booking, status: 'cancelled' }
+              : booking
+          )
+        );
+        
         showSuccess('Booking cancelled successfully!');
       } else {
         showError('Failed to cancel booking: ' + (data.error || 'Unknown error'));
       }
     } catch (error) {
-
+      console.error('Error cancelling booking:', error);
       showError('Error cancelling booking');
     } finally {
       setShowConfirmModal(false);
@@ -857,6 +991,91 @@ export default function BookingsPage() {
     );
   }
 
+  const handleMarkAsPaid = (booking: any) => {
+    if (!canEdit) {
+      showError('You have view-only access. Ask an administrator to enable edits.');
+      return;
+    }
+
+    const bookingId = booking.originalBookingId || booking.id;
+    if (!bookingId) {
+      showError('Booking ID missing');
+      return;
+    }
+
+    const currentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
+    if (currentStatus === 'paid') {
+      showSuccess('Payment already marked as paid.');
+      return;
+    }
+
+    setBookingPendingPayment(booking);
+    setSelectedPaymentMethod('online');
+    setIsPaymentMethodModalOpen(true);
+  };
+
+  const handleClosePaymentMethodModal = () => {
+    if (paymentUpdatingId) return;
+    setIsPaymentMethodModalOpen(false);
+    setBookingPendingPayment(null);
+    setSelectedPaymentMethod('online');
+  };
+
+  const handleConfirmPaymentMethod = async () => {
+    if (!bookingPendingPayment) return;
+    if (!canEdit) {
+      showError('You have view-only access. Ask an administrator to enable edits.');
+      return;
+    }
+
+    const booking = bookingPendingPayment;
+    const bookingId = booking.originalBookingId || booking.id;
+    if (!bookingId) {
+      showError('Booking ID missing');
+      return;
+    }
+
+    try {
+      setPaymentUpdatingId(booking.id);
+
+      const response = await fetch('/api/admin/update-booking', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          bookingId,
+          paymentStatus: 'paid',
+          venuePaymentMethod: selectedPaymentMethod,
+          sendInvoice: true,
+          isManualBooking: (booking.bookingType || '').toLowerCase() === 'manual'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setBookings(prev => prev.map(item => (
+          item.id === booking.id
+            ? { ...item, paymentStatus: 'paid', venuePaymentMethod: selectedPaymentMethod }
+            : item
+        )));
+
+        const methodLabel = selectedPaymentMethod === 'cash' ? 'Cash' : 'Online';
+        showSuccess(`Payment marked as paid (${methodLabel}).`);
+        setIsPaymentMethodModalOpen(false);
+        setBookingPendingPayment(null);
+      } else {
+        showError('Failed to update payment status: ' + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      showError('Error updating payment status');
+    } finally {
+      setPaymentUpdatingId(null);
+      setSelectedPaymentMethod('online');
+    }
+  };
+
   return (
     <div className="bookings-page">
       <div className="page-header">
@@ -866,7 +1085,7 @@ export default function BookingsPage() {
             <p>Manage all booking requests and applications</p>
           </div>
           <div className="header-actions">
-            <button className="manual-booking-btn" onClick={handleManualBooking}>
+            <button className="manual-booking-btn" onClick={handleManualBooking} title={canEdit ? 'Create a new manual booking' : 'View-only access: ask admin to enable edits'}>
               <Calendar size={16} />
               Manual Booking
             </button>
@@ -966,6 +1185,7 @@ export default function BookingsPage() {
               <th>Theater</th>
               <th>Date & Time</th>
               <th>Amount</th>
+              <th>Payment</th>
               <th>Reason</th>
               <th>Status</th>
               <th>Actions</th>
@@ -989,6 +1209,9 @@ export default function BookingsPage() {
                   b.status.toLowerCase() === 'confirmed'
                 );
                 const currentDateConfirmedBookingNumber = currentDateConfirmedBookings.length;
+                const normalizedPaymentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
+                const isPaid = normalizedPaymentStatus === 'paid';
+                const canMarkAsPaid = (booking.status || '').toLowerCase() === 'confirmed';
 
                 return (
                   <tr key={booking.id}>
@@ -1013,6 +1236,11 @@ export default function BookingsPage() {
                       </div>
                     </td>
                     <td>₹{booking.amount.toLocaleString()}</td>
+                    <td>
+                      <span className={`payment-badge ${isPaid ? 'paid' : 'unpaid'}`}>
+                        {isPaid ? 'Paid' : 'Unpaid'}
+                      </span>
+                    </td>
                     <td>{booking.cancelReason || '-'}</td>
                     <td>
                       <span className={`status-badge ${booking.status.toLowerCase()}`}>
@@ -1023,24 +1251,50 @@ export default function BookingsPage() {
                       <div className="action-buttons">
                         <button
                           className="action-btn view-btn"
-                          title="View Details"
                           onClick={() => handleViewBooking(booking)}
+                          title="View Details"
                         >
                           <Eye size={16} />
                         </button>
                         <button
                           className="action-btn edit-btn"
-                          title={(booking.status || '').toLowerCase() === 'cancelled' ? 'Cannot edit cancelled booking' : 'Edit Booking'}
-                          onClick={() => handleEditBooking(booking)}
-                          disabled={(booking.status || '').toLowerCase() === 'cancelled'}
+                          onClick={() => {
+                            if (!canEdit) {
+                              showError('You have view-only access. Switch to Edit in Staff Management to modify bookings.');
+                              return;
+                            }
+                            const query = new URLSearchParams({
+                              bookingId: String(booking.id ?? ''),
+                              email: String(booking.email ?? ''),
+                              theaterName: String(booking.theaterName || booking.theater || ''),
+                              date: String(booking.date ?? ''),
+                              time: String(booking.time ?? ''),
+                            }).toString();
+                            router.push(`/Editbooking?${query}`);
+                          }}
+                          title={canEdit ? 'Edit Booking' : 'View-only access'}
                         >
                           <Edit size={16} />
                         </button>
+                        {canMarkAsPaid && !isPaid && (
+                          <button
+                             className="action-btn pay-btn"
+                             onClick={() => {
+                               if (!canEdit) {
+                                 showError('You have view-only access. Ask an administrator to enable edits.');
+                                 return;
+                               }
+                               handleMarkAsPaid(booking);
+                             }}
+                             title={canEdit ? 'Mark as Paid' : 'View-only access'}
+                           >
+                            <CheckCircle size={16} />
+                          </button>
+                        )}
                         <button
                           className="action-btn delete-btn"
-                          title={(booking.status || '').toLowerCase() === 'cancelled' ? 'Already cancelled' : 'Cancel Booking'}
                           onClick={() => handleDeleteBooking(booking)}
-                          disabled={(booking.status || '').toLowerCase() === 'cancelled'}
+                          title={canEdit ? 'Delete Booking' : 'View-only access'}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -1198,6 +1452,15 @@ export default function BookingsPage() {
           background: #218838;
           transform: translateY(-1px);
           box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+        }
+
+        .manual-booking-btn.disabled,
+        .manual-booking-btn:disabled {
+          background: #e5e7eb;
+          color: #9ca3af;
+          cursor: not-allowed;
+          box-shadow: none;
+          transform: none;
         }
 
         .filters-section {
@@ -1366,6 +1629,30 @@ export default function BookingsPage() {
           color: #666;
         }
 
+        .payment-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0.25rem 0.75rem;
+          border-radius: 9999px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: capitalize;
+          border: 1px solid transparent;
+        }
+
+        .payment-badge.paid {
+          background: #d1fae5;
+          border-color: #10b981;
+          color: #047857;
+        }
+
+        .payment-badge.unpaid {
+          background: #fee2e2;
+          border-color: #f87171;
+          color: #b91c1c;
+        }
+
         .customer-info {
           display: flex;
           flex-direction: column;
@@ -1442,53 +1729,64 @@ export default function BookingsPage() {
         .action-buttons {
           display: flex;
           gap: 0.5rem;
+          align-items: center;
         }
 
         .action-btn {
-          padding: 0.5rem;
+          width: 32px;
+          height: 32px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           border: none;
           border-radius: 6px;
           cursor: pointer;
-          transition: all 0.3s ease;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          transition: all 0.2s ease;
+          color: #fff;
+          font-size: 0;
+        }
+
+        .action-btn:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+        }
+
+        .action-btn.pay-btn {
+          background: #f59e0b;
+          color: #fff;
         }
 
         .view-btn {
-          background: #3B82F6;
-          color: white;
+          background: #28a745;
         }
 
         .view-btn:hover {
-          background: #2563EB;
+          background: #218838;
         }
 
         .edit-btn {
-          background: #8B5CF6;
-          color: white;
+          background: #ffc107;
+          color: #212529;
         }
 
         .edit-btn:hover {
-          background: #7C3AED;
+          background: #e0a800;
         }
 
-        .confirm-btn {
-          background: #17a2b8;
-          color: white;
+        .cancel-btn {
+          background: #dc3545 !important;
         }
 
-        .confirm-btn:hover {
-          background: #138496;
-        }
-
-        .delete-btn {
-          background: #dc3545;
-          color: white;
-        }
-
-        .delete-btn:hover {
+        .cancel-btn:hover {
           background: #c82333;
+        }
+
+        .activate-btn {
+          background: #17a2b8;
+        }
+
+        .activate-btn:hover {
+          background: #138496;
         }
 
         .results-info {
@@ -1733,6 +2031,71 @@ export default function BookingsPage() {
 
         .modal-body {
           padding: 1.5rem;
+        }
+
+        .modal-subtitle {
+          color: #6B7280;
+          font-size: 0.95rem;
+          line-height: 1.5;
+          margin: 0;
+        }
+
+        .payment-method-modal {
+          background: #ffffff;
+          width: min(420px, 90vw);
+          padding: 2rem;
+          border-radius: 18px;
+          box-shadow: 0 25px 60px rgba(15, 23, 42, 0.2);
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+        }
+
+        .payment-method-options {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .payment-method-option {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.75rem;
+          padding: 1.1rem 1.25rem;
+          border-radius: 14px;
+          border: 1.5px solid #E5E7EB;
+          background: #F9FAFB;
+          text-align: left;
+          transition: all 0.2s ease;
+          cursor: pointer;
+        }
+
+        .payment-method-option .method-icon {
+          font-size: 1.6rem;
+        }
+
+        .payment-method-option .method-title {
+          display: block;
+          font-weight: 600;
+          color: #111827;
+        }
+
+        .payment-method-option .method-subtitle {
+          display: block;
+          color: #6B7280;
+          font-size: 0.85rem;
+          margin-top: 0.2rem;
+        }
+
+        .payment-method-option.selected {
+          border-color: #8B5CF6;
+          background: rgba(139, 92, 246, 0.08);
+          box-shadow: 0 10px 20px rgba(139, 92, 246, 0.18);
+        }
+
+        .payment-method-option:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
         .detail-grid {
@@ -2098,6 +2461,68 @@ export default function BookingsPage() {
           }
         }
       `}</style>
+
+      {isPaymentMethodModalOpen && bookingPendingPayment && (
+        <div className="modal-overlay" onClick={handleClosePaymentMethodModal}>
+          <div className="payment-method-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>How was the payment received?</h2>
+              <button
+                className="close-btn"
+                onClick={handleClosePaymentMethodModal}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="modal-subtitle">
+              Select the payment method used for booking #{bookingPendingPayment.originalBookingId || bookingPendingPayment.id}.
+            </p>
+
+            <div className="payment-method-options">
+              <button
+                type="button"
+                className={`payment-method-option ${selectedPaymentMethod === 'online' ? 'selected' : ''}`}
+                onClick={() => setSelectedPaymentMethod('online')}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                <span className="method-icon">💳</span>
+                <span className="method-title">Paid Online</span>
+                <span className="method-subtitle">UPI, card, or any digital mode</span>
+              </button>
+
+              <button
+                type="button"
+                className={`payment-method-option ${selectedPaymentMethod === 'cash' ? 'selected' : ''}`}
+                onClick={() => setSelectedPaymentMethod('cash')}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                <span className="method-icon">💵</span>
+                <span className="method-title">Paid in Cash</span>
+                <span className="method-subtitle">Amount collected at the venue</span>
+              </button>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                className="cancel-btn"
+                onClick={handleClosePaymentMethodModal}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                Cancel
+              </button>
+              <button
+                className="save-btn"
+                onClick={handleConfirmPaymentMethod}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                Mark as Paid
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

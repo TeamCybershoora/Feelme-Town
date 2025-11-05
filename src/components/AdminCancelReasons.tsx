@@ -165,6 +165,62 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
     }
   };
 
+  const resetToDefaultReasons = async () => {
+    if (!confirm('This will delete all current cancel reasons and add default ones. Are you sure?')) {
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      showMessage('success', 'Resetting to default reasons...');
+
+      // Delete all existing reasons except "Other"
+      for (const reason of reasons) {
+        const reasonText = getReasonText(reason);
+        if (reasonText.toLowerCase() !== 'other') {
+          const id = (reason as any)?.id || (reason as any)?._id;
+          if (id) {
+            await fetch(`/api/admin/cancel-reasons?id=${id}`, { method: 'DELETE' });
+          }
+        }
+      }
+
+      // Add default reasons
+      const defaultReasons = [
+        'Personal Emergency',
+        'Transportation Issue',
+        'Weather Conditions', 
+        'Health Issue',
+        'Work Commitment',
+        'Family Emergency',
+        'Other'
+      ];
+
+      for (const reason of defaultReasons) {
+        await fetch('/api/admin/cancel-reasons', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reason: reason,
+            category: 'General',
+            description: '',
+            isActive: true
+          })
+        });
+      }
+
+      // Refresh the list
+      await fetchCancelReasons();
+      showMessage('success', 'Cancel reasons reset to defaults successfully! ✅');
+
+    } catch (error) {
+      console.error('❌ Failed to reset reasons:', error);
+      showMessage('error', 'Failed to reset cancel reasons');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="admin-cancel-reasons">
       <div className="admin-cancel-reasons-header">
@@ -217,7 +273,17 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
       </div>
 
       <div className="reasons-list-section">
-        <h3>Current Cancel Reasons ({reasons.length})</h3>
+        <div className="reasons-list-header">
+          <h3>Current Cancel Reasons ({reasons.length})</h3>
+          <button 
+            onClick={resetToDefaultReasons}
+            disabled={isLoading}
+            className="reset-button"
+            title="Reset to default cancel reasons"
+          >
+            🔄 Reset to Defaults
+          </button>
+        </div>
         
         {isLoading ? (
           <div className="loading-state">
@@ -437,7 +503,40 @@ export default function AdminCancelReasons({ onClose }: AdminCancelReasonsProps)
           color: #1a1a1a;
           font-size: 18px;
           font-weight: 600;
+          margin: 0;
+        }
+
+        .reasons-list-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           margin-bottom: 16px;
+        }
+
+        .reset-button {
+          background: #f59e0b;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          padding: 8px 16px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .reset-button:hover:not(:disabled) {
+          background: #d97706;
+          transform: translateY(-1px);
+        }
+
+        .reset-button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
         }
 
         .loading-state, .empty-state {

@@ -14,6 +14,7 @@ interface Staff {
   photoType: 'upload' | 'avatar';
   role: 'staff';
   isActive: boolean;
+  bookingAccess?: 'view' | 'edit';
   createdAt?: Date;
 }
 
@@ -33,7 +34,8 @@ export default function StaffListPage() {
     profilePhoto: '',
     photoType: 'upload' as 'upload' | 'avatar',
     role: 'staff' as const,
-    password: ''
+    password: '',
+    bookingAccess: 'view' as 'view' | 'edit'
   });
 
   const [imagePreview, setImagePreview] = useState<string>('');
@@ -88,7 +90,11 @@ export default function StaffListPage() {
       const data = await response.json();
       
       if (data.success) {
-        setStaff(data.staff);
+        const normalizedStaff: Staff[] = (data.staff || []).map((member: any) => ({
+          ...member,
+          bookingAccess: member.bookingAccess === 'edit' ? 'edit' : 'view'
+        }));
+        setStaff(normalizedStaff);
       }
     } catch (error) {
       
@@ -163,7 +169,8 @@ export default function StaffListPage() {
       profilePhoto: '',
       photoType: 'upload',
       role: 'staff',
-      password: ''
+      password: '',
+      bookingAccess: 'view'
     });
     setImagePreview('');
     setSelectedImageFile(null);
@@ -180,7 +187,8 @@ export default function StaffListPage() {
       profilePhoto: staffMember.profilePhoto,
       photoType: staffMember.photoType,
       role: staffMember.role,
-      password: '' // Don't show existing password for security
+      password: '', // Don't show existing password for security
+      bookingAccess: staffMember.bookingAccess === 'edit' ? 'edit' : 'view'
     });
     setImagePreview(staffMember.profilePhoto);
     setSelectedImageFile(null);
@@ -332,6 +340,32 @@ export default function StaffListPage() {
     }
   };
 
+  const handleSetBookingAccess = async (staffMember: Staff, access: 'view' | 'edit') => {
+    const nextAccess = access === 'edit' ? 'edit' : 'view';
+    const currentAccess = staffMember.bookingAccess === 'edit' ? 'edit' : 'view';
+    if (currentAccess === nextAccess) return;
+
+    try {
+      const response = await fetch(`/api/admin/staff?id=${staffMember._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingAccess: nextAccess })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showToast(`Booking access set to ${nextAccess === 'edit' ? 'Edit' : 'View Only'}`, 'success');
+        fetchStaff();
+      } else {
+        showToast(data.error || 'Failed to update booking access', 'error');
+      }
+    } catch (error) {
+      
+      showToast('Failed to update booking access', 'error');
+    }
+  };
+ 
   if (loading) {
     return (
       <div className="user-list-page">
@@ -380,41 +414,61 @@ export default function StaffListPage() {
               </tr>
             </thead>
             <tbody>
-              {staff.map((user) => (
-                <tr key={user._id}>
-                  <td>
-                    <div className="profile-photo-cell">
-                      <img src={user.profilePhoto} alt={user.name} className="profile-photo-thumb" />
-                    </div>
-                  </td>
-                  <td>{user.name}</td>
-                  <td>{user.email}</td>
-                  <td>{user.phone}</td>
-                  <td>
-                    <span className={`status-badge ${user.isActive ? 'status-active' : 'status-inactive'}`}>
-                      {user.isActive ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="action-buttons">
-                      <label className="status-toggle">
-                        <input 
-                          type="checkbox" 
-                          checked={user.isActive}
-                          onChange={() => handleToggleStatus(user)}
-                        />
-                        <span className="toggle-slider"></span>
-                      </label>
-                      <button className="edit-btn" onClick={() => handleEditStaff(user)}>
-                        <Edit size={18} />
-                      </button>
-                      <button className="delete-btn" onClick={() => handleDeleteClick(user)}>
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {staff.map((user) => {
+                const bookingAccess = (user.bookingAccess === 'edit' ? 'edit' : 'view') as 'view' | 'edit';
+                return (
+                  <tr key={user._id}>
+                    <td>
+                      <div className="profile-photo-cell">
+                        <img src={user.profilePhoto} alt={user.name} className="profile-photo-thumb" />
+                      </div>
+                    </td>
+                    <td>{user.name}</td>
+                    <td>{user.email}</td>
+                    <td>{user.phone}</td>
+                    <td>
+                      <span className={`status-badge ${user.isActive ? 'status-active' : 'status-inactive'}`}>
+                        {user.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="action-buttons">
+                        <div className="access-chip-group" title="Toggle booking permissions">
+                          <span className="access-chip-label">Access:</span>
+                          <button
+                            className={`access-chip ${bookingAccess === 'view' ? 'active' : ''}`}
+                            type="button"
+                            onClick={() => handleSetBookingAccess(user, 'view')}
+                          >
+                            View
+                          </button>
+                          <button
+                            className={`access-chip ${bookingAccess === 'edit' ? 'active' : ''}`}
+                            type="button"
+                            onClick={() => handleSetBookingAccess(user, 'edit')}
+                          >
+                            Edit
+                          </button>
+                        </div>
+                        <label className="status-toggle">
+                          <input 
+                            type="checkbox" 
+                            checked={user.isActive}
+                            onChange={() => handleToggleStatus(user)}
+                          />
+                          <span className="toggle-slider"></span>
+                        </label>
+                        <button className={`edit-btn ${bookingAccess === 'view' ? 'disabled' : ''}`} onClick={() => bookingAccess === 'edit' && handleEditStaff(user)} disabled={bookingAccess === 'view'} title={bookingAccess === 'view' ? 'Switch to Edit access to allow modifications' : 'Edit staff details'}>
+                         <Edit size={18} />
+                       </button>
+                        <button className="delete-btn" onClick={() => handleDeleteClick(user)}>
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -523,6 +577,19 @@ export default function StaffListPage() {
                 />
               </div>
 
+              <div className="form-group">
+                <label>Booking Access</label>
+                <select
+                  className="form-input"
+                  value={formData.bookingAccess}
+                  onChange={(e) => setFormData({ ...formData, bookingAccess: e.target.value as 'view' | 'edit' })}
+                >
+                  <option value="view">View Only (no booking edits)</option>
+                  <option value="edit">View & Edit Bookings</option>
+                </select>
+                <span className="form-hint">Choose whether this staff member can modify bookings or just review them.</span>
+              </div>
+ 
               <div className="form-actions">
                 <button className="btn-secondary" onClick={() => setShowAddPopup(false)}>
                   Cancel
@@ -855,8 +922,50 @@ export default function StaffListPage() {
         .action-buttons {
           display: flex;
           gap: 0.5rem;
+          align-items: center;
+          flex-wrap: wrap;
         }
 
+        .access-chip-group {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          background: #f3f4f6;
+          border: 1px solid #e5e7eb;
+          border-radius: 999px;
+          padding: 0.25rem 0.5rem;
+        }
+
+        .access-chip-label {
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: #4b5563;
+          margin-right: 0.25rem;
+        }
+
+        .access-chip {
+          border: none;
+          border-radius: 999px;
+          padding: 0.35rem 0.75rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: #4b5563;
+          background: transparent;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .access-chip:hover {
+          background: rgba(59, 130, 246, 0.12);
+          color: #2563eb;
+        }
+
+        .access-chip.active {
+          background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+          color: #ffffff;
+          box-shadow: 0 6px 12px rgba(37, 99, 235, 0.25);
+        }
+ 
         .edit-btn, .delete-btn {
           padding: 0.5rem;
           border: none;
@@ -868,8 +977,15 @@ export default function StaffListPage() {
           justify-content: center;
         }
 
+        .edit-btn.disabled {
+          background: #e5e7eb;
+          color: #9ca3af;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+
         .edit-btn {
-          background: #f0f9ff;
+          background: #e0f2fe;
           color: #0369a1;
         }
 
@@ -1218,6 +1334,13 @@ export default function StaffListPage() {
             transform: translateX(0);
             opacity: 1;
           }
+        }
+
+        .form-hint {
+          display: block;
+          font-size: 0.75rem;
+          color: #6b7280;
+          margin-top: 0.35rem;
         }
       `}</style>
     </div>

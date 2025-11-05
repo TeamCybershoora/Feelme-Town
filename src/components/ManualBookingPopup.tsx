@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Minus, X, Check, Star, Calendar, Clock, Users, MapPin, Gift, Cake, Sparkles, Play, Phone, MessageCircle } from 'lucide-react';
@@ -54,6 +54,14 @@ interface OccasionOption {
   popular?: boolean;
 }
 
+interface TrustedCustomerPrefill {
+  customerId?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  billingPreference?: 'paid' | 'free';
+}
+
 interface BookingPopupProps {
   isOpen: boolean;
   onClose: () => void;
@@ -66,10 +74,11 @@ interface BookingPopupProps {
     adminName?: string;
     profilePhoto?: string;
   }; // User information for tracking who created the booking
+  prefillCustomer?: TrustedCustomerPrefill | null;
 }
 
 
-export default function BookingPopup({ isOpen, onClose, isManualMode = false, onSuccess, userInfo }: BookingPopupProps) {
+export default function BookingPopup({ isOpen, onClose, isManualMode = false, onSuccess, userInfo, prefillCustomer = null }: BookingPopupProps) {
   const { selectedTheater, selectedDate, selectedTimeSlot, setSelectedTimeSlot, setSelectedTheater, setSelectedDate, openBookingPopup, closeBookingPopup, refreshBookedSlots } = useBooking();
   const { isDatePickerOpen, openDatePicker, closeDatePicker } = useDatePicker();
   
@@ -132,12 +141,45 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     convenienceFee: 50
   });
   const [pricingLoaded, setPricingLoaded] = useState(false);
+  const [trustedCustomerInfo, setTrustedCustomerInfo] = useState<TrustedCustomerPrefill | null>(prefillCustomer ?? null);
+  const prefillTokenRef = useRef<string | null>(null);
+
+  const sanitizePhoneNumber = (value?: string) => {
+    if (!value) return '';
+    const digits = value.replace(/\D/g, '');
+    if (digits.length <= 10) return digits;
+    return digits.slice(-10);
+  };
+
+  const applyTrustedCustomerToForm = useCallback((source?: TrustedCustomerPrefill | null) => {
+    const info = source ?? trustedCustomerInfo;
+    if (!info) return;
+    const sanitizedPhone = sanitizePhoneNumber(info.phone);
+    setFormData(prev => ({
+      ...prev,
+      bookingName: info.name ?? prev.bookingName,
+      whatsappNumber: sanitizedPhone || prev.whatsappNumber,
+      emailAddress: info.email ?? prev.emailAddress
+    }));
+  }, [trustedCustomerInfo]);
+
+  const formatPhoneDisplay = (value?: string) => {
+    if (!value) return '';
+    const digits = value.replace(/\D/g, '');
+    if (digits.length === 10) {
+      return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+    }
+    if (digits.length > 0) {
+      return digits;
+    }
+    return value;
+  };
 
   // Fetch pricing data from JSON file
   useEffect(() => {
     const fetchPricingData = async () => {
       try {
-        const response = await fetch('/api/pricing');
+        const response = await fetch('/api/pricing', { cache: 'no-store' });
         const data = await response.json();
         
         if (data.success && data.pricing) {
@@ -156,6 +198,28 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       fetchPricingData();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    setTrustedCustomerInfo(prefillCustomer ?? null);
+    if (!prefillCustomer) {
+      prefillTokenRef.current = null;
+    }
+  }, [prefillCustomer]);
+
+  useEffect(() => {
+    if (isOpen && prefillCustomer) {
+      const token = JSON.stringify(prefillCustomer);
+      if (prefillTokenRef.current !== token) {
+        setTrustedCustomerInfo(prefillCustomer);
+        applyTrustedCustomerToForm(prefillCustomer);
+        prefillTokenRef.current = token;
+      }
+    }
+
+    if (!isOpen) {
+      prefillTokenRef.current = null;
+    }
+  }, [isOpen, prefillCustomer, applyTrustedCustomerToForm]);
 
   // Fetch real theater data from database
   useEffect(() => {
@@ -2101,6 +2165,33 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           <div className="booking-popup-layout">
             {/* Main Panel */}
             <div className="booking-popup-main">
+              {trustedCustomerInfo && (
+                <div className="manual-booking-trusted-banner">
+                  <div className="manual-booking-trusted-header">
+                    <span className="manual-booking-trusted-tag">Trusted Customer</span>
+                    {trustedCustomerInfo.customerId && (
+                      <span className="manual-booking-trusted-id">#{trustedCustomerInfo.customerId}</span>
+                    )}
+                    {trustedCustomerInfo.billingPreference && (
+                      <span className={`manual-booking-trusted-pill ${trustedCustomerInfo.billingPreference === 'free' ? 'free' : 'paid'}`}>
+                        {trustedCustomerInfo.billingPreference === 'free' ? 'Complimentary' : 'Paid' }
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="manual-booking-trusted-fill"
+                      onClick={() => applyTrustedCustomerToForm()}
+                    >
+                      Fill Customer Details
+                    </button>
+                  </div>
+                  <div className="manual-booking-trusted-details">
+                    {trustedCustomerInfo.name && <span>{trustedCustomerInfo.name}</span>}
+                    {trustedCustomerInfo.phone && <span>{formatPhoneDisplay(trustedCustomerInfo.phone)}</span>}
+                    {trustedCustomerInfo.email && <span>{trustedCustomerInfo.email}</span>}
+                  </div>
+                </div>
+              )}
               <div className="booking-popup-tab-content">
                 {activeTab === 'Overview' && (
                   <div className="booking-popup-section">
@@ -2964,7 +3055,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                       `Time: ${selectedTimeSlot || 'N/A'}`
                     ].join('\n');
                     const name = formData.bookingName ? `Hi ${formData.bookingName},` : 'Hi,';
-                    const message = `${name}\nWe’d like to edit your booking.\n${details}\nPlease reply to confirm.`;
+                    const message = `${name}\nWe'd like to edit your booking.\n${details}\nPlease reply to confirm.`;
                     const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
                     window.open(whatsappUrl, '_blank');
                   }}
@@ -5882,6 +5973,111 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             60% { 
               transform: translateY(-5px); 
             }
+          }
+
+          .manual-booking-trusted-banner {
+            margin: 1.5rem 1.5rem 0 1.5rem;
+            padding: 1rem 1.25rem;
+            border-radius: 1rem;
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(99, 102, 241, 0.12));
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+          }
+
+          .manual-booking-trusted-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            color: #e2e8f0;
+            font-size: 0.85rem;
+            font-weight: 600;
+          }
+
+          .manual-booking-trusted-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.7rem;
+            border-radius: 999px;
+            background: rgba(99, 102, 241, 0.28);
+            color: #c7d2fe;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.7rem;
+          }
+
+          .manual-booking-trusted-id {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.65rem;
+            border-radius: 999px;
+            background: rgba(37, 99, 235, 0.28);
+            color: #bfdbfe;
+            font-size: 0.75rem;
+          }
+
+          .manual-booking-trusted-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+          }
+
+          .manual-booking-trusted-pill.paid {
+            background: rgba(12, 74, 110, 0.4);
+            color: #bae6fd;
+          }
+
+          .manual-booking-trusted-pill.free {
+            background: rgba(22, 163, 74, 0.35);
+            color: #bbf7d0;
+          }
+
+          .manual-booking-trusted-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+          }
+
+          .manual-booking-trusted-details span {
+            display: inline-flex;
+            align-items: center;
+          }
+
+          .manual-booking-trusted-details span::before {
+            content: '•';
+            margin-right: 0.35rem;
+            color: rgba(148, 163, 184, 0.6);
+          }
+
+          .manual-booking-trusted-details span:first-of-type::before {
+            content: '';
+            margin: 0;
+          }
+
+          .manual-booking-trusted-fill {
+            margin-left: auto;
+            padding: 0.35rem 0.85rem;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            background: rgba(15, 23, 42, 0.6);
+            color: #cbd5f5;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.18s ease;
+          }
+
+          .manual-booking-trusted-fill:hover {
+            background: rgba(99, 102, 241, 0.25);
+            border-color: rgba(99, 102, 241, 0.4);
+            color: #f8fafc;
           }
 
         `}</style>

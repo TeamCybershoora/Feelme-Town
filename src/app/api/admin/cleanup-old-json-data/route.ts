@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ExportsStorage } from '@/lib/exports-storage';
+import { ExportsStorage } from '@/lib/exports-storage'; // Dummy - no longer used
 
 // POST /api/admin/cleanup-old-json-data
-// Cleans up JSON data older than 1 month from cancelled and completed bookings
+// DISABLED: JSON cleanup not needed - data now stored in GoDaddy SQL
 export async function POST(request: NextRequest) {
+  return NextResponse.json({
+    success: true,
+    message: 'JSON cleanup disabled - data now stored in GoDaddy SQL database',
+    note: 'Old JSON files are no longer used. All data is in SQL.'
+  });
+  
+  /* DISABLED CODE - keeping for reference
   try {
     const fs = require('fs').promises;
     const path = require('path');
@@ -187,5 +194,6 @@ export async function GET(request: NextRequest) {
       error: 'Failed to check warnings'
     }, { status: 500 });
   }
+  */
 }
 

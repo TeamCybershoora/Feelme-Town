@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
-import { ExportsStorage } from '@/lib/exports-storage';
+import { ExportsStorage } from '@/lib/exports-storage'; // Dummy - no longer used
 
 // POST /api/cancel-booking - Cancel booking and process refund
 export async function POST(request: NextRequest) {
   try {
+    console.log('🚀 [CANCEL API] Cancel booking API called');
     const body = await request.json();
+    console.log('📝 [CANCEL API] Request body:', JSON.stringify(body, null, 2));
     
     // Validate required fields
     const { bookingId, email, reason } = body;
+    console.log(`📋 [CANCEL API] Booking ID: ${bookingId}, Email: ${email}`);
     
     if (!bookingId || !email) {
       return NextResponse.json(
@@ -83,28 +86,82 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Save cancelled booking to blob storage JSON
+    // Prepare cancelled booking record - Include ALL fields from MongoDB
+    const record = {
+      // Basic booking info
+      bookingId: booking.bookingId || booking.id || booking._id,
+      name: booking.name,
+      email: booking.email,
+      phone: booking.phone,
+      theaterName: booking.theaterName,
+      date: booking.date,
+      time: booking.time,
+      occasion: booking.occasion,
+      numberOfPeople: booking.numberOfPeople,
+      
+      // Payment info
+      advancePayment: Math.round((booking.totalAmount || 0) * 0.25),
+      venuePayment: Math.round((booking.totalAmount || 0) * 0.75),
+      totalAmount: booking.totalAmount,
+      
+      // Cancellation info
+      status: 'cancelled',
+      cancelledAt: new Date().toISOString(),
+      cancelReason: (typeof reason === 'string' && reason.trim()) ? reason.trim() : 'Cancelled by Customer',
+      refundAmount,
+      refundStatus,
+      
+      // Additional MongoDB fields - Pass everything to SQL
+      occasionPersonName: booking.occasionPersonName,
+      bookingType: booking.bookingType,
+      createdBy: booking.createdBy,
+      isManualBooking: booking.isManualBooking,
+      staffId: booking.staffId,
+      staffName: booking.staffName,
+      notes: booking.notes,
+      createdAt: booking.createdAt,
+      
+      // Custom fields (Your Nickname, Partner Name, etc.)
+      ...(booking['Your Nickname'] && { 'Your Nickname': booking['Your Nickname'] }),
+      ...(booking['Your Nickname_label'] && { 'Your Nickname_label': booking['Your Nickname_label'] }),
+      ...(booking['Your Nickname_value'] && { 'Your Nickname_value': booking['Your Nickname_value'] }),
+      ...(booking["Your Partner's Name"] && { "Your Partner's Name": booking["Your Partner's Name"] }),
+      ...(booking["Your Partner's Name_label"] && { "Your Partner's Name_label": booking["Your Partner's Name_label"] }),
+      ...(booking["Your Partner's Name_value"] && { "Your Partner's Name_value": booking["Your Partner's Name_value"] }),
+      
+      // Arrays (movies, cakes, decor, gifts)
+      selectedMovies: booking.selectedMovies || [],
+      selectedCakes: booking.selectedCakes || [],
+      selectedDecorItems: booking.selectedDecorItems || [],
+      selectedGifts: booking.selectedGifts || [],
+      
+      // Complete original booking data (everything from MongoDB)
+      _originalBooking: booking
+    };
+    
+    console.log(`📝 Cancelled booking record:`, JSON.stringify(record, null, 2));
+    
+    // Sync to GoDaddy SQL database (PRIORITY - Always run this first)
+    try {
+      console.log(`🔄 [GODADDY SQL] Starting sync for cancelled booking: ${record.bookingId}`);
+      console.log(`🔄 [GODADDY SQL] Record data:`, JSON.stringify(record, null, 2));
+      
+      const { syncCancelledBookingToSQL } = await import('@/lib/godaddy-sql');
+      const result = await syncCancelledBookingToSQL(record);
+      
+      if (result.success) {
+        console.log(`✅ [GODADDY SQL] Successfully synced cancelled booking to GoDaddy SQL: ${record.bookingId}`);
+      } else {
+        console.error(`❌ [GODADDY SQL] Sync failed:`, result.error);
+      }
+    } catch (sqlError) {
+      console.error('❌ [GODADDY SQL] Exception during sync:', sqlError);
+      console.error('❌ [GODADDY SQL] Error stack:', (sqlError as Error).stack);
+    }
+    
+    // Save cancelled booking to blob storage JSON (optional backup)
     try {
       console.log(`🗑️ Saving cancelled booking ${bookingId} to cancelled-bookings.json`);
-      const record = {
-        bookingId: booking.bookingId || booking.id || booking._id,
-        name: booking.name,
-        email: booking.email,
-        phone: booking.phone,
-        theaterName: booking.theaterName,
-        date: booking.date,
-        time: booking.time,
-        occasion: booking.occasion,
-        numberOfPeople: booking.numberOfPeople,
-        advancePayment: Math.round((booking.totalAmount || 0) * 0.25),
-        venuePayment: Math.round((booking.totalAmount || 0) * 0.75),
-        totalAmount: booking.totalAmount,
-        status: 'cancelled',
-        cancelledAt: new Date().toISOString(),
-        cancelReason: (typeof reason === 'string' && reason.trim()) ? reason.trim() : 'Cancelled by Customer'
-      };
-      
-      console.log(`📝 Cancelled booking record:`, JSON.stringify(record, null, 2));
       await ExportsStorage.appendToArray('cancelled-bookings.json', record);
       console.log(`✅ Successfully saved cancelled booking to blob storage`);
     } catch (blobError) {

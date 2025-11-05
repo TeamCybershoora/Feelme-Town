@@ -1,23 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ExportsStorage } from '@/lib/exports-storage';
+import database from '@/lib/db-connect';
 
-// GET /api/admin/cancel-reasons - Get all cancel reasons
+// GET /api/admin/cancel-reasons - Get all cancel reasons from database
 export async function GET() {
   try {
-    console.log('📖 GET /api/admin/cancel-reasons - Reading from blob storage');
+    console.log('📝 Fetching cancel reasons from database...');
     
-    const rawReasons = await ExportsStorage.readArray('cancel-reasons.json');
-    // Normalize to simple strings
-    const toText = (r: any) => (typeof r === 'string' ? r : (r?.reason ?? ''));
-    const cancelReasons = (rawReasons || [])
-      .map(toText)
-      .filter((s: string) => !!(s || '').trim());
+    // Get all cancel reasons from database
+    const result = await (database as any).getAllCancelReasons();
     
+    if (!result.success) {
+      console.error('❌ Failed to fetch cancel reasons from database:', result.error);
+      return NextResponse.json({ 
+        success: false, 
+        error: result.error || 'Failed to fetch cancel reasons' 
+      }, { status: 500 });
+    }
+
+    console.log(`✅ Retrieved ${result.total} cancel reasons from database`);
+
     return NextResponse.json({
       success: true,
-      cancelReasons,
-      count: cancelReasons.length,
-      source: 'blob-storage'
+      cancelReasons: result.cancelReasons,
+      total: result.total,
+      source: 'database'
     });
   } catch (error) {
     console.error('❌ GET Cancel Reasons API Error:', error);
@@ -28,12 +34,12 @@ export async function GET() {
   }
 }
 
-// POST /api/admin/cancel-reasons - Add new cancel reason
+// POST /api/admin/cancel-reasons - Create new cancel reason
 export async function POST(request: NextRequest) {
   try {
-    console.log('➕ POST /api/admin/cancel-reasons - Adding new cancel reason');
+    console.log('📝 Creating new cancel reason...');
     const body = await request.json();
-    const { reason, category = 'General', isActive = true } = body;
+    const { reason, category = 'General', description, isActive = true } = body;
 
     if (!reason || !reason.trim()) {
       return NextResponse.json({
@@ -42,41 +48,37 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const trimmed = reason.trim();
-    // Read current reasons and normalize to strings
-    const rawReasons = await ExportsStorage.readArray('cancel-reasons.json');
-    const toText = (r: any) => (typeof r === 'string' ? r : (r?.reason ?? ''));
-    let currentReasons: string[] = (rawReasons || []).map(toText).filter((s: string) => !!(s || '').trim());
+    console.log('📝 Creating new cancel reason:', reason.trim());
 
-    // Prevent duplicates (case-insensitive)
-    const exists = currentReasons.some(r => r.trim().toLowerCase() === trimmed.toLowerCase());
-    if (exists) {
-      return NextResponse.json({ success: false, error: 'This cancel reason already exists' }, { status: 409 });
+    // Save cancel reason to database
+    const result = await (database as any).saveCancelReason({
+      reason: reason.trim(),
+      category: category.trim(),
+      description: description || '',
+      isActive
+    });
+
+    if (!result.success) {
+      console.error('❌ Failed to save cancel reason to database:', result.error);
+      return NextResponse.json({ 
+        success: false, 
+        error: result.error || 'Failed to save cancel reason' 
+      }, { status: 500 });
     }
 
-    // Insert before 'Other' if present, else push
-    const otherIdx = currentReasons.findIndex(r => r.trim().toLowerCase() === 'other');
-    if (otherIdx !== -1) {
-      currentReasons.splice(otherIdx, 0, trimmed);
-    } else {
-      currentReasons.push(trimmed);
-    }
+    console.log('✅ Cancel reason saved successfully:', result.cancelReason.id);
 
-    // Persist as array of strings
-    await ExportsStorage.writeArray('cancel-reasons.json', currentReasons);
-
-    console.log(`✅ New cancel reason added (string): "${trimmed}"`);
     return NextResponse.json({ 
       success: true, 
-      message: 'Cancel reason added successfully',
-      reason: trimmed,
-      cancelReasons: currentReasons
+      message: 'Cancel reason created successfully!',
+      cancelReason: result.cancelReason,
+      source: 'database'
     });
   } catch (error) {
     console.error('❌ POST Cancel Reasons API Error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Failed to add cancel reason' 
+      error: 'Failed to create cancel reason' 
     }, { status: 500 });
   }
 }
@@ -84,48 +86,41 @@ export async function POST(request: NextRequest) {
 // PUT /api/admin/cancel-reasons - Update cancel reason
 export async function PUT(request: NextRequest) {
   try {
-    console.log('✏️ PUT /api/admin/cancel-reasons - Updating cancel reason');
+    console.log('📝 Updating cancel reason...');
     const body = await request.json();
-    const { id, reason, category, isActive } = body;
+    const { id, reason, category, description, isActive } = body;
 
     if (!id) {
       return NextResponse.json({
         success: false,
-        error: 'Cancel reason ID is required'
+        error: 'Cancel reason ID is required for update'
       }, { status: 400 });
     }
 
-    // Read existing reasons
-    const cancelReasons = await ExportsStorage.readArray('cancel-reasons.json');
-    
-    // Find and update the reason
-    const reasonIndex = cancelReasons.findIndex((r: any) => r.id === id);
-    if (reasonIndex === -1) {
-      return NextResponse.json({
-        success: false,
-        error: 'Cancel reason not found'
-      }, { status: 404 });
-    }
+    console.log('📝 Updating cancel reason:', id);
 
-    // Update the reason
-    cancelReasons[reasonIndex] = {
-      ...cancelReasons[reasonIndex],
+    // Update cancel reason in database
+    const result = await (database as any).updateCancelReason(id, {
       ...(reason && { reason: reason.trim() }),
       ...(category && { category: category.trim() }),
-      ...(isActive !== undefined && { isActive }),
-      updatedAt: new Date().toISOString(),
-      updatedBy: 'Administrator'
-    };
+      ...(description !== undefined && { description }),
+      ...(isActive !== undefined && { isActive })
+    });
 
-    console.log('📝 Updated cancel reason:', JSON.stringify(cancelReasons[reasonIndex], null, 2));
+    if (!result.success) {
+      console.error('❌ Failed to update cancel reason in database:', result.error);
+      return NextResponse.json({ 
+        success: false, 
+        error: result.error || 'Failed to update cancel reason' 
+      }, { status: 500 });
+    }
 
-    // Write back to blob storage
-    await ExportsStorage.writeArray('cancel-reasons.json', cancelReasons);
+    console.log('✅ Cancel reason updated successfully:', id);
 
     return NextResponse.json({
       success: true,
-      message: 'Cancel reason updated successfully',
-      cancelReason: cancelReasons[reasonIndex]
+      message: 'Cancel reason updated successfully!',
+      source: 'database'
     });
   } catch (error) {
     console.error('❌ PUT Cancel Reasons API Error:', error);
@@ -139,52 +134,36 @@ export async function PUT(request: NextRequest) {
 // DELETE /api/admin/cancel-reasons - Delete cancel reason
 export async function DELETE(request: NextRequest) {
   try {
-    console.log('🗑️ DELETE /api/admin/cancel-reasons - Deleting cancel reason');
+    console.log('🗑️ Deleting cancel reason...');
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    const reasonParam = searchParams.get('reason');
 
-    if (!id && !reasonParam) {
+    if (!id) {
       return NextResponse.json({
         success: false,
-        error: 'Cancel reason id or reason is required'
+        error: 'Cancel reason ID is required for deletion'
       }, { status: 400 });
     }
 
-    const normalize = (s?: string) => (s ?? '').trim().toLowerCase();
-    // Protect "Other" from deletion
-    if (reasonParam && normalize(reasonParam) === 'other') {
-      return NextResponse.json({ success: false, error: 'Cannot remove "Other" reason' }, { status: 403 });
+    console.log('🗑️ Deleting cancel reason:', id);
+
+    // Delete cancel reason from database
+    const result = await (database as any).deleteCancelReason(id);
+
+    if (!result.success) {
+      console.error('❌ Failed to delete cancel reason from database:', result.error);
+      return NextResponse.json({ 
+        success: false, 
+        error: result.error || 'Failed to delete cancel reason' 
+      }, { status: 500 });
     }
 
-    // Read existing reasons
-    const cancelReasons = await ExportsStorage.readArray('cancel-reasons.json');
-    
-    // Filter out the reason to delete (match by id or text, supports both string and object entries)
-    const filteredReasons = cancelReasons.filter((r: any) => {
-      const text = typeof r === 'string' ? r : (r?.reason ?? '');
-      const matchesId = !!id && r && typeof r === 'object' && 'id' in r && r.id === id;
-      const matchesText = !!reasonParam && normalize(text) === normalize(reasonParam);
-      return !(matchesId || matchesText);
-    });
-    
-    if (filteredReasons.length === cancelReasons.length) {
-      return NextResponse.json({
-        success: false,
-        error: 'Cancel reason not found'
-      }, { status: 404 });
-    }
-
-    console.log(`🗑️ Deleting cancel reason with ID: ${id}`);
-
-    // Persist as array of strings (normalize remaining)
-    const toText = (r: any) => (typeof r === 'string' ? r : (r?.reason ?? ''));
-    const asStrings: string[] = filteredReasons.map(toText).filter((s: string) => !!(s || '').trim());
-    await ExportsStorage.writeArray('cancel-reasons.json', asStrings);
+    console.log('✅ Cancel reason deleted successfully:', id);
 
     return NextResponse.json({
       success: true,
-      message: 'Cancel reason deleted successfully'
+      message: 'Cancel reason deleted successfully!',
+      source: 'database'
     });
   } catch (error) {
     console.error('❌ DELETE Cancel Reasons API Error:', error);

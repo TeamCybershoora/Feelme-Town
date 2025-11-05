@@ -20,16 +20,17 @@ interface BookingData {
 
 export default function CancelBookingPage() {
   const searchParams = useSearchParams();
-  const { openCancelBookingPopup } = useBooking();
+  const { openCancelBookingPopup, isCancelBookingPopupOpen } = useBooking();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasOpenedPopup, setHasOpenedPopup] = useState(false);
 
   useEffect(() => {
     const bookingId = searchParams.get('bookingId');
     const email = searchParams.get('email');
 
-    if (!bookingId || !email) {
-      setError('Missing booking ID or email');
+    if (!bookingId) {
+      setError('Missing booking ID');
       setLoading(false);
       return;
     }
@@ -38,19 +39,35 @@ export default function CancelBookingPage() {
     fetchBookingData(bookingId, email);
   }, [searchParams]);
 
-  const fetchBookingData = async (bookingId: string, email: string) => {
+  // Redirect to theater page when popup closes after cancellation
+  useEffect(() => {
+    if (hasOpenedPopup && !isCancelBookingPopupOpen) {
+      // Popup was opened and now closed - wait 2 seconds then redirect to theater page
+      setTimeout(() => {
+        window.location.href = '/theater';
+      }, 2000); // 2 seconds delay
+    }
+  }, [isCancelBookingPopupOpen, hasOpenedPopup]);
+
+  const fetchBookingData = async (bookingId: string, email: string | null) => {
     try {
-      const response = await fetch(`/api/booking/${bookingId}?email=${encodeURIComponent(email)}`);
+      // Build URL with or without email parameter
+      const url = email 
+        ? `/api/booking/${bookingId}?email=${encodeURIComponent(email)}`
+        : `/api/booking/${bookingId}`;
+      
+      const response = await fetch(url);
       const result = await response.json();
 
       if (result.success && result.booking) {
         // Open cancel booking popup using context
         openCancelBookingPopup(result.booking);
+        setHasOpenedPopup(true);
       } else {
         setError(result.error || 'Booking not found');
       }
     } catch (error) {
-      
+      console.error('Error fetching booking data:', error);
       setError('Failed to load booking data');
     } finally {
       setLoading(false);

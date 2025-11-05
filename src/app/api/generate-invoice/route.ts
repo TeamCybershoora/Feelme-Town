@@ -89,21 +89,22 @@ export async function GET(request: NextRequest) {
     if (result.success && result.booking) {
       const b: any = result.booking || {};
       const status = String(b.status || '').toLowerCase();
+      const paymentStatus = String(b.paymentStatus || b.payment_status || '').toLowerCase();
 
-      // If not completed, gate the invoice with friendly HTML
-      if (status !== 'completed') {
+      // Gate invoice until payment is marked as paid
+      if (paymentStatus !== 'paid') {
         const customerName = b.name || 'Valued Customer';
-        const gatingHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Invoice Pending</title><style>body{margin:0;padding:0;background:#0b0b0b;color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:720px;margin:6rem auto;background:#141414;border-radius:20px;border:1px solid #222;box-shadow:0 10px 30px rgba(0,0,0,.4);padding:32px;text-align:center}.title{font-size:28px;font-weight:800;margin-bottom:10px}.note{background:#1a1a1a;border-left:4px solid #eab308;color:#fef08a;padding:14px;border-radius:10px;margin-top:12px;display:inline-block}</style></head><body><div class="wrap"><div class="title">Invoice will be available after completion</div><div class="note">Your invoice will generate automatically once your booking is marked as <b>Completed</b>. We'll email you a link to download it.</div></div><!-- INVOICE_PENDING --><script type="application/json" id="booking-data">{"name":"${customerName}","bookingId":"${bookingId}"}</script></body></html>`;
+        const gatingHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Invoice Pending</title><style>body{margin:0;padding:0;background:#0b0b0b;color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:720px;margin:6rem auto;background:#141414;border-radius:20px;border:1px solid #222;box-shadow:0 10px 30px rgba(0,0,0,.4);padding:32px;text-align:center}.title{font-size:28px;font-weight:800;margin-bottom:10px}.note{background:#1a1a1a;border-left:4px solid #eab308;color:#fef08a;padding:14px;border-radius:10px;margin-top:12px;display:inline-block}</style></head><body><div class="wrap"><div class="title">Invoice will be available after payment</div><div class="note">Once our team marks your booking as <b>Paid</b>, your invoice will unlock automatically and we&rsquo;ll email you the download link.</div></div><!-- INVOICE_PENDING --><script type="application/json" id="booking-data">{"name":"${customerName}","bookingId":"${bookingId}"}</script></body></html>`;
 
         // If PDF requested while pending, block
         if (format === 'pdf') {
-          return NextResponse.json({ success: false, error: 'Invoice not available until booking is completed' }, { status: 403 });
+          return NextResponse.json({ success: false, error: 'Invoice not available until payment is marked as paid' }, { status: 403 });
         }
 
         return new NextResponse(gatingHtml, { status: 200, headers: { 'Content-Type': 'text/html' } });
       }
 
-      // Completed in DB → build invoice
+      // Payment received → build invoice regardless of completion status
       const invoiceData: any = {
         id: b.bookingId || b.id || (b._id ? String(b._id) : bookingId),
         name: b.name || b.customerName || '',
@@ -115,6 +116,8 @@ export async function GET(request: NextRequest) {
         occasion: b.occasion || '',
         numberOfPeople: Number(b.numberOfPeople || 2),
         totalAmount: Number(b.totalAmount || 0),
+        slotBookingFee: Number((b as any).slotBookingFee ?? b.pricingData?.slotBookingFee ?? b.advancePayment ?? 0),
+        venuePaymentMethod: (b as any).venuePaymentMethod || (b as any).paymentMethod || (b as any).finalPaymentMethod || undefined,
         pricingData: b.pricingData || {},
         extraGuestsCount: Number(b.extraGuestsCount ?? Math.max(0, Number(b.numberOfPeople || 2) - 2)),
         extraGuestCharges: Number(b.extraGuestCharges || 0),
@@ -162,6 +165,8 @@ export async function GET(request: NextRequest) {
         occasion: record.occasion || '',
         numberOfPeople: Number(record.numberOfPeople || 2),
         totalAmount: Number(record.totalAmount || 0),
+        slotBookingFee: Number((record as any).slotBookingFee ?? record.pricingData?.slotBookingFee ?? record.advancePayment ?? 0),
+        venuePaymentMethod: (record as any).venuePaymentMethod || (record as any).paymentMethod || (record as any).finalPaymentMethod || undefined,
         advancePayment: record.advancePayment !== undefined ? Number(record.advancePayment) : undefined,
         venuePayment: record.venuePayment !== undefined ? Number(record.venuePayment) : undefined,
         ...record
@@ -181,15 +186,13 @@ export async function GET(request: NextRequest) {
       }
 
       return new NextResponse(invoiceHtml, { status: 200, headers: { 'Content-Type': 'text/html' } });
-    } catch (jsonErr) {
-      return NextResponse.json({ success: false, error: 'Booking not found' }, { status: 404 });
+    } catch (archiveError) {
+      console.error('❌ Failed to build invoice from archived bookings:', archiveError);
     }
 
+    return NextResponse.json({ success: false, error: 'Booking not found' }, { status: 404 });
   } catch (error) {
-    console.error('Invoice preview error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to generate invoice' },
-      { status: 500 }
-    );
+    console.error('❌ Invoice preview error:', error);
+    return NextResponse.json({ success: false, error: 'Failed to generate invoice preview' }, { status: 500 });
   }
 }

@@ -1,76 +1,47 @@
 import { NextResponse } from 'next/server';
-import { ExportsStorage } from '@/lib/exports-storage';
 import database from '@/lib/db-connect';
 
-// GET /api/pricing - Get current pricing settings for public use (Blob-backed)
+// GET /api/pricing - Get current pricing settings from database only
 export async function GET() {
   try {
-    // First try to read from blob storage
-    let pricingData = await ExportsStorage.readRaw('pricing.json');
+    console.log('💰 Fetching pricing from database...');
     
-    if (!pricingData) {
-      // If not found in blob, fetch from database and save to blob
-      console.log('🔄 Pricing not found in blob, fetching from database...');
-      
-      try {
-        // Try to get pricing from database (system settings)
-        const systemSettings = await database.getSystemSettings();
-        
-        if (systemSettings.success && systemSettings.settings) {
-          const settings = systemSettings.settings;
-          pricingData = {
-            slotBookingFee: settings.slotBookingFee || 400,
-            extraGuestFee: settings.extraGuestFee || 600,
-            convenienceFee: settings.convenienceFee || 0,
-            decorationFees: settings.decorationFees || 750
-          };
-          
-          // Save to blob storage for future use
-          await ExportsStorage.writeRaw('pricing.json', pricingData);
-          console.log('✅ Pricing fetched from database and saved to blob');
-        } else {
-          // Use default pricing if database is empty
-          pricingData = {
-            slotBookingFee: 400,
-            extraGuestFee: 600,
-            convenienceFee: 0,
-            decorationFees: 750
-          };
-          
-          // Save default to blob
-          await ExportsStorage.writeRaw('pricing.json', pricingData);
-          console.log('✅ Default pricing saved to blob');
-        }
-      } catch (dbError) {
-        console.error('❌ Database fetch failed, using default pricing:', dbError);
-        
-        // Fallback to default pricing
-        pricingData = {
-          slotBookingFee: 400,
-          extraGuestFee: 600,
-          convenienceFee: 0,
-          decorationFees: 750
-        };
-        
-        // Save fallback to blob
-        await ExportsStorage.writeRaw('pricing.json', pricingData);
-      }
-    } else {
-      console.log('✅ Pricing loaded from blob storage');
+    // Get pricing from database
+    const result = await (database as any).getAllPricing();
+    
+    console.log('💰 Pricing fetch result:', result);
+    
+    if (!result.success || !result.pricing || result.pricing.length === 0) {
+      console.error('❌ No pricing found in database');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'No pricing data found in database. Please configure pricing in admin panel.',
+        source: 'database'
+      }, { status: 404 });
     }
 
+    // Use first pricing configuration
+    const firstPricing = result.pricing[0];
+    const pricing = {
+      slotBookingFee: firstPricing.slotBookingFee ?? 0,
+      extraGuestFee: firstPricing.extraGuestFee ?? 0,
+      convenienceFee: firstPricing.convenienceFee ?? 0,
+      decorationFees: firstPricing.decorationFees ?? 0
+    };
+
+    console.log('✅ Pricing loaded from database:', pricing);
     return NextResponse.json({ 
       success: true, 
-      pricing: pricingData,
-      source: 'blob-storage'
+      pricing: pricing,
+      source: 'database'
     });
   } catch (error) {
-    console.error('❌ GET Public Pricing API Error:', error);
+    console.error(' GET Pricing API Error:', error);
     
     // Emergency fallback
     const fallbackPricing = {
-      slotBookingFee: 400,
-      extraGuestFee: 600,
+      slotBookingFee: 600,
+      extraGuestFee: 400,
       convenienceFee: 0,
       decorationFees: 750
     };

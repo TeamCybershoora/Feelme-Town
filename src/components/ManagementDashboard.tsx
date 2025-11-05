@@ -154,7 +154,34 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
     gifts: []
   });
   const [showEditBookingPopup, setShowEditBookingPopup] = useState(false);
-  
+  const [bookingAccess, setBookingAccess] = useState<'view' | 'edit'>('view');
+  const canEdit = bookingAccess === 'edit';
+
+  useEffect(() => {
+    const readAccessFromStorage = () => {
+      try {
+        const stored = localStorage.getItem('staffUser');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setBookingAccess(parsed?.bookingAccess === 'edit' ? 'edit' : 'view');
+        } else {
+          setBookingAccess('view');
+        }
+      } catch (error) {
+        setBookingAccess('view');
+      }
+    };
+
+    readAccessFromStorage();
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'staffUser') {
+        readAccessFromStorage();
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   // Helper function to convert UTC to IST
   const convertToIST = (utcDate: string) => {
@@ -491,19 +518,57 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
   };
 
   const handleCancelOrActivateBooking = async (booking: Booking) => {
+    if (!canEdit) {
+      showError('You have view-only access. Ask an administrator to enable edits.');
+      return;
+    }
     try {
       const oldStatus = booking.status;
       const newStatus = booking.status.toLowerCase() === 'confirmed' ? 'cancelled' : 'confirmed';
+
+      // Get current staff info from localStorage
+      let cancelledBy = 'Staff'; // Management dashboard is for staff only
+      let staffName = 'Staff Member'; // Default fallback
+      let userId = null;
+      
+      const staffUser = localStorage.getItem('staffUser');
+      console.log('🔍 [MANAGEMENT] staffUser from localStorage:', staffUser);
+      
+      if (staffUser) {
+        try {
+          const staffData = JSON.parse(staffUser);
+          console.log('🔍 [MANAGEMENT] Parsed staff data:', staffData);
+          
+          staffName = staffData.name || 'Staff Member'; // "Nishant Mogahaa", "Harshit", "Somay"
+          userId = staffData.userId || staffData.id; // "FMT0001", "FMT0002", "FMT0003"
+          
+          console.log('🔍 [MANAGEMENT] Staff info extracted:', { cancelledBy, staffName, userId });
+        } catch (e) {
+          console.error('❌ [MANAGEMENT] Failed to parse staff user data:', e);
+        }
+      } else {
+        console.warn('⚠️ [MANAGEMENT] No staffUser found in localStorage');
+      }
+
+      const requestBody = {
+        bookingId: booking.id,
+        status: newStatus,
+        // Add staff tracking info for cancellations
+        ...(newStatus === 'cancelled' && {
+          cancelledBy: cancelledBy,
+          staffName: staffName,
+          userId: userId
+        })
+      };
+      
+      console.log('📤 [MANAGEMENT] Sending request to API:', requestBody);
 
       const response = await fetch('/api/admin/update-booking', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          bookingId: booking.id,
-          status: newStatus
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
@@ -545,6 +610,10 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
   
 
   const handleEditBooking = (booking: Booking) => {
+    if (!canEdit) {
+      showError('You have view-only access. Switch to Edit in Staff Management to modify bookings.');
+      return;
+    }
     setSelectedBooking(booking);
 
     // Convert date format from "Tuesday, September 30, 2025" to "2025-09-30"
@@ -1192,6 +1261,10 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
                           <button
                             className="action-btn edit-btn"
                             onClick={() => {
+                              if (!canEdit) {
+                                showError('You have view-only access. Switch to Edit in Staff Management to modify bookings.');
+                                return;
+                              }
                               const query = new URLSearchParams({
                                 bookingId: String(booking.id ?? ''),
                                 email: String(booking.email ?? ''),
@@ -1201,15 +1274,21 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
                               }).toString();
                               router.push(`/Editbooking?${query}`);
                             }}
-                            title="Edit Booking"
+                            title={canEdit ? 'Edit Booking' : 'View-only access'}
                           >
                             <Edit size={14} />
                             Edit
                           </button>
                           <button
                             className={`action-btn ${booking.status.toLowerCase() === 'confirmed' ? 'cancel-btn' : 'activate-btn'}`}
-                            onClick={() => handleCancelOrActivateBooking(booking)}
-                            title={booking.status.toLowerCase() === 'confirmed' ? 'Cancel Booking' : 'Activate Booking'}
+                            onClick={() => {
+                              if (!canEdit) {
+                                showError('You have view-only access. Ask an administrator to enable edits.');
+                                return;
+                              }
+                              handleCancelOrActivateBooking(booking);
+                            }}
+                            title={!canEdit ? 'View-only access' : booking.status.toLowerCase() === 'confirmed' ? 'Cancel Booking' : 'Activate Booking'}
                           >
                             {booking.status.toLowerCase() === 'confirmed' ? (
                               <>
@@ -1242,6 +1321,10 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
             booking={selectedBooking}
             occasions={occasions}
             onEdit={(booking) => {
+              if (!canEdit) {
+                showError('You have view-only access. Switch to Edit in Staff Management to modify bookings.');
+                return;
+              }
               // Prepare booking data for edit
               sessionStorage.setItem('editingBooking', JSON.stringify({
                 bookingId: booking.id || booking.bookingId || booking._id,
@@ -2032,23 +2115,26 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
         .action-btn {
           background: #007bff;
           color: white;
+          padding: 0.5rem;
           border: none;
-          border-radius: 6px;
-          padding: 0.25rem 0.75rem;
-          font-size: 0.8rem;
+          border-radius: 8px;
           cursor: pointer;
-          transition: all 0.3s ease;
           display: flex;
           align-items: center;
           gap: 0.25rem;
+          font-size: 0.85rem;
+          font-weight: 600;
+          transition: all 0.3s ease;
         }
 
         .action-btn:hover {
-          background: #0056b3;
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(138, 43, 226, 0.3);
         }
 
         .view-btn {
           background: #28a745;
+          color: white;
         }
 
         .view-btn:hover {

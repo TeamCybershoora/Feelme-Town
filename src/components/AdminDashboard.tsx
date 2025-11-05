@@ -522,6 +522,26 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
       const oldStatus = booking.status;
       const newStatus = booking.status.toLowerCase() === 'confirmed' ? 'cancelled' : 'confirmed';
 
+      // Get current user info (admin or staff)
+      let cancelledBy = 'Administrator';
+      let staffName = null;
+      let userId = null;
+      
+      // Check if logged in as staff
+      const staffUser = localStorage.getItem('staffUser');
+      if (staffUser) {
+        try {
+          const staffData = JSON.parse(staffUser);
+          if (staffData.role === 'staff') {
+            cancelledBy = 'Staff';
+            staffName = staffData.name;
+            userId = staffData.userId; // FMT0001, FMT0002, etc.
+          }
+        } catch (e) {
+          console.error('Failed to parse staff user data:', e);
+        }
+      }
+
       const response = await fetch('/api/admin/update-booking', {
         method: 'PUT',
         headers: {
@@ -529,7 +549,13 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
         },
         body: JSON.stringify({
           bookingId: booking.id,
-          status: newStatus
+          status: newStatus,
+          // Add cancellation tracking info
+          ...(newStatus === 'cancelled' && {
+            cancelledBy: cancelledBy,
+            staffName: staffName,
+            userId: userId
+          })
         }),
       });
 

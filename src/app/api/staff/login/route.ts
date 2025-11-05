@@ -117,7 +117,8 @@ export async function POST(request: NextRequest) {
         photoType: staffInfo.photoType,
         role: staffInfo.role,
         isActive: staffInfo.isActive,
-        createdAt: staffInfo.createdAt
+        createdAt: staffInfo.createdAt,
+        bookingAccess: staffInfo.bookingAccess === 'edit' ? 'edit' : 'view'
       }
     });
   } catch (error) {

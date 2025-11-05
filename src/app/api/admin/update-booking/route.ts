@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
-import { ExportsStorage } from '@/lib/exports-storage';
+import { ExportsStorage } from '@/lib/exports-storage'; // Dummy - no longer used
 
 export async function PUT(request: NextRequest) {
   try {
@@ -19,6 +19,9 @@ export async function PUT(request: NextRequest) {
       status, 
       amount,
       numberOfPeople,
+      paymentStatus,
+      venuePaymentMethod,
+      sendInvoice = true,
       isManualBooking = false 
     } = body;
 
@@ -47,6 +50,12 @@ export async function PUT(request: NextRequest) {
     if (status !== undefined) updateData.status = status;
     if (amount !== undefined) updateData.amount = amount;
     if (numberOfPeople !== undefined) updateData.numberOfPeople = numberOfPeople;
+    if (paymentStatus !== undefined) updateData.paymentStatus = paymentStatus;
+    const normalizedVenuePaymentMethod = typeof venuePaymentMethod === 'string' ? venuePaymentMethod.toLowerCase() : undefined;
+    if (normalizedVenuePaymentMethod) {
+      updateData.venuePaymentMethod = normalizedVenuePaymentMethod;
+      updateData.paymentMethod = normalizedVenuePaymentMethod;
+    }
 
     // Get current booking to check status change
     let currentBooking;
@@ -71,6 +80,7 @@ export async function PUT(request: NextRequest) {
 
     const oldStatus = currentBooking?.status;
     const newStatus = status;
+    const oldPaymentStatus = (currentBooking as any)?.paymentStatus || (currentBooking as any)?.payment_status;
 
     let result;
     
@@ -103,38 +113,107 @@ export async function PUT(request: NextRequest) {
       
       // Save to cancelled JSON file before deleting
       if (bookingData) {
+        // Determine who cancelled (admin or staff)
+        const cancelledBy = body.cancelledBy || 'Administrator';
+        const staffName = body.staffName || null;
+        const staffId = body.staffId || body.userId || null; // Use staffId or userId from staff database
+        
+        // Calculate refund (same logic as customer cancellation)
+        const bookingDate = new Date(bookingData.date);
+        const now = new Date();
+        const hoursUntilBooking = (bookingDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+        let refundAmount = 0;
+        let refundStatus = 'non-refundable';
+        if (hoursUntilBooking > 72) {
+          refundAmount = Math.round((bookingData.totalAmount || 0) * 0.25);
+          refundStatus = 'refundable';
+        }
+        
+        // Prepare cancelled booking record with ALL MongoDB fields
+        const record = {
+          // Basic booking info
+          bookingId: bookingData.bookingId || bookingData.id,
+          name: bookingData.name,
+          email: bookingData.email,
+          phone: bookingData.phone,
+          theaterName: bookingData.theaterName,
+          date: bookingData.date,
+          time: bookingData.time,
+          occasion: bookingData.occasion,
+          numberOfPeople: bookingData.numberOfPeople,
+          
+          // Payment info
+          advancePayment: bookingData.advancePayment,
+          venuePayment: bookingData.venuePayment,
+          totalAmount: bookingData.totalAmount,
+          
+          // Cancellation info
+          status: 'cancelled',
+          cancelledAt: new Date().toISOString(),
+          cancelReason: (typeof body.cancelReason === 'string' && body.cancelReason.trim()) 
+            ? body.cancelReason.trim() 
+            : (cancelledBy === 'Staff' && staffName && staffId)
+              ? `Cancelled by ${staffName} (${staffId})`
+              : `Cancelled by ${cancelledBy}`,
+          cancelledBy: cancelledBy, // 'Administrator' or 'Staff'
+          staffName: staffName, // Staff name if cancelled by staff
+          staffId: staffId, // Staff ID if cancelled by staff
+          refundAmount: refundAmount,
+          refundStatus: refundStatus,
+          
+          // Additional MongoDB fields - Pass everything to SQL
+          occasionPersonName: bookingData.occasionPersonName,
+          bookingType: bookingData.bookingType,
+          createdBy: bookingData.createdBy,
+          isManualBooking: bookingData.isManualBooking,
+          notes: bookingData.notes,
+          createdAt: bookingData.createdAt,
+          
+          // Custom fields (Your Nickname, Partner Name, etc.)
+          ...(bookingData['Your Nickname'] && { 'Your Nickname': bookingData['Your Nickname'] }),
+          ...(bookingData['Your Nickname_label'] && { 'Your Nickname_label': bookingData['Your Nickname_label'] }),
+          ...(bookingData['Your Nickname_value'] && { 'Your Nickname_value': bookingData['Your Nickname_value'] }),
+          ...(bookingData["Your Partner's Name"] && { "Your Partner's Name": bookingData["Your Partner's Name"] }),
+          ...(bookingData["Your Partner's Name_label"] && { "Your Partner's Name_label": bookingData["Your Partner's Name_label"] }),
+          ...(bookingData["Your Partner's Name_value"] && { "Your Partner's Name_value": bookingData["Your Partner's Name_value"] }),
+          
+          // Arrays (movies, cakes, decor, gifts)
+          selectedMovies: bookingData.selectedMovies || [],
+          selectedCakes: bookingData.selectedCakes || [],
+          selectedDecorItems: bookingData.selectedDecorItems || [],
+          selectedGifts: bookingData.selectedGifts || [],
+          
+          // Complete original booking data (everything from MongoDB)
+          _originalBooking: bookingData
+        };
+        
+        console.log(`📝 Cancelled booking record:`, JSON.stringify(record, null, 2));
+        
+        // Sync to GoDaddy SQL database (PRIORITY - Always run this first)
         try {
-          // Add new cancelled booking with timestamp
-          const record = {
-            bookingId: bookingData.bookingId || bookingData.id,
-            name: bookingData.name,
-            email: bookingData.email,
-            phone: bookingData.phone,
-            theaterName: bookingData.theaterName,
-            date: bookingData.date,
-            time: bookingData.time,
-            occasion: bookingData.occasion,
-            numberOfPeople: bookingData.numberOfPeople,
-            advancePayment: bookingData.advancePayment,
-            venuePayment: bookingData.venuePayment,
-            totalAmount: bookingData.totalAmount,
-            status: 'cancelled',
-            cancelledAt: new Date().toISOString(),
-            cancelReason: (typeof body.cancelReason === 'string' && body.cancelReason.trim()) ? body.cancelReason.trim() : 'Cancelled by Administrator'
-          };
+          console.log(`🔄 [GODADDY SQL] Syncing admin-cancelled booking to GoDaddy SQL...`);
+          const { syncCancelledBookingToSQL } = await import('@/lib/godaddy-sql');
+          const sqlResult = await syncCancelledBookingToSQL(record);
+          if (sqlResult.success) {
+            console.log(`✅ [GODADDY SQL] Successfully synced admin-cancelled booking to GoDaddy SQL: ${record.bookingId}`);
+          } else {
+            console.error(`❌ [GODADDY SQL] Sync failed:`, sqlResult.error);
+          }
+        } catch (sqlError) {
+          console.error('❌ [GODADDY SQL] Exception during sync:', sqlError);
+        }
+        
+        // Save to blob storage JSON (optional backup)
+        try {
           await ExportsStorage.appendToArray('cancelled-bookings.json', record);
           console.log(`✅ Cancelled booking saved to JSON (Blob-backed)`);
-          console.log(`📝 Cancelled booking record:`, JSON.stringify(record, null, 2));
-
-          // If manual, also remove from manual-bookings.json
-          if (isManual) {
-            try {
-              await ExportsStorage.removeManualByBookingId(bookingId);
-              console.log(`🧹 Removed manual booking ${bookingId} from manual-bookings.json`);
-            } catch {}
-          }
         } catch (err) {
           console.error('❌ Failed to save to JSON (Blob-backed):', err);
+        }
+
+        // Manual bookings are now only in database, no JSON cleanup needed
+        if (isManual) {
+          console.log(`✅ Manual booking ${bookingId} cancelled (database only)`);
         }
       }
       
@@ -188,36 +267,78 @@ export async function PUT(request: NextRequest) {
 
       // Save to completed JSON file before deleting
       if (bookingData) {
+        const record = {
+          // Basic booking info
+          bookingId: bookingData.bookingId || bookingData.id,
+          name: bookingData.name,
+          email: bookingData.email,
+          phone: bookingData.phone,
+          theaterName: bookingData.theaterName,
+          date: bookingData.date,
+          time: bookingData.time,
+          occasion: bookingData.occasion,
+          numberOfPeople: bookingData.numberOfPeople,
+          
+          // Payment info
+          advancePayment: bookingData.advancePayment,
+          venuePayment: bookingData.venuePayment,
+          totalAmount: bookingData.totalAmount,
+          
+          // Completion info
+          status: 'completed',
+          completedAt: new Date().toISOString(),
+          
+          // Additional MongoDB fields - Pass everything to SQL
+          occasionPersonName: bookingData.occasionPersonName,
+          bookingType: bookingData.bookingType,
+          createdBy: bookingData.createdBy,
+          isManualBooking: bookingData.isManualBooking,
+          staffId: bookingData.staffId,
+          staffName: bookingData.staffName,
+          notes: bookingData.notes,
+          createdAt: bookingData.createdAt,
+          
+          // Custom fields (Your Nickname, Partner Name, etc.)
+          ...(bookingData['Your Nickname'] && { 'Your Nickname': bookingData['Your Nickname'] }),
+          ...(bookingData['Your Nickname_label'] && { 'Your Nickname_label': bookingData['Your Nickname_label'] }),
+          ...(bookingData['Your Nickname_value'] && { 'Your Nickname_value': bookingData['Your Nickname_value'] }),
+          ...(bookingData["Your Partner's Name"] && { "Your Partner's Name": bookingData["Your Partner's Name"] }),
+          ...(bookingData["Your Partner's Name_label"] && { "Your Partner's Name_label": bookingData["Your Partner's Name_label"] }),
+          ...(bookingData["Your Partner's Name_value"] && { "Your Partner's Name_value": bookingData["Your Partner's Name_value"] }),
+          
+          // Arrays (movies, cakes, decor, gifts)
+          selectedMovies: bookingData.selectedMovies || [],
+          selectedCakes: bookingData.selectedCakes || [],
+          selectedDecorItems: bookingData.selectedDecorItems || [],
+          selectedGifts: bookingData.selectedGifts || [],
+          
+          // Complete original booking data (everything from MongoDB)
+          _originalBooking: bookingData
+        };
+        
+        console.log(`📝 Completed booking record:`, JSON.stringify(record, null, 2));
+        
+        // Sync to GoDaddy SQL database (PRIORITY - Always run this first)
         try {
-          const record = {
-            bookingId: bookingData.bookingId || bookingData.id,
-            name: bookingData.name,
-            email: bookingData.email,
-            phone: bookingData.phone,
-            theaterName: bookingData.theaterName,
-            date: bookingData.date,
-            time: bookingData.time,
-            occasion: bookingData.occasion,
-            numberOfPeople: bookingData.numberOfPeople,
-            advancePayment: bookingData.advancePayment,
-            venuePayment: bookingData.venuePayment,
-            totalAmount: bookingData.totalAmount,
-            status: 'completed',
-            completedAt: new Date().toISOString()
-          };
+          console.log(`🔄 Syncing completed booking to GoDaddy SQL...`);
+          const { syncCompletedBookingToSQL } = await import('@/lib/godaddy-sql');
+          await syncCompletedBookingToSQL(record);
+          console.log(`✅ Successfully synced completed booking to GoDaddy SQL`);
+        } catch (sqlError) {
+          console.error('❌ Failed to sync completed booking to GoDaddy SQL:', sqlError);
+        }
+        
+        // Save to blob storage JSON (optional backup)
+        try {
           await ExportsStorage.appendToArray('completed-bookings.json', record);
           console.log(`✅ Completed booking archived to JSON (Blob-backed)`);
-          console.log(`📝 Completed booking record:`, JSON.stringify(record, null, 2));
-
-          // If manual, also remove from manual-bookings.json so it doesn't appear in manual list anymore
-          if (isManual) {
-            try {
-              await ExportsStorage.removeManualByBookingId(bookingId);
-              console.log(`🧹 Removed manual booking ${bookingId} from manual-bookings.json after completion`);
-            } catch {}
-          }
         } catch (err) {
           console.error('❌ Failed to archive completed booking to JSON (Blob-backed):', err);
+        }
+
+        // Manual bookings are now only in database, no JSON cleanup needed
+        if (isManual) {
+          console.log(`✅ Manual booking ${bookingId} completed (database only)`);
         }
       }
 
@@ -241,20 +362,7 @@ export async function PUT(request: NextRequest) {
         const { incrementCounter } = await import('@/lib/counter-system');
         await incrementCounter('completed');
         // Notify customer their invoice is ready
-        try {
-          const mailData: any = {
-            id: bookingData?.bookingId || bookingData?.id || bookingId,
-            name: bookingData?.name,
-            email: bookingData?.email,
-            phone: bookingData?.phone,
-            theaterName: bookingData?.theaterName,
-            date: bookingData?.date,
-            time: bookingData?.time,
-            numberOfPeople: bookingData?.numberOfPeople,
-            totalAmount: bookingData?.totalAmount
-          };
-          emailService.sendBookingInvoiceReady(mailData).catch(() => {});
-        } catch {}
+        // Invoice email is triggered explicitly when payment is marked as paid
       }
     } else {
       // Normal update for other status changes
@@ -301,6 +409,45 @@ export async function PUT(request: NextRequest) {
           await incrementCounter('completed');
           
         }
+        }
+
+        if (paymentStatus !== undefined && paymentStatus !== oldPaymentStatus) {
+          const normalizedPaymentStatus = String(paymentStatus).toLowerCase();
+          if (normalizedPaymentStatus === 'paid' && sendInvoice) {
+            let updatedBookingData: any = null;
+            try {
+              if (isManual) {
+                const manualBookings = await database.getAllManualBookings();
+                updatedBookingData = manualBookings.manualBookings?.find((b: any) => (b.bookingId || b.id) === bookingId) || null;
+              } else {
+                const updatedBookingResult = await database.getBookingById(bookingId);
+                updatedBookingData = updatedBookingResult.booking;
+              }
+            } catch (fetchError) {
+              console.error('❌ Failed to fetch updated booking for payment email:', fetchError);
+            }
+
+            const bookingForEmail = updatedBookingData || currentBooking;
+            if (bookingForEmail) {
+              try {
+                const mailData: any = {
+                  id: bookingForEmail.bookingId || bookingForEmail.id || bookingId,
+                  name: bookingForEmail.name,
+                  email: bookingForEmail.email,
+                  phone: bookingForEmail.phone,
+                  theaterName: bookingForEmail.theaterName || bookingForEmail.theater,
+                  date: bookingForEmail.date,
+                  time: bookingForEmail.time,
+                  numberOfPeople: bookingForEmail.numberOfPeople,
+                  totalAmount: bookingForEmail.totalAmount
+                };
+
+                emailService.sendBookingInvoiceReady(mailData).catch(() => {});
+              } catch (mailError) {
+                console.error('❌ Failed to send payment invoice email:', mailError);
+              }
+            }
+          }
         }
       }
     }

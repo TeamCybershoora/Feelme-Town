@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
-import { ExportsStorage } from '@/lib/exports-storage';
+import { ExportsStorage } from '@/lib/exports-storage'; // Dummy - no longer used
 import emailService from '@/lib/email-service';
 import { incrementCounter } from '@/lib/counter-system';
 
@@ -110,9 +110,39 @@ export async function POST(request: NextRequest) {
 // Function to perform the actual cleanup
 async function performCleanup() {
   try {
-      
-      
-      // Get current time in IST (proper way)
+    console.log('🔄 Auto-cleanup: Checking for expired bookings...');
+    
+    // Call the auto-complete-expired logic directly
+    const autoCompleteModule = await import('../admin/auto-complete-expired/route');
+    
+    // Create a mock NextRequest
+    const mockRequest = {
+      json: async () => ({}),
+      headers: new Headers(),
+      method: 'POST',
+      url: 'http://localhost/api/admin/auto-complete-expired'
+    } as any;
+    
+    const response = await autoCompleteModule.POST(mockRequest);
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log(`✅ Auto-cleanup: Completed ${result.completedCount} expired bookings`);
+      if (result.completedCount > 0) {
+        console.log('📋 Expired bookings:', result.expiredBookings);
+      }
+    } else {
+      console.error('❌ Auto-cleanup: Failed to complete expired bookings:', result.error);
+    }
+  } catch (error) {
+    console.error('❌ Auto-cleanup: Error in performCleanup:', error);
+  }
+}
+
+/* LEGACY CLEANUP CODE - DISABLED
+// Old cleanup logic replaced by auto-complete-expired API call
+async function performCleanupLegacy() {
+  try { 
     const nowUtcMs = Date.now();
     const IST_OFFSET_MINUTES = 330;
     
@@ -212,13 +242,14 @@ async function performCleanup() {
       
       
       
-      if ((String(booking.status || '').trim().toLowerCase() === 'confirmed') && (expiredBySlot || expiredByField)) {
+      const bookingStatus = String(booking.status || '').trim().toLowerCase();
+      if ((bookingStatus === 'confirmed' || bookingStatus === 'manual') && (expiredBySlot || expiredByField)) {
         
         
         
-        // Save to completed JSON (Blob-backed)
+        // Sync to GoDaddy SQL database (PRIORITY)
         try {
-          const record = {
+          const completedRecord = {
             bookingId: booking.bookingId || booking.id,
             name: booking.name,
             email: booking.email,
@@ -244,13 +275,27 @@ async function performCleanup() {
             status: 'completed',
             completedAt: new Date().toISOString()
           };
-          await ExportsStorage.appendToArray('completed-bookings.json', record);
-        } catch (err) {
-          console.error('❌ Failed to save to JSON (Blob) :', err);
+          
+          console.log('🔄 Syncing auto-completed booking to GoDaddy SQL...');
+          const { syncCompletedBookingToSQL } = await import('@/lib/godaddy-sql');
+          await syncCompletedBookingToSQL(completedRecord);
+          console.log('✅ Successfully synced auto-completed booking to GoDaddy SQL:', booking.bookingId);
+        } catch (sqlError) {
+          console.error('❌ Failed to sync completed booking to GoDaddy SQL:', sqlError);
         }
         
-        // Delete booking from database
+        // Delete booking from database (and manual collection if it's a manual booking)
         const deleteResult = await database.deleteBooking(booking.bookingId || booking.id);
+        
+        // If this was originally a manual booking, also delete from manual collection
+        if (booking.sourceCollection === 'manual_booking' || booking.isManualBooking) {
+          try {
+            await (database as any).deleteManualBooking?.(booking.bookingId || booking.id);
+            console.log(`🗑️ Also deleted manual booking ${booking.bookingId} from manual collection`);
+          } catch (err) {
+            console.log(`⚠️ Could not delete from manual collection: ${err}`);
+          }
+        }
         
         if (deleteResult.success) {
           console.log(`✅ Booking ${booking.bookingId} saved to JSON and deleted`);
@@ -273,45 +318,11 @@ async function performCleanup() {
             // Import the new counter system
             const { incrementCounter: incrementNewCounter } = await import('@/lib/counter-system');
             await incrementNewCounter('completed');
-            
-            // Update completed-bookings.json
-            const completedRecord = {
-              id: booking._id || booking.id,
-              bookingId: booking.bookingId,
-              name: booking.name,
-              email: booking.email,
-              phone: booking.phone,
-              theaterName: booking.theaterName,
-              date: booking.date,
-              time: booking.time,
-              occasion: booking.occasion,
-              numberOfPeople: booking.numberOfPeople,
-              totalAmount: booking.totalAmount,
-              advancePayment: booking.advancePayment,
-              venuePayment: booking.venuePayment,
-              status: 'completed',
-              createdAt: booking.createdAt,
-              completedAt: new Date().toISOString()
-            };
-            
-            await ExportsStorage.appendToArray('completed-bookings.json', completedRecord);
-            console.log('✅ Cleanup completed booking written to completed-bookings.json:', booking.bookingId);
-          } catch {}
-          // Send invoice ready email (best-effort)
-          try {
-            const mailData: any = {
-              id: booking.bookingId || booking.id,
-              name: booking.name,
-              email: booking.email,
-              phone: booking.phone,
-              theaterName: booking.theaterName,
-              date: booking.date,
-              time: booking.time,
-              numberOfPeople: booking.numberOfPeople,
-              totalAmount: booking.totalAmount
-            };
-            emailService.sendBookingInvoiceReady(mailData).catch(() => {});
-          } catch {}
+            console.log('✅ Completed counter incremented for:', booking.bookingId);
+          } catch (counterError) {
+            console.error('❌ Failed to increment completed counter:', counterError);
+          }
+          // Invoice emails are now triggered only when payment is marked as paid by staff
         }
       }
     }
@@ -334,7 +345,8 @@ async function performCleanup() {
           }
         } catch {}
 
-        if ((String(booking.status || '').trim().toLowerCase() === 'confirmed') && (expiredBySlot || expiredByField)) {
+        const manualBookingStatus = String(booking.status || '').trim().toLowerCase();
+        if ((manualBookingStatus === 'confirmed' || manualBookingStatus === 'manual') && (expiredBySlot || expiredByField)) {
           // Archive to completed JSON
           try {
             const record = {
@@ -363,8 +375,7 @@ async function performCleanup() {
             await ExportsStorage.appendToArray('completed-bookings.json', record);
           } catch {}
 
-          // Remove from manual JSON list if exists (best-effort)
-          try { await ExportsStorage.removeManualByBookingId(booking.bookingId || booking.id); } catch {}
+          // Manual bookings are now only in database, no JSON cleanup needed
 
           // Delete from manual collection (fallback to main delete)
           let delRes: any = null;
@@ -402,21 +413,7 @@ async function performCleanup() {
               await ExportsStorage.appendToArray('completed-bookings.json', completedRecord);
               console.log('✅ Cleanup completed booking written to completed-bookings.json:', booking.bookingId);
             } catch {}
-            // Send invoice ready (best-effort)
-            try {
-              const mailData: any = {
-                id: booking.bookingId || booking.id,
-                name: booking.name,
-                email: booking.email,
-                phone: booking.phone,
-                theaterName: booking.theaterName,
-                date: booking.date,
-                time: booking.time,
-                numberOfPeople: booking.numberOfPeople,
-                totalAmount: booking.totalAmount
-              };
-              emailService.sendBookingInvoiceReady(mailData).catch(() => {});
-            } catch {}
+            // Invoice emails are now triggered only when payment is marked as paid by staff
           }
         }
       }
@@ -512,3 +509,4 @@ async function performCleanup() {
     };
   }
 }
+*/

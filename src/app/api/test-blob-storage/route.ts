@@ -52,7 +52,10 @@ export async function POST(request: NextRequest) {
 
     if (action === 'cleanup') {
       console.log(`🧹 Testing cleanup for ${fileName}`);
-      await ExportsStorage.cleanupDuplicateFiles(fileName);
+      const cleanupFn = (ExportsStorage as any)?.cleanupDuplicateFiles;
+      if (typeof cleanupFn === 'function') {
+        await cleanupFn(fileName);
+      }
       
       return NextResponse.json({
         success: true,

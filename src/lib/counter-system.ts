@@ -1,4 +1,3 @@
-import { ExportsStorage } from './exports-storage';
 import database from './db-connect';
 
 // Counter types
@@ -77,10 +76,15 @@ const getDefaultTimeBasedCounter = (): TimeBasedCounters => {
   };
 };
 
-// Get time-based counters from JSON (blob storage)
+// Get time-based counters from database
 export const getTimeBasedCounters = async (): Promise<CounterData> => {
   try {
-    const counters = await ExportsStorage.readRaw('counters.json');
+    await database.connect();
+    const db = database.db();
+    if (!db) throw new Error('Database not connected');
+    
+    const collection = db.collection('counters');
+    const counters = await collection.findOne({ _id: 'time-based-counters' } as any);
     
     if (!counters) {
       console.log('🔄 No time-based counters found, initializing...');
@@ -92,11 +96,13 @@ export const getTimeBasedCounters = async (): Promise<CounterData> => {
         incomplete: getDefaultTimeBasedCounter()
       };
       
-      await ExportsStorage.writeRaw('counters.json', defaultCounters);
+      await collection.insertOne({ _id: 'time-based-counters' as any, ...defaultCounters });
       return defaultCounters;
     }
     
-    return counters as CounterData;
+    // Remove _id field and return as CounterData
+    const { _id, ...counterData } = counters;
+    return counterData as CounterData;
   } catch (error) {
     console.error('❌ Error getting time-based counters:', error);
     return {
@@ -213,8 +219,17 @@ export const checkAndResetTimeBasedCounters = async (): Promise<CounterData> => 
     
     // Save changes if any
     if (hasChanges) {
-      await ExportsStorage.writeRaw('counters.json', counters);
-      console.log('✅ Time-based counters reset and saved');
+      await database.connect();
+      const db = database.db();
+      if (db) {
+        const collection = db.collection('counters');
+        await collection.updateOne(
+          { _id: 'time-based-counters' } as any,
+          { $set: counters },
+          { upsert: true }
+        );
+        console.log('✅ Time-based counters reset and saved');
+      }
     }
     
     return counters;
@@ -240,7 +255,16 @@ export const incrementCounter = async (
     counters[type].year += 1;
     
     // Save time-based counters
-    await ExportsStorage.writeRaw('counters.json', counters);
+    await database.connect();
+    const db = database.db();
+    if (db) {
+      const collection = db.collection('counters');
+      await collection.updateOne(
+        { _id: 'time-based-counters' } as any,
+        { $set: counters },
+        { upsert: true }
+      );
+    }
     
     // Increment total counter in database if requested
     if (incrementTotal) {
@@ -321,7 +345,16 @@ export const resetTimeBasedCounters = async (): Promise<void> => {
       incomplete: getDefaultTimeBasedCounter()
     };
     
-    await ExportsStorage.writeRaw('counters.json', defaultCounters);
+    await database.connect();
+    const db = database.db();
+    if (db) {
+      const collection = db.collection('counters');
+      await collection.updateOne(
+        { _id: 'time-based-counters' } as any,
+        { $set: defaultCounters },
+        { upsert: true }
+      );
+    }
     console.log('✅ Time-based counters manually reset');
   } catch (error) {
     console.error('❌ Error manually resetting time-based counters:', error);
@@ -344,7 +377,16 @@ export const decrementCounter = async (
     counters[type].year = Math.max(0, counters[type].year - 1);
     
     // Save time-based counters
-    await ExportsStorage.writeRaw('counters.json', counters);
+    await database.connect();
+    const db = database.db();
+    if (db) {
+      const collection = db.collection('counters');
+      await collection.updateOne(
+        { _id: 'time-based-counters' } as any,
+        { $set: counters },
+        { upsert: true }
+      );
+    }
     
     // Decrement total counter in database if requested
     if (decrementTotal) {

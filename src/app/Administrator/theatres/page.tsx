@@ -18,8 +18,10 @@ interface Theater {
   };
   image: string;
   images?: string[]; // Multiple images support
+  youtubeLink?: string; // YouTube video link
   whatsIncluded: string[];
   isActive?: boolean;
+  decorationCompulsory?: boolean; // Decoration compulsory toggle
   timeSlots?: {
     slotId: string;
     startTime: string;
@@ -45,6 +47,7 @@ export default function TheatresPage() {
     capacity: { min: 0, max: 0 },
     image: '',
     images: [],
+    youtubeLink: '',
     whatsIncluded: [],
     timeSlots: []
   });
@@ -124,6 +127,7 @@ export default function TheatresPage() {
       capacity: theater.capacity,
       image: theater.image,
       images: theater.images || [],
+      youtubeLink: theater.youtubeLink || '',
       whatsIncluded: theater.whatsIncluded || [],
       timeSlots: theater.timeSlots || []
     });
@@ -195,12 +199,6 @@ export default function TheatresPage() {
         ? { ...formData, image: imageUrl, images: imageUrls, theaterId: editingTheater.theaterId }
         : { ...formData, image: imageUrl, images: imageUrls };
 
-      // Debug logging to see what images are being sent
-      console.log('🔍 Theater Update Debug:');
-      console.log('   Editing Theater:', editingTheater?.name);
-      console.log('   FormData Images:', formData.images);
-      console.log('   Final ImageUrls:', imageUrls);
-      console.log('   Body Images:', body.images);
       
 
       const response = await fetch(url, {
@@ -254,6 +252,56 @@ export default function TheatresPage() {
       showError('Failed to save theater');
     } finally {
       setUploadingImage(false);
+    }
+  };
+
+  const handleToggleDecorationCompulsory = async (theater: Theater) => {
+    try {
+      const newValue = !theater.decorationCompulsory;
+      
+      // Optimistic UI update
+      setTheatres(prevTheatres => 
+        prevTheatres.map(t => 
+          t._id === theater._id 
+            ? { ...t, decorationCompulsory: newValue }
+            : t
+        )
+      );
+      
+      const response = await fetch(`/api/admin/theaters?theaterId=${theater.theaterId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          decorationCompulsory: newValue 
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showSuccess(`Decoration ${newValue ? 'is now compulsory' : 'is now optional'} for ${theater.name}`);
+        fetchTheaters();
+      } else {
+        // Revert on error
+        setTheatres(prevTheatres => 
+          prevTheatres.map(t => 
+            t._id === theater._id 
+              ? { ...t, decorationCompulsory: !newValue }
+              : t
+          )
+        );
+        showError(data.error || 'Failed to update theater');
+      }
+    } catch (error) {
+      // Revert on error
+      setTheatres(prevTheatres => 
+        prevTheatres.map(t => 
+          t._id === theater._id 
+            ? { ...t, decorationCompulsory: theater.decorationCompulsory }
+            : t
+        )
+      );
+      showError('Failed to update theater');
     }
   };
 
@@ -362,6 +410,37 @@ export default function TheatresPage() {
     setFormData({
       ...formData,
       whatsIncluded: formData.whatsIncluded.filter((_, i) => i !== index)
+    });
+  };
+
+  // Drag and drop handlers for What's Included items
+  const handleIncludedDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', index.toString());
+  };
+
+  const handleIncludedDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleIncludedDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    const dragIndex = parseInt(e.dataTransfer.getData('text/html'));
+    
+    if (dragIndex === dropIndex) return;
+    
+    const newItems = [...formData.whatsIncluded];
+    const draggedItem = newItems[dragIndex];
+    
+    // Remove from old position
+    newItems.splice(dragIndex, 1);
+    // Insert at new position
+    newItems.splice(dropIndex, 0, draggedItem);
+    
+    setFormData({
+      ...formData,
+      whatsIncluded: newItems
     });
   };
 
@@ -768,16 +847,30 @@ export default function TheatresPage() {
                     <span className="type-badge">{theatre.type}</span>
                   </div>
                 )}
-                <div className="theatre-price">₹{theatre.price.toLocaleString()}</div>
+                <div className="theatre-price">₹{(theatre.price || 0).toLocaleString()}</div>
                 
                 <div className="capacity-info">
                   <span className="capacity-label">Capacity:</span>
-                  <span className="capacity-value">{theatre.capacity.min} - {theatre.capacity.max} people</span>
+                  <span className="capacity-value">
+                    {theatre.capacity?.min || 0} - {theatre.capacity?.max || 0} people
+                  </span>
                 </div>
 
                 <div className="time-slots-info">
                   <span className="slots-label">Time Slots:</span>
                   <span className="slots-value">{theatre.timeSlots?.length || 0} slots</span>
+                </div>
+
+                {/* Decoration Compulsory Toggle */}
+                <div className="decoration-toggle-section">
+                  <label className="toggle-container">
+                    <input
+                      type="checkbox"
+                      checked={theatre.decorationCompulsory || false}
+                      onChange={() => handleToggleDecorationCompulsory(theatre)}
+                    />
+                    <span className="toggle-label">Decoration Compulsory</span>
+                  </label>
                 </div>
               
                 <div className="whats-included-section">
@@ -928,6 +1021,67 @@ export default function TheatresPage() {
                     className="form-input"
                   />
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label>YouTube Video Link (Optional)</label>
+                <input
+                  type="url"
+                  value={formData.youtubeLink || ''}
+                  onChange={(e) => setFormData({ ...formData, youtubeLink: e.target.value })}
+                  placeholder="Enter YouTube video URL (e.g., https://www.youtube.com/watch?v=...)"
+                  className="form-input"
+                />
+                <small style={{ color: '#888', fontSize: '0.85rem', marginTop: '0.5rem', display: 'block' }}>
+                  Add a YouTube video link to showcase your theater. The video will appear on the theater page.
+                </small>
+                
+                {/* YouTube Video Preview */}
+                {formData.youtubeLink && (() => {
+                  // Extract YouTube video ID from URL
+                  const getYouTubeVideoId = (url: string) => {
+                    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+                    const match = url.match(regExp);
+                    return (match && match[2].length === 11) ? match[2] : null;
+                  };
+                  
+                  const videoId = getYouTubeVideoId(formData.youtubeLink);
+                  
+                  if (videoId) {
+                    return (
+                      <div style={{ marginTop: '1rem' }}>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#fff', fontSize: '0.9rem', fontWeight: '600' }}>
+                          Video Preview:
+                        </label>
+                        <div style={{ 
+                          position: 'relative', 
+                          paddingBottom: '56.25%', 
+                          height: 0, 
+                          overflow: 'hidden',
+                          borderRadius: '8px',
+                          background: '#000'
+                        }}>
+                          <iframe
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              height: '100%',
+                              border: 'none',
+                              borderRadius: '8px'
+                            }}
+                            src={`https://www.youtube.com/embed/${videoId}`}
+                            title="YouTube video preview"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                          />
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               <div className="form-group">
@@ -1098,8 +1252,17 @@ export default function TheatresPage() {
                 </div>
                 <div className="included-items-list">
                   {formData.whatsIncluded.map((item, index) => (
-                    <div key={index} className="included-item">
-                      <span>{item}</span>
+                    <div 
+                      key={index} 
+                      className="included-item"
+                      draggable
+                      onDragStart={(e) => handleIncludedDragStart(e, index)}
+                      onDragOver={handleIncludedDragOver}
+                      onDrop={(e) => handleIncludedDrop(e, index)}
+                      style={{ cursor: 'move' }}
+                    >
+                      <span className="item-number">{index + 1}.</span>
+                      <span className="item-text">{item}</span>
                       <button onClick={() => removeIncludedItem(index)} className="remove-item-btn">×</button>
                     </div>
                   ))}
@@ -1677,6 +1840,29 @@ export default function TheatresPage() {
           border-radius: 20px;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
           font-size: 0.85rem;
+          cursor: move;
+          transition: all 0.2s ease;
+          border: 2px solid transparent;
+        }
+
+        .included-item:hover {
+          background: #dee2e6;
+          border-color: #6c757d;
+          transform: scale(1.02);
+        }
+
+        .included-item:active {
+          opacity: 0.5;
+        }
+
+        .item-number {
+          font-weight: bold;
+          color: #495057;
+          min-width: 25px;
+        }
+
+        .item-text {
+          flex: 1;
         }
 
         .remove-item-btn {
@@ -1689,6 +1875,11 @@ export default function TheatresPage() {
           padding: 0;
           width: 20px;
           height: 20px;
+          transition: transform 0.2s ease;
+        }
+
+        .remove-item-btn:hover {
+          transform: scale(1.2);
         }
 
         /* Image Upload Styles */
@@ -2274,6 +2465,61 @@ export default function TheatresPage() {
 
         .theatre-card:not(:hover) .drag-handle {
           opacity: 0.8;
+        }
+
+        /* Decoration Toggle Styles */
+        .decoration-toggle-section {
+          margin: 0.75rem 0;
+          padding: 0.75rem;
+          background: #f9fafb;
+          border-radius: 8px;
+          border: 1px solid #e5e7eb;
+        }
+
+        .toggle-container {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .toggle-container input[type="checkbox"] {
+          position: relative;
+          width: 44px;
+          height: 24px;
+          appearance: none;
+          background: #cbd5e1;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: background 0.3s ease;
+        }
+
+        .toggle-container input[type="checkbox"]:checked {
+          background: #10b981;
+        }
+
+        .toggle-container input[type="checkbox"]::before {
+          content: '';
+          position: absolute;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: white;
+          top: 3px;
+          left: 3px;
+          transition: transform 0.3s ease;
+        }
+
+        .toggle-container input[type="checkbox"]:checked::before {
+          transform: translateX(20px);
+        }
+
+        .toggle-label {
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.9rem;
+          color: #374151;
+          font-weight: 500;
         }
       `}</style>
     </div>
