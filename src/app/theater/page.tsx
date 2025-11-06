@@ -140,6 +140,7 @@ export default function Theater() {
                         features: theater.whatsIncluded || [], // Only database features, no hardcoded fallback
                         timeSlots: theater.timeSlots || [],
                         rawTimeSlots: theater.timeSlots || [], // Keep original for processing
+                        youtubeLink: theater.youtubeLink || null, // YouTube video link
                         images: (() => {
                             // Handle compressed/string images from database
                             let imageArray = [];
@@ -998,27 +999,6 @@ export default function Theater() {
                                                         {currentCardImageIndex + 1}/{theaterImages.length}
                                                     </div>
                                                 )}
-                                                {/* YouTube Video Icon */}
-                                                {theater.youtubeLink && (
-                                                    <div 
-                                                        className="youtube-play-icon"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            window.open(theater.youtubeLink, '_blank');
-                                                        }}
-                                                        title="Watch Theater Video"
-                                                    >
-                                                        <svg 
-                                                            xmlns="http://www.w3.org/2000/svg" 
-                                                            viewBox="0 0 24 24" 
-                                                            fill="currentColor"
-                                                            width="48"
-                                                            height="48"
-                                                        >
-                                                            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                                                        </svg>
-                                                    </div>
-                                                )}
                                             </>
                                         );
                                     })()}
@@ -1185,6 +1165,42 @@ export default function Theater() {
                                                         </div>
                                                     )}
                                                 </div>
+                                                
+                                                {/* YouTube Button - Top Left Corner (Shows for all theaters, uses theater's specific link) */}
+                                                {currentTheater?.youtubeLink ? (
+                                                    <a
+                                                        href={currentTheater.youtubeLink}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="youtube-overlay-button"
+                                                        title="Watch Theater Video"
+                                                    >
+                                                        <span className="youtube-text">YouTube</span>
+                                                        <svg 
+                                                            xmlns="http://www.w3.org/2000/svg" 
+                                                            viewBox="0 0 24 24" 
+                                                            fill="currentColor"
+                                                            className="youtube-icon"
+                                                        >
+                                                            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                                                        </svg>
+                                                    </a>
+                                                ) : (
+                                                    <div
+                                                        className="youtube-overlay-button youtube-disabled"
+                                                        title="No video available for this theater"
+                                                    >
+                                                        <span className="youtube-text">YouTube</span>
+                                                        <svg 
+                                                            xmlns="http://www.w3.org/2000/svg" 
+                                                            viewBox="0 0 24 24" 
+                                                            fill="currentColor"
+                                                            className="youtube-icon"
+                                                        >
+                                                            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                                                        </svg>
+                                                    </div>
+                                                )}
 
                                                 {/* Navigation Dots (fixed 4 for About-style parity) */}
                                                 {imagesArray.length > 1 && (
@@ -2135,37 +2151,6 @@ export default function Theater() {
                     font-size: 0.75rem;
                     font-weight: bold;
                     z-index: 5;
-                }
-
-                /* YouTube Play Icon */
-                .youtube-play-icon {
-                    position: absolute;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    width: 64px;
-                    height: 64px;
-                    background: rgba(255, 0, 0, 0.9);
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    z-index: 10;
-                    transition: all 0.3s ease;
-                    box-shadow: 0 4px 12px rgba(255, 0, 0, 0.4);
-                }
-
-                .youtube-play-icon:hover {
-                    background: rgba(255, 0, 0, 1);
-                    transform: translate(-50%, -50%) scale(1.1);
-                    box-shadow: 0 6px 20px rgba(255, 0, 0, 0.6);
-                }
-
-                .youtube-play-icon svg {
-                    color: white;
-                    width: 36px;
-                    height: 36px;
                 }
 
                 /* Card Content */
@@ -4384,6 +4369,73 @@ export default function Theater() {
 
                 .theater-image-container .slideshow-progress {
                     height: 3px;
+                }
+
+                /* YouTube Overlay Button - Top Left Corner */
+                .youtube-overlay-button {
+                    position: absolute;
+                    top: 1.5rem;
+                    left: 1.5rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    padding: 0.75rem 1.25rem;
+                    background: white;
+                    border-radius: 50px;
+                    text-decoration: none;
+                    z-index: 10;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                    transition: all 0.3s ease;
+                }
+
+                .youtube-overlay-button:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+                }
+
+                /* Disabled YouTube Button (no link available) */
+                .youtube-disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                    pointer-events: none;
+                }
+
+                .youtube-disabled:hover {
+                    transform: none;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                }
+
+                .youtube-text {
+                    font-size: 0.95rem;
+                    font-family: 'Paralucent', sans-serif;
+                    font-weight: 600;
+                    color: #000;
+                    letter-spacing: 0.3px;
+                }
+
+                .youtube-icon {
+                    width: 24px;
+                    height: 24px;
+                    color: #FF0000;
+                    flex-shrink: 0;
+                }
+
+                @media (max-width: 768px) {
+                    .youtube-overlay-button {
+                        top: 1rem;
+                        left: 1rem;
+                        padding: 0.6rem 1rem;
+                        gap: 0.4rem;
+                    }
+
+                    .youtube-text {
+                        font-size: 0.85rem;
+                    }
+
+                    .youtube-icon {
+                        width: 20px;
+                        height: 20px;
+                    }
                 }
             `}</style>
 
