@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Filter, Eye, Edit, Trash2, CheckCircle, XCircle, Calendar, X, Check } from 'lucide-react';
+import { Search, Filter, Eye, Edit, Trash2, CheckCircle, XCircle, Calendar, X } from 'lucide-react';
 
 import { BookingProvider } from '@/contexts/BookingContext';
 import { DatePickerProvider } from '@/contexts/DatePickerContext';
@@ -31,34 +31,6 @@ export default function BookingsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
-  const [bookingAccess, setBookingAccess] = useState<'view' | 'edit'>('view');
-  const canEdit = bookingAccess === 'edit';
-
-  useEffect(() => {
-    const readAccessFromStorage = () => {
-      try {
-        const stored = localStorage.getItem('staffUser');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          setBookingAccess(parsed?.bookingAccess === 'edit' ? 'edit' : 'view');
-        } else {
-          setBookingAccess('view');
-        }
-      } catch (error) {
-        setBookingAccess('view');
-      }
-    };
-
-    readAccessFromStorage();
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === 'staffUser') {
-        readAccessFromStorage();
-      }
-    };
-
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, []);
 
   // Helper function to convert UTC to IST
   const convertToIST = (utcDate: string) => {
@@ -179,9 +151,9 @@ export default function BookingsPage() {
   const [bookingPendingPayment, setBookingPendingPayment] = useState<any | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'cash'>('online');
 
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(30);
+  // Infinite scroll state
+  const [displayedCount, setDisplayedCount] = useState(50);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   // For viewing/editing booking details
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -283,17 +255,20 @@ export default function BookingsPage() {
       }).filter(Boolean);
 
       // Process completed bookings from GoDaddy SQL
-      const completedBookings = (completedArray).map((booking: any) => ({
-        ...booking,
-        bookingType: 'online',
-        status: 'completed',
-        paymentStatus: 'paid',
-        venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null,
-        // Map SQL column names to expected field names
-        theaterName: booking.theater_name || booking.theaterName || booking.theater,
-        theater: booking.theater_name || booking.theaterName || booking.theater,
-        createdAtIST: convertToIST(booking.completed_at || booking.completedAt || booking.createdAt)
-      }));
+      const completedBookings = (completedArray).map((booking: any) => {
+        const normalizedPaymentStatus = 'paid';
+        return {
+          ...booking,
+          bookingType: 'online',
+          status: 'completed',
+          paymentStatus: normalizedPaymentStatus,
+          venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null,
+          // Map SQL column names to expected field names
+          theaterName: booking.theater_name || booking.theaterName || booking.theater,
+          theater: booking.theater_name || booking.theaterName || booking.theater,
+          createdAtIST: convertToIST(booking.completed_at || booking.completedAt || booking.createdAt)
+        };
+      });
 
       // Process manual bookings from database (manual_booking collection)
       const manualBookings = (manualArray).map((booking: any) => ({
@@ -306,16 +281,20 @@ export default function BookingsPage() {
       }));
 
       // Process cancelled bookings from GoDaddy SQL
-      const cancelledBookings = (cancelledArray).map((booking: any) => ({
-        ...booking,
-        bookingType: 'online',
-        status: 'cancelled',
-        paymentStatus: (booking.paymentStatus || booking.payment_status || '').toString().toLowerCase() === 'paid' ? 'paid' : 'unpaid',
-        // Map SQL column names to expected field names
-        theaterName: booking.theater_name || booking.theaterName || booking.theater,
-        theater: booking.theater_name || booking.theaterName || booking.theater,
-        createdAtIST: convertToIST(booking.cancelledAt || booking.cancelled_at || booking.createdAt)
-      }));
+      const cancelledBookings = (cancelledArray).map((booking: any) => {
+        const rawPaymentStatus = (booking.paymentStatus || booking.payment_status || '').toString().toLowerCase();
+        const normalizedPaymentStatus = rawPaymentStatus === 'paid' ? 'paid' : 'unpaid';
+        return {
+          ...booking,
+          bookingType: 'online',
+          status: 'cancelled',
+          paymentStatus: normalizedPaymentStatus,
+          // Map SQL column names to expected field names
+          theaterName: booking.theater_name || booking.theaterName || booking.theater,
+          theater: booking.theater_name || booking.theaterName || booking.theater,
+          createdAtIST: convertToIST(booking.cancelledAt || booking.cancelled_at || booking.createdAt)
+        };
+      });
 
       // Process incomplete bookings from database
       const incompleteBookings = (incompleteData.incompleteBookings || []).map((booking: any) => ({
@@ -334,6 +313,7 @@ export default function BookingsPage() {
 
       // Transform data for display (keep status as-is from database)
       const transformedBookings = allBookingsToShow.map((booking: any, index: number) => {
+        const normalizedPaymentStatus = (booking.paymentStatus || booking.payment_status || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid';
         // Use MongoDB _id as unique key (always unique) or create composite key
         const uniqueId = booking._id ? booking._id.toString() : `${booking.bookingId || booking.id || 'unknown'}-${index}-${Date.now()}`;
         const transformedBooking = {
@@ -347,10 +327,10 @@ export default function BookingsPage() {
           time: booking.time || '',
           status: booking.status || 'pending', // Keep exact status from database
           amount: booking.totalAmount || booking.amount || 0,
-          paymentStatus: (booking.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
           bookingDate: booking.createdAt ? new Date(booking.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           bookingType: booking.bookingType || 'online',
           occasion: booking.occasion || '',
+          paymentStatus: (booking.status || '').toLowerCase() === 'completed' ? 'paid' : normalizedPaymentStatus,
           occasionPersonName: booking.occasionPersonName || '',
           birthdayName: booking.birthdayName || '',
           partner1Name: booking.partner1Name || '',
@@ -399,9 +379,6 @@ export default function BookingsPage() {
   // Open edit modal when coming from Edit Booking Requests page
   const [pendingOpenEditIdChecked, setPendingOpenEditIdChecked] = useState(false);
   useEffect(() => {
-    if (!canEdit) {
-      return;
-    }
     if (pendingOpenEditIdChecked) return;
     const targetBookingId = sessionStorage.getItem('openEditBookingId');
     const targetMongoId = sessionStorage.getItem('openEditBookingMongoId');
@@ -432,7 +409,7 @@ export default function BookingsPage() {
         setPendingOpenEditIdChecked(true);
       }
     }
-  }, [bookings, pendingOpenEditIdChecked, canEdit]);
+  }, [bookings, pendingOpenEditIdChecked]);
 
   // Real-time clock update every second
   useEffect(() => {
@@ -445,10 +422,6 @@ export default function BookingsPage() {
 
   // Check if we need to reopen the manual booking popup
   useEffect(() => {
-    if (!canEdit) {
-      return;
-    }
-
     const checkAndReopenPopup = () => {
       const shouldReopen = sessionStorage.getItem('reopenAdminBookingPopup') === 'true';
       const hasFormData = sessionStorage.getItem('adminBookingFormData');
@@ -485,7 +458,7 @@ export default function BookingsPage() {
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [canEdit]);
+  }, []);
 
   // Calculate status counts
   const statusCounts = {
@@ -591,94 +564,65 @@ export default function BookingsPage() {
     return timeMinutesB - timeMinutesA;
   });
 
-  // Pagination calculations
-  const totalPages = Math.ceil(sortedBookings.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedBookings = sortedBookings.slice(startIndex, endIndex);
+  // Infinite scroll - show only displayedCount bookings
+  const displayedBookings = sortedBookings.slice(0, displayedCount);
+  const hasMore = displayedCount < sortedBookings.length;
 
-  // Reset to first page when filters change
+  // Reset displayed count when filters change
   useEffect(() => {
-    setCurrentPage(1);
+    setDisplayedCount(50);
   }, [searchTerm, statusFilter, showTodayOnly, showTomorrowOnly, selectedDate]);
 
-  const handleStatusChange = async (id: number, newStatus: string) => {
-    if (!canEdit) {
-      showError('You have view-only access. Ask an administrator to enable edits.');
-      return;
-    }
-    try {
-      // Get current staff info from localStorage
-      let cancelledBy = 'Staff'; // Management page is for staff only
-      let staffName = 'Staff Member'; // Default fallback
-      let userId = null;
+  // Infinite scroll handler
+  useEffect(() => {
+    const handleScroll = () => {
+      // Check if user scrolled near bottom (within 200px)
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = document.documentElement.clientHeight;
       
-      const staffUser = localStorage.getItem('staffUser');
-      console.log('🔍 [BOOKINGS PAGE] staffUser from localStorage:', staffUser);
-      
-      if (staffUser) {
-        try {
-          const staffData = JSON.parse(staffUser);
-          console.log('🔍 [BOOKINGS PAGE] Parsed staff data:', staffData);
-          
-          staffName = staffData.name || 'Staff Member';
-          userId = staffData.userId || staffData.id;
-          
-          console.log('🔍 [BOOKINGS PAGE] Staff info extracted:', { cancelledBy, staffName, userId });
-        } catch (e) {
-          console.error('❌ [BOOKINGS PAGE] Failed to parse staff user data:', e);
-        }
-      } else {
-        console.warn('⚠️ [BOOKINGS PAGE] No staffUser found in localStorage');
+      if (scrollHeight - scrollTop - clientHeight < 200 && hasMore && !isLoadingMore) {
+        setIsLoadingMore(true);
+        // Load 50 more bookings
+        setTimeout(() => {
+          setDisplayedCount(prev => prev + 50);
+          setIsLoadingMore(false);
+        }, 300); // Small delay for smooth UX
       }
+    };
 
-      const requestBody = {
-        bookingId: id.toString(),
-        status: newStatus.toLowerCase(),
-        // Add staff tracking info for cancellations
-        ...(newStatus.toLowerCase() === 'cancelled' && {
-          cancelledBy: cancelledBy,
-          staffName: staffName,
-          userId: userId
-        })
-      };
-      
-      console.log('📤 [BOOKINGS PAGE] Sending request to API:', requestBody);
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [hasMore, isLoadingMore]);
 
+  const handleStatusChange = async (id: number, newStatus: string) => {
+    try {
       const response = await fetch('/api/admin/update-booking', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({
+          bookingId: id.toString(),
+          status: newStatus.toLowerCase()
+        })
       });
 
       const data = await response.json();
 
       if (data.success) {
-        // Update bookings state directly without page reload
-        setBookings(prevBookings => 
-          prevBookings.map(booking => 
-            booking.id === id
-              ? { ...booking, status: newStatus.toLowerCase() }
-              : booking
-          )
-        );
-        
-        console.log(`✅ Booking ${id} status updated to ${newStatus}`);
+        // Refresh the bookings list
+        await fetchBookings();
+
       } else {
-        console.error('Failed to update booking status:', data.error);
+
       }
     } catch (error) {
-      console.error('Error updating booking status:', error);
+
     }
   };
 
   const handleManualBooking = () => {
-    if (!canEdit) {
-      showError('You currently have view-only access. Ask an administrator to enable booking edits.');
-      return;
-    }
     // Redirect to ManualBooking page instead of opening popup
     window.open('/ManualBooking', '_blank');
   };
@@ -774,11 +718,6 @@ export default function BookingsPage() {
   };
 
   const handleEditBooking = (booking: any) => {
-    if (!canEdit) {
-      showError('You have view-only access. Switch to Edit in Staff Management to modify bookings.');
-      void handleViewBooking(booking);
-      return;
-    }
     const query = new URLSearchParams({
       bookingId: String(booking.originalBookingId || booking.id || ''),
       email: String(booking.email || ''),
@@ -791,10 +730,6 @@ export default function BookingsPage() {
 
   // Delete/Cancel booking
   const handleDeleteBooking = async (booking: any) => {
-    if (!canEdit) {
-      showError('You have view-only access. Contact an administrator to delete bookings.');
-      return;
-    }
     setBookingToDelete(booking);
     setShowConfirmModal(true);
   };
@@ -803,40 +738,12 @@ export default function BookingsPage() {
     if (!bookingToDelete) return;
 
     try {
-      // Get current staff info from localStorage
-      let cancelledBy = 'Staff'; // Management page is for staff only
-      let staffName = 'Staff Member'; // Default fallback
-      let userId = null;
-      
-      const staffUser = localStorage.getItem('staffUser');
-      console.log('🔍 [DELETE BOOKING] staffUser from localStorage:', staffUser);
-      
-      if (staffUser) {
-        try {
-          const staffData = JSON.parse(staffUser);
-          console.log('🔍 [DELETE BOOKING] Parsed staff data:', staffData);
-          
-          staffName = staffData.name || 'Staff Member';
-          userId = staffData.userId || staffData.id;
-          
-          console.log('🔍 [DELETE BOOKING] Staff info extracted:', { cancelledBy, staffName, userId });
-        } catch (e) {
-          console.error('❌ [DELETE BOOKING] Failed to parse staff user data:', e);
-        }
-      } else {
-        console.warn('⚠️ [DELETE BOOKING] No staffUser found in localStorage');
-      }
-
       const requestBody = {
         bookingId: bookingToDelete.originalBookingId || bookingToDelete.id.toString(), // Use original booking ID for API call
-        status: 'cancelled',
-        // Add staff tracking info
-        cancelledBy: cancelledBy,
-        staffName: staffName,
-        userId: userId
+        status: 'cancelled'
       };
 
-      console.log('📤 [DELETE BOOKING] Sending request to API:', requestBody);
+
 
       const response = await fetch('/api/admin/update-booking', {
         method: 'PUT',
@@ -850,26 +757,98 @@ export default function BookingsPage() {
 
 
       if (data.success) {
-        // Update bookings state directly without page reload
-        setBookings(prevBookings => 
-          prevBookings.map(booking => 
-            (booking.id === bookingToDelete.id || booking.originalBookingId === bookingToDelete.originalBookingId)
-              ? { ...booking, status: 'cancelled' }
-              : booking
-          )
-        );
-        
+        // Refresh bookings after cancellation
+        await fetchBookings();
         showSuccess('Booking cancelled successfully!');
       } else {
         showError('Failed to cancel booking: ' + (data.error || 'Unknown error'));
       }
     } catch (error) {
-      console.error('Error cancelling booking:', error);
+
       showError('Error cancelling booking');
     } finally {
       setShowConfirmModal(false);
       setBookingToDelete(null);
     }
+  };
+
+  const handleTogglePaymentStatus = (booking: any) => {
+    const bookingId = booking.originalBookingId || booking.id;
+    if (!bookingId) {
+      showError('Booking ID missing');
+      return;
+    }
+
+    const currentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
+    if (currentStatus === 'paid') {
+      showSuccess('Payment already marked as paid.');
+      return;
+    }
+
+    setBookingPendingPayment(booking);
+    setSelectedPaymentMethod('online');
+    setIsPaymentMethodModalOpen(true);
+  };
+
+  const handleConfirmPaymentMethod = async () => {
+    if (!bookingPendingPayment) return;
+
+    const booking = bookingPendingPayment;
+    const bookingId = booking.originalBookingId || booking.id;
+    if (!bookingId) {
+      showError('Booking ID missing');
+      return;
+    }
+
+    const targetStatus = 'paid';
+
+    try {
+      setPaymentUpdatingId(booking.id);
+
+      const response = await fetch('/api/admin/update-booking', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          bookingId,
+          paymentStatus: targetStatus,
+          venuePaymentMethod: selectedPaymentMethod,
+          sendInvoice: targetStatus === 'paid',
+          isManualBooking: (booking.bookingType || '').toLowerCase() === 'manual'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setBookings(prev => prev.map(item => (
+          item.id === booking.id
+            ? { ...item, paymentStatus: targetStatus, venuePaymentMethod: selectedPaymentMethod }
+            : item
+        )));
+
+        const methodLabel = selectedPaymentMethod === 'cash' ? 'Cash' : 'Online';
+        showSuccess(`Payment marked as paid (${methodLabel}). Invoice email sent.`);
+        setIsPaymentMethodModalOpen(false);
+        setBookingPendingPayment(null);
+      } else {
+        showError(data.error || 'Failed to update payment status');
+      }
+    } catch (error) {
+      console.error('Error updating payment status:', error);
+      showError('Error updating payment status');
+    } finally {
+      setPaymentUpdatingId(null);
+    }
+  };
+
+  const handleClosePaymentMethodModal = () => {
+    if (paymentUpdatingId !== null && bookingPendingPayment && paymentUpdatingId === bookingPendingPayment.id) {
+      return;
+    }
+    setIsPaymentMethodModalOpen(false);
+    setBookingPendingPayment(null);
   };
 
   // Handle booking update from modal
@@ -973,119 +952,18 @@ export default function BookingsPage() {
     return fields;
   };
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="bookings-page">
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '50vh',
-          fontSize: '1.2rem',
-          color: '#666'
-        }}>
-          Loading bookings...
-        </div>
-      </div>
-    );
-  }
-
-  const handleMarkAsPaid = (booking: any) => {
-    if (!canEdit) {
-      showError('You have view-only access. Ask an administrator to enable edits.');
-      return;
-    }
-
-    const bookingId = booking.originalBookingId || booking.id;
-    if (!bookingId) {
-      showError('Booking ID missing');
-      return;
-    }
-
-    const currentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
-    if (currentStatus === 'paid') {
-      showSuccess('Payment already marked as paid.');
-      return;
-    }
-
-    setBookingPendingPayment(booking);
-    setSelectedPaymentMethod('online');
-    setIsPaymentMethodModalOpen(true);
-  };
-
-  const handleClosePaymentMethodModal = () => {
-    if (paymentUpdatingId) return;
-    setIsPaymentMethodModalOpen(false);
-    setBookingPendingPayment(null);
-    setSelectedPaymentMethod('online');
-  };
-
-  const handleConfirmPaymentMethod = async () => {
-    if (!bookingPendingPayment) return;
-    if (!canEdit) {
-      showError('You have view-only access. Ask an administrator to enable edits.');
-      return;
-    }
-
-    const booking = bookingPendingPayment;
-    const bookingId = booking.originalBookingId || booking.id;
-    if (!bookingId) {
-      showError('Booking ID missing');
-      return;
-    }
-
-    try {
-      setPaymentUpdatingId(booking.id);
-
-      const response = await fetch('/api/admin/update-booking', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          bookingId,
-          paymentStatus: 'paid',
-          venuePaymentMethod: selectedPaymentMethod,
-          sendInvoice: true,
-          isManualBooking: (booking.bookingType || '').toLowerCase() === 'manual'
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setBookings(prev => prev.map(item => (
-          item.id === booking.id
-            ? { ...item, paymentStatus: 'paid', venuePaymentMethod: selectedPaymentMethod }
-            : item
-        )));
-
-        const methodLabel = selectedPaymentMethod === 'cash' ? 'Cash' : 'Online';
-        showSuccess(`Payment marked as paid (${methodLabel}).`);
-        setIsPaymentMethodModalOpen(false);
-        setBookingPendingPayment(null);
-      } else {
-        showError('Failed to update payment status: ' + (data.error || 'Unknown error'));
-      }
-    } catch (error) {
-      showError('Error updating payment status');
-    } finally {
-      setPaymentUpdatingId(null);
-      setSelectedPaymentMethod('online');
-    }
-  };
-
+  // No loading state - show bookings immediately
+  
   return (
     <div className="bookings-page">
       <div className="page-header">
         <div className="header-content">
           <div className="header-text">
-            <h1>Booking Applications</h1>
-            <p>Manage all booking requests and applications</p>
+            <h1>Management - Booking Applications</h1>
+            <p>Manage all your theater bookings in one place</p>
           </div>
           <div className="header-actions">
-            <button className="manual-booking-btn" onClick={handleManualBooking} title={canEdit ? 'Create a new manual booking' : 'View-only access: ask admin to enable edits'}>
+            <button className="manual-booking-btn" onClick={handleManualBooking}>
               <Calendar size={16} />
               Manual Booking
             </button>
@@ -1170,7 +1048,8 @@ export default function BookingsPage() {
         </div>
 
         <div className="results-info">
-          Showing {startIndex + 1}-{Math.min(endIndex, filteredBookings.length)} of {filteredBookings.length} bookings
+          Showing {displayedBookings.length} of {sortedBookings.length} bookings
+          {hasMore && <span style={{ marginLeft: '0.5rem', color: '#10b981' }}>(Scroll for more)</span>}
         </div>
       </div>
 
@@ -1192,18 +1071,18 @@ export default function BookingsPage() {
             </tr>
           </thead>
           <tbody>
-            {paginatedBookings.length === 0 ? (
+            {displayedBookings.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: '#6B7280' }}>
+                <td colSpan={11} style={{ textAlign: 'center', padding: '3rem', color: '#6B7280' }}>
                   {bookings.length === 0
                     ? 'No bookings found in database'
                     : `No bookings match your search criteria`}
                 </td>
               </tr>
             ) : (
-              paginatedBookings.map((booking, index) => {
+              displayedBookings.map((booking: any, index: number) => {
                 // Calculate current date CONFIRMED booking number
-                const currentDateConfirmedBookings = paginatedBookings.filter((b, i) =>
+                const currentDateConfirmedBookings = displayedBookings.filter((b: any, i: number) =>
                   i <= index &&
                   isCurrentDateBooking(b.date) &&
                   b.status.toLowerCase() === 'confirmed'
@@ -1211,11 +1090,12 @@ export default function BookingsPage() {
                 const currentDateConfirmedBookingNumber = currentDateConfirmedBookings.length;
                 const normalizedPaymentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
                 const isPaid = normalizedPaymentStatus === 'paid';
-                const canMarkAsPaid = (booking.status || '').toLowerCase() === 'confirmed';
+                const canTogglePayment = (booking.status || '').toLowerCase() === 'confirmed';
+                const isPaymentUpdating = paymentUpdatingId === booking.id;
 
                 return (
                   <tr key={booking.id}>
-                    <td>{startIndex + index + 1}</td>
+                    <td>{index + 1}</td>
                     <td>#{booking.originalBookingId || booking.id}</td>
                     <td>
                       <div className="customer-info">
@@ -1249,52 +1129,35 @@ export default function BookingsPage() {
                     </td>
                     <td>
                       <div className="action-buttons">
+                        {canTogglePayment && !isPaid && (
+                          <button
+                            className={`action-btn pay-btn ${isPaid ? 'paid' : ''}`}
+                            title='Mark as Paid'
+                            onClick={() => handleTogglePaymentStatus(booking)}
+                            disabled={isPaymentUpdating}
+                          >
+                            <CheckCircle size={16} />
+                          </button>
+                        )}
                         <button
                           className="action-btn view-btn"
-                          onClick={() => handleViewBooking(booking)}
                           title="View Details"
+                          onClick={() => handleViewBooking(booking)}
                         >
                           <Eye size={16} />
                         </button>
                         <button
                           className="action-btn edit-btn"
-                          onClick={() => {
-                            if (!canEdit) {
-                              showError('You have view-only access. Switch to Edit in Staff Management to modify bookings.');
-                              return;
-                            }
-                            const query = new URLSearchParams({
-                              bookingId: String(booking.id ?? ''),
-                              email: String(booking.email ?? ''),
-                              theaterName: String(booking.theaterName || booking.theater || ''),
-                              date: String(booking.date ?? ''),
-                              time: String(booking.time ?? ''),
-                            }).toString();
-                            router.push(`/Editbooking?${query}`);
-                          }}
-                          title={canEdit ? 'Edit Booking' : 'View-only access'}
+                          title="Edit Booking"
+                          onClick={() => handleEditBooking(booking)}
                         >
                           <Edit size={16} />
                         </button>
-                        {canMarkAsPaid && !isPaid && (
-                          <button
-                             className="action-btn pay-btn"
-                             onClick={() => {
-                               if (!canEdit) {
-                                 showError('You have view-only access. Ask an administrator to enable edits.');
-                                 return;
-                               }
-                               handleMarkAsPaid(booking);
-                             }}
-                             title={canEdit ? 'Mark as Paid' : 'View-only access'}
-                           >
-                            <CheckCircle size={16} />
-                          </button>
-                        )}
                         <button
                           className="action-btn delete-btn"
+                          title={(booking.status || '').toLowerCase() === 'cancelled' ? 'Already cancelled' : 'Cancel Booking'}
                           onClick={() => handleDeleteBooking(booking)}
-                          title={canEdit ? 'Delete Booking' : 'View-only access'}
+                          disabled={(booking.status || '').toLowerCase() === 'cancelled'}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -1308,40 +1171,28 @@ export default function BookingsPage() {
         </table>
       </div>
 
-      {/* Pagination Controls - Only show if more than 30 bookings */}
-      {sortedBookings.length > 30 && totalPages > 1 && (
-        <div className="pagination-container">
-          <div className="pagination-info">
-            Page {currentPage} of {totalPages}
-          </div>
-          <div className="pagination-controls">
-            <button
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="pagination-btn"
-            >
-              Previous
-            </button>
-
-            {/* Page numbers */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`pagination-btn ${currentPage === page ? 'active' : ''}`}
-              >
-                {page}
-              </button>
-            ))}
-
-            <button
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="pagination-btn"
-            >
-              Next
-            </button>
-          </div>
+      {/* Loading indicator for infinite scroll */}
+      {isLoadingMore && (
+        <div style={{ 
+          textAlign: 'center', 
+          padding: '2rem', 
+          color: '#10b981',
+          fontSize: '0.9rem',
+          fontWeight: 600
+        }}>
+          Loading more bookings...
+        </div>
+      )}
+      
+      {/* End of results indicator */}
+      {!hasMore && displayedBookings.length > 0 && (
+        <div style={{ 
+          textAlign: 'center', 
+          padding: '2rem', 
+          color: '#666',
+          fontSize: '0.85rem'
+        }}>
+          All bookings loaded ({sortedBookings.length} total)
         </div>
       )}
 
@@ -1371,7 +1222,7 @@ export default function BookingsPage() {
 
         .header-text h1 {
           font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
-          font-size: 2rem;
+          font-size: 1.6rem;
           font-weight: 600;
           color: #333;
           margin: 0 0 0.5rem 0;
@@ -1379,7 +1230,7 @@ export default function BookingsPage() {
 
         .header-text p {
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 1rem;
+          font-size: 0.85rem;
           color: #666;
           margin: 0;
         }
@@ -1413,14 +1264,14 @@ export default function BookingsPage() {
 
         .current-time {
           font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
-          font-size: 0.85rem;
+          font-size: 0.75rem;
           color: #28a745;
           font-weight: 600;
         }
 
         .last-updated {
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.75rem;
+          font-size: 0.65rem;
           color: #666;
         }
 
@@ -1436,9 +1287,9 @@ export default function BookingsPage() {
           color: white;
           border: none;
           border-radius: 8px;
-          padding: 0.75rem 1.5rem;
+          padding: 0.6rem 1.2rem;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -1452,15 +1303,6 @@ export default function BookingsPage() {
           background: #218838;
           transform: translateY(-1px);
           box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
-        }
-
-        .manual-booking-btn.disabled,
-        .manual-booking-btn:disabled {
-          background: #e5e7eb;
-          color: #9ca3af;
-          cursor: not-allowed;
-          box-shadow: none;
-          transform: none;
         }
 
         .filters-section {
@@ -1479,11 +1321,11 @@ export default function BookingsPage() {
 
         .search-box input {
           width: 100%;
-          padding: 0.75rem 1rem 0.75rem 3rem;
+          padding: 0.6rem 0.8rem 0.6rem 2.5rem;
           border: 1px solid #ddd;
           border-radius: 8px;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           background: white;
           color: #000000;
         }
@@ -1501,13 +1343,13 @@ export default function BookingsPage() {
         }
 
         .today-button {
-          padding: 0.75rem 1.5rem;
+          padding: 0.6rem 1.2rem;
           background: rgb(255, 66, 66);
           color: white;
           border: 2px solid rgba(255, 255, 255, 0.2);
           border-radius: 12px;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -1535,13 +1377,13 @@ export default function BookingsPage() {
 
 
         .date-selector-button {
-          padding: 0.75rem 1.5rem;
+          padding: 0.6rem 1.2rem;
           background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
           color: white;
           border: 2px solid rgba(255, 255, 255, 0.2);
           border-radius: 12px;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -1612,45 +1454,21 @@ export default function BookingsPage() {
 
         .bookings-table th {
           background: #f8f9fa;
-          padding: 1rem;
+          padding: 0.75rem;
           text-align: left;
           font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           font-weight: 600;
           color: #333;
           border-bottom: 1px solid #dee2e6;
         }
 
         .bookings-table td {
-          padding: 1rem;
+          padding: 0.75rem;
           border-bottom: 1px solid #dee2e6;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           color: #666;
-        }
-
-        .payment-badge {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          padding: 0.25rem 0.75rem;
-          border-radius: 9999px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-transform: capitalize;
-          border: 1px solid transparent;
-        }
-
-        .payment-badge.paid {
-          background: #d1fae5;
-          border-color: #10b981;
-          color: #047857;
-        }
-
-        .payment-badge.unpaid {
-          background: #fee2e2;
-          border-color: #f87171;
-          color: #b91c1c;
         }
 
         .customer-info {
@@ -1664,7 +1482,7 @@ export default function BookingsPage() {
         }
 
         .booking-date {
-          font-size: 0.8rem;
+          font-size: 0.7rem;
           color: #999;
         }
 
@@ -1681,9 +1499,9 @@ export default function BookingsPage() {
         }
 
         .status-badge {
-          padding: 0.25rem 0.75rem;
+          padding: 0.2rem 0.6rem;
           border-radius: 20px;
-          font-size: 0.8rem;
+          font-size: 0.7rem;
           font-weight: 500;
           text-transform: uppercase;
           color: rgb(255, 255, 255) !important; /* White text for all status badges */
@@ -1719,6 +1537,30 @@ export default function BookingsPage() {
               color: rgb(255, 255, 255) !important;
             }
 
+        .payment-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0.2rem 0.6rem;
+          border-radius: 9999px;
+          font-size: 0.65rem;
+          font-weight: 600;
+          text-transform: capitalize;
+          border: 1px solid transparent;
+        }
+
+        .payment-badge.paid {
+          background: #d1fae5;
+          border-color: #10b981;
+          color: #047857;
+        }
+
+        .payment-badge.unpaid {
+          background: #fee2e2;
+          border-color: #f87171;
+          color: #b91c1c;
+        }
+
         .delete-btn:disabled {
           background: #f3f4f6;
           color: #9ca3af;
@@ -1729,64 +1571,67 @@ export default function BookingsPage() {
         .action-buttons {
           display: flex;
           gap: 0.5rem;
-          align-items: center;
         }
 
         .action-btn {
-          width: 32px;
-          height: 32px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
+          padding: 0.4rem;
           border: none;
           border-radius: 6px;
           cursor: pointer;
-          transition: all 0.2s ease;
-          color: #fff;
-          font-size: 0;
-        }
-
-        .action-btn:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+          transition: all 0.3s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .action-btn.pay-btn {
           background: #f59e0b;
-          color: #fff;
+          color: white;
+        }
+
+        .action-btn.pay-btn.paid {
+          background: #10b981;
+        }
+
+        .action-btn.pay-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
         .view-btn {
-          background: #28a745;
+          background: #3B82F6;
+          color: white;
         }
 
         .view-btn:hover {
-          background: #218838;
+          background: #2563EB;
         }
 
         .edit-btn {
-          background: #ffc107;
-          color: #212529;
+          background: #8B5CF6;
+          color: white;
         }
 
         .edit-btn:hover {
-          background: #e0a800;
+          background: #7C3AED;
         }
 
-        .cancel-btn {
-          background: #dc3545 !important;
-        }
-
-        .cancel-btn:hover {
-          background: #c82333;
-        }
-
-        .activate-btn {
+        .confirm-btn {
           background: #17a2b8;
+          color: white;
         }
 
-        .activate-btn:hover {
+        .confirm-btn:hover {
           background: #138496;
+        }
+
+        .delete-btn {
+          background: #dc3545;
+          color: white;
+        }
+
+        .delete-btn:hover {
+          background: #c82333;
         }
 
         .results-info {
@@ -2033,71 +1878,6 @@ export default function BookingsPage() {
           padding: 1.5rem;
         }
 
-        .modal-subtitle {
-          color: #6B7280;
-          font-size: 0.95rem;
-          line-height: 1.5;
-          margin: 0;
-        }
-
-        .payment-method-modal {
-          background: #ffffff;
-          width: min(420px, 90vw);
-          padding: 2rem;
-          border-radius: 18px;
-          box-shadow: 0 25px 60px rgba(15, 23, 42, 0.2);
-          display: flex;
-          flex-direction: column;
-          gap: 1.5rem;
-        }
-
-        .payment-method-options {
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-        }
-
-        .payment-method-option {
-          display: flex;
-          align-items: flex-start;
-          gap: 0.75rem;
-          padding: 1.1rem 1.25rem;
-          border-radius: 14px;
-          border: 1.5px solid #E5E7EB;
-          background: #F9FAFB;
-          text-align: left;
-          transition: all 0.2s ease;
-          cursor: pointer;
-        }
-
-        .payment-method-option .method-icon {
-          font-size: 1.6rem;
-        }
-
-        .payment-method-option .method-title {
-          display: block;
-          font-weight: 600;
-          color: #111827;
-        }
-
-        .payment-method-option .method-subtitle {
-          display: block;
-          color: #6B7280;
-          font-size: 0.85rem;
-          margin-top: 0.2rem;
-        }
-
-        .payment-method-option.selected {
-          border-color: #8B5CF6;
-          background: rgba(139, 92, 246, 0.08);
-          box-shadow: 0 10px 20px rgba(139, 92, 246, 0.18);
-        }
-
-        .payment-method-option:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
         .detail-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -2147,6 +1927,77 @@ export default function BookingsPage() {
           gap: 1rem;
           margin-top: 2rem;
           justify-content: flex-end;
+        }
+
+        .payment-method-modal {
+          background: #ffffff;
+          width: min(420px, 90vw);
+          padding: 2rem;
+          border-radius: 18px;
+          box-shadow: 0 25px 60px rgba(15, 23, 42, 0.2);
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+        }
+
+        .payment-method-modal .modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+        }
+
+        .modal-subtitle {
+          color: #6B7280;
+          font-size: 0.95rem;
+          line-height: 1.5;
+        }
+
+        .payment-method-options {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .payment-method-option {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.75rem;
+          padding: 1.1rem 1.25rem;
+          border-radius: 14px;
+          border: 1.5px solid #E5E7EB;
+          background: #F9FAFB;
+          text-align: left;
+          transition: all 0.2s ease;
+          cursor: pointer;
+        }
+
+        .payment-method-option .method-icon {
+          font-size: 1.6rem;
+        }
+
+        .payment-method-option .method-title {
+          display: block;
+          font-weight: 600;
+          color: #111827;
+        }
+
+        .payment-method-option .method-subtitle {
+          display: block;
+          color: #6B7280;
+          font-size: 0.85rem;
+          margin-top: 0.2rem;
+        }
+
+        .payment-method-option.selected {
+          border-color: #8B5CF6;
+          background: rgba(139, 92, 246, 0.08);
+          box-shadow: 0 10px 20px rgba(139, 92, 246, 0.18);
+        }
+
+        .payment-method-option:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
         .save-btn,
@@ -2277,201 +2128,12 @@ export default function BookingsPage() {
         type="warning"
       />
 
-      {/* Global Date Picker */}
-      {isDatePickerOpen && (
-        <GlobalDatePicker
-          isOpen={isDatePickerOpen}
-          onClose={() => setIsDatePickerOpen(false)}
-          onDateSelect={(date) => {
-            setSelectedDate(date);
-            setShowTodayOnly(false);
-            setShowTomorrowOnly(false);
-            setSearchTerm('');
-            setIsDatePickerOpen(false);
-          }}
-          selectedDate={selectedDate}
-          allowPastDates={true}
-        />
-      )}
-
-      <style jsx>{`
-        /* Booking Detail Popup Styles */
-        .booking-detail-popup {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          z-index: 1000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .popup-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          cursor: pointer;
-        }
-
-        .popup-content {
-          position: relative;
-          background: white;
-          border-radius: 12px;
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-          max-width: 600px;
-          width: 90%;
-          max-height: 80vh;
-          overflow-y: auto;
-        }
-
-        .popup-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 1.5rem;
-          border-bottom: 1px solid #eee;
-        }
-
-        .popup-header h3 {
-          margin: 0;
-          color: #333;
-          font-size: 1.5rem;
-          font-weight: 600;
-        }
-
-        .header-actions {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .edit-btn-header {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 16px;
-          background: #007bff;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .edit-btn-header:hover {
-          background: #0056b3;
-          transform: translateY(-1px);
-        }
-
-        .edit-btn-header span {
-          font-size: 16px;
-        }
-
-        .popup-body {
-          padding: 1.5rem;
-        }
-
-        .detail-section {
-          margin-bottom: 2rem;
-        }
-
-        .detail-section h4 {
-          margin: 0 0 1rem 0;
-          color: #333;
-          font-size: 1.1rem;
-          font-weight: 600;
-          border-bottom: 2px solid #007bff;
-          padding-bottom: 0.5rem;
-        }
-
-        .detail-section .detail-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 1rem;
-        }
-
-        .detail-section .detail-item {
-          display: flex;
-          flex-direction: column;
-          gap: 0.25rem;
-        }
-
-        .detail-section .detail-item .label {
-          font-weight: 600;
-          color: #555;
-          font-size: 0.9rem;
-        }
-
-        .detail-section .detail-item .value {
-          color: #333;
-          font-size: 0.95rem;
-        }
-
-        .selected-items {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-        }
-
-        .selected-item {
-          background: #e9ecef;
-          color: #495057;
-          padding: 0.25rem 0.75rem;
-          border-radius: 15px;
-          font-size: 0.85rem;
-          font-weight: 500;
-        }
-
-        @media (max-width: 768px) {
-          .popup-content {
-            width: 95%;
-            margin: 1rem;
-          }
-
-          .detail-section .detail-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .popup-header {
-            padding: 1rem;
-          }
-
-          .popup-body {
-            padding: 1rem;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .popup-content {
-            width: 100%;
-            height: 100vh;
-            border-radius: 0;
-            max-height: none;
-          }
-
-          .popup-header h3 {
-            font-size: 1.25rem;
-          }
-        }
-      `}</style>
-
       {isPaymentMethodModalOpen && bookingPendingPayment && (
         <div className="modal-overlay" onClick={handleClosePaymentMethodModal}>
           <div className="payment-method-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>How was the payment received?</h2>
-              <button
-                className="close-btn"
-                onClick={handleClosePaymentMethodModal}
-                disabled={paymentUpdatingId === bookingPendingPayment.id}
-              >
+              <button className="close-btn" onClick={handleClosePaymentMethodModal} disabled={paymentUpdatingId === bookingPendingPayment.id}>
                 <X size={20} />
               </button>
             </div>
@@ -2522,6 +2184,23 @@ export default function BookingsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Global Date Picker */}
+      {isDatePickerOpen && (
+        <GlobalDatePicker
+          isOpen={isDatePickerOpen}
+          onClose={() => setIsDatePickerOpen(false)}
+          onDateSelect={(date) => {
+            setSelectedDate(date);
+            setShowTodayOnly(false);
+            setShowTomorrowOnly(false);
+            setSearchTerm('');
+            setIsDatePickerOpen(false);
+          }}
+          selectedDate={selectedDate}
+          allowPastDates={true}
+        />
       )}
 
     </div>

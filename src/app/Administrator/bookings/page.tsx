@@ -151,9 +151,9 @@ export default function BookingsPage() {
   const [bookingPendingPayment, setBookingPendingPayment] = useState<any | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'cash'>('online');
 
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(30);
+  // Infinite scroll state
+  const [displayedCount, setDisplayedCount] = useState(50);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   // For viewing/editing booking details
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -564,16 +564,36 @@ export default function BookingsPage() {
     return timeMinutesB - timeMinutesA;
   });
 
-  // Pagination calculations
-  const totalPages = Math.ceil(sortedBookings.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedBookings = sortedBookings.slice(startIndex, endIndex);
+  // Infinite scroll - show only displayedCount bookings
+  const displayedBookings = sortedBookings.slice(0, displayedCount);
+  const hasMore = displayedCount < sortedBookings.length;
 
-  // Reset to first page when filters change
+  // Reset displayed count when filters change
   useEffect(() => {
-    setCurrentPage(1);
+    setDisplayedCount(50);
   }, [searchTerm, statusFilter, showTodayOnly, showTomorrowOnly, selectedDate]);
+
+  // Infinite scroll handler
+  useEffect(() => {
+    const handleScroll = () => {
+      // Check if user scrolled near bottom (within 200px)
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = document.documentElement.clientHeight;
+      
+      if (scrollHeight - scrollTop - clientHeight < 200 && hasMore && !isLoadingMore) {
+        setIsLoadingMore(true);
+        // Load 50 more bookings
+        setTimeout(() => {
+          setDisplayedCount(prev => prev + 50);
+          setIsLoadingMore(false);
+        }, 300); // Small delay for smooth UX
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [hasMore, isLoadingMore]);
 
   const handleStatusChange = async (id: number, newStatus: string) => {
     try {
@@ -932,24 +952,8 @@ export default function BookingsPage() {
     return fields;
   };
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="bookings-page">
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '50vh',
-          fontSize: '1.2rem',
-          color: '#666'
-        }}>
-          Loading bookings...
-        </div>
-      </div>
-    );
-  }
-
+  // No loading state - show bookings immediately
+  
   return (
     <div className="bookings-page">
       <div className="page-header">
@@ -1044,7 +1048,8 @@ export default function BookingsPage() {
         </div>
 
         <div className="results-info">
-          Showing {startIndex + 1}-{Math.min(endIndex, filteredBookings.length)} of {filteredBookings.length} bookings
+          Showing {displayedBookings.length} of {sortedBookings.length} bookings
+          {hasMore && <span style={{ marginLeft: '0.5rem', color: '#10b981' }}>(Scroll for more)</span>}
         </div>
       </div>
 
@@ -1066,7 +1071,7 @@ export default function BookingsPage() {
             </tr>
           </thead>
           <tbody>
-            {paginatedBookings.length === 0 ? (
+            {displayedBookings.length === 0 ? (
               <tr>
                 <td colSpan={11} style={{ textAlign: 'center', padding: '3rem', color: '#6B7280' }}>
                   {bookings.length === 0
@@ -1075,9 +1080,9 @@ export default function BookingsPage() {
                 </td>
               </tr>
             ) : (
-              paginatedBookings.map((booking, index) => {
+              displayedBookings.map((booking: any, index: number) => {
                 // Calculate current date CONFIRMED booking number
-                const currentDateConfirmedBookings = paginatedBookings.filter((b, i) =>
+                const currentDateConfirmedBookings = displayedBookings.filter((b: any, i: number) =>
                   i <= index &&
                   isCurrentDateBooking(b.date) &&
                   b.status.toLowerCase() === 'confirmed'
@@ -1090,7 +1095,7 @@ export default function BookingsPage() {
 
                 return (
                   <tr key={booking.id}>
-                    <td>{startIndex + index + 1}</td>
+                    <td>{index + 1}</td>
                     <td>#{booking.originalBookingId || booking.id}</td>
                     <td>
                       <div className="customer-info">
@@ -1166,40 +1171,28 @@ export default function BookingsPage() {
         </table>
       </div>
 
-      {/* Pagination Controls - Only show if more than 30 bookings */}
-      {sortedBookings.length > 30 && totalPages > 1 && (
-        <div className="pagination-container">
-          <div className="pagination-info">
-            Page {currentPage} of {totalPages}
-          </div>
-          <div className="pagination-controls">
-            <button
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="pagination-btn"
-            >
-              Previous
-            </button>
-
-            {/* Page numbers */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`pagination-btn ${currentPage === page ? 'active' : ''}`}
-              >
-                {page}
-              </button>
-            ))}
-
-            <button
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="pagination-btn"
-            >
-              Next
-            </button>
-          </div>
+      {/* Loading indicator for infinite scroll */}
+      {isLoadingMore && (
+        <div style={{ 
+          textAlign: 'center', 
+          padding: '2rem', 
+          color: '#10b981',
+          fontSize: '0.9rem',
+          fontWeight: 600
+        }}>
+          Loading more bookings...
+        </div>
+      )}
+      
+      {/* End of results indicator */}
+      {!hasMore && displayedBookings.length > 0 && (
+        <div style={{ 
+          textAlign: 'center', 
+          padding: '2rem', 
+          color: '#666',
+          fontSize: '0.85rem'
+        }}>
+          All bookings loaded ({sortedBookings.length} total)
         </div>
       )}
 
@@ -1229,7 +1222,7 @@ export default function BookingsPage() {
 
         .header-text h1 {
           font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
-          font-size: 2rem;
+          font-size: 1.6rem;
           font-weight: 600;
           color: #333;
           margin: 0 0 0.5rem 0;
@@ -1237,7 +1230,7 @@ export default function BookingsPage() {
 
         .header-text p {
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 1rem;
+          font-size: 0.85rem;
           color: #666;
           margin: 0;
         }
@@ -1271,14 +1264,14 @@ export default function BookingsPage() {
 
         .current-time {
           font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
-          font-size: 0.85rem;
+          font-size: 0.75rem;
           color: #28a745;
           font-weight: 600;
         }
 
         .last-updated {
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.75rem;
+          font-size: 0.65rem;
           color: #666;
         }
 
@@ -1294,9 +1287,9 @@ export default function BookingsPage() {
           color: white;
           border: none;
           border-radius: 8px;
-          padding: 0.75rem 1.5rem;
+          padding: 0.6rem 1.2rem;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -1328,11 +1321,11 @@ export default function BookingsPage() {
 
         .search-box input {
           width: 100%;
-          padding: 0.75rem 1rem 0.75rem 3rem;
+          padding: 0.6rem 0.8rem 0.6rem 2.5rem;
           border: 1px solid #ddd;
           border-radius: 8px;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           background: white;
           color: #000000;
         }
@@ -1350,13 +1343,13 @@ export default function BookingsPage() {
         }
 
         .today-button {
-          padding: 0.75rem 1.5rem;
+          padding: 0.6rem 1.2rem;
           background: rgb(255, 66, 66);
           color: white;
           border: 2px solid rgba(255, 255, 255, 0.2);
           border-radius: 12px;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -1384,13 +1377,13 @@ export default function BookingsPage() {
 
 
         .date-selector-button {
-          padding: 0.75rem 1.5rem;
+          padding: 0.6rem 1.2rem;
           background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
           color: white;
           border: 2px solid rgba(255, 255, 255, 0.2);
           border-radius: 12px;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -1461,20 +1454,20 @@ export default function BookingsPage() {
 
         .bookings-table th {
           background: #f8f9fa;
-          padding: 1rem;
+          padding: 0.75rem;
           text-align: left;
           font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           font-weight: 600;
           color: #333;
           border-bottom: 1px solid #dee2e6;
         }
 
         .bookings-table td {
-          padding: 1rem;
+          padding: 0.75rem;
           border-bottom: 1px solid #dee2e6;
           font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
           color: #666;
         }
 
@@ -1489,7 +1482,7 @@ export default function BookingsPage() {
         }
 
         .booking-date {
-          font-size: 0.8rem;
+          font-size: 0.7rem;
           color: #999;
         }
 
@@ -1506,9 +1499,9 @@ export default function BookingsPage() {
         }
 
         .status-badge {
-          padding: 0.25rem 0.75rem;
+          padding: 0.2rem 0.6rem;
           border-radius: 20px;
-          font-size: 0.8rem;
+          font-size: 0.7rem;
           font-weight: 500;
           text-transform: uppercase;
           color: rgb(255, 255, 255) !important; /* White text for all status badges */
@@ -1548,9 +1541,9 @@ export default function BookingsPage() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          padding: 0.25rem 0.75rem;
+          padding: 0.2rem 0.6rem;
           border-radius: 9999px;
-          font-size: 0.75rem;
+          font-size: 0.65rem;
           font-weight: 600;
           text-transform: capitalize;
           border: 1px solid transparent;
@@ -1581,7 +1574,7 @@ export default function BookingsPage() {
         }
 
         .action-btn {
-          padding: 0.5rem;
+          padding: 0.4rem;
           border: none;
           border-radius: 6px;
           cursor: pointer;

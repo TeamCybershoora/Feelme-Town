@@ -100,6 +100,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [isClosing, setIsClosing] = useState(false);
   const [showPaymentConfirmation, setShowPaymentConfirmation] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
   const [realTheaterData, setRealTheaterData] = useState<any[]>([]);
   const [showEditRequestPopup, setShowEditRequestPopup] = useState(false);
   const { showSuccess, showError, toasts, removeToast } = useToast();
@@ -320,6 +321,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   // Handle Pay Now with Razorpay
   // Handle Confirm Booking without online payment
   const handleConfirmWithoutPayment = async () => {
+    // Prevent multiple submissions
+    if (isSubmittingBooking) {
+      console.log('⚠️ Booking already in progress, ignoring duplicate click');
+      return;
+    }
+
     // Ensure terms are agreed
     if (!formData.agreeToTerms) {
       setValidationErrorName('Terms & Conditions Required');
@@ -341,6 +348,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       setShowValidationPopup(true);
       return;
     }
+
+    // Set submitting state to disable button
+    setIsSubmittingBooking(true);
 
     try {
       // Calculate pricing (same as payment flow)
@@ -425,16 +435,19 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       if (json.success) {
         setBookingResult({ success: true, message: 'Booking confirmed successfully! Our team will contact you to collect payment at the venue.', bookingId: json.bookingId });
         setIsBookingSuccessful(true);
+        // Keep button disabled on success - booking is complete
         // Remove slow API calls - booking popup will close anyway
       } else {
         setValidationErrorName('Booking Save Failed');
         setValidationMessage(json.error || 'Unable to save booking. Please try again.');
         setShowValidationPopup(true);
+        setIsSubmittingBooking(false); // Re-enable button on failure
       }
     } catch (error) {
       setValidationErrorName('Booking Save Error');
       setValidationMessage('Something went wrong while saving your booking. Please try again.');
       setShowValidationPopup(true);
+      setIsSubmittingBooking(false); // Re-enable button on error
     }
   };
   const handlePaymentDone = async () => {
@@ -589,6 +602,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
   useEffect(() => {
     if (isOpen) {
+      // Reset submitting state when popup opens (for new bookings)
+      setIsSubmittingBooking(false);
+      setIsProcessingPayment(false);
+      
       // Check if editing an existing booking
       const editingBooking = sessionStorage.getItem('editingBooking');
       if (editingBooking) {
@@ -1773,6 +1790,20 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     );
   };
 
+  const handleSkip = () => {
+    const currentIndex = tabs.indexOf(activeTab);
+    if (currentIndex < tabs.length - 1) {
+      setActiveTab(tabs[currentIndex + 1]);
+      // Scroll to top of popup content
+      setTimeout(() => {
+        const popupContent = document.querySelector('.booking-popup-content');
+        if (popupContent) {
+          popupContent.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }, 100);
+    }
+  };
+
   const handleNextStep = async () => {
     // Check if this is the last tab (Complete Booking)
     const isLastTab = activeTab === tabs[tabs.length - 1];
@@ -2077,50 +2108,17 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           if (onSuccess) {
             onSuccess();
           }
-
-          // Refresh booked slots in real-time
-          refreshBookedSlots();
-          // Also refresh booked slots in this popup
-          fetchBookedSlots();
         } else {
-          console.error('❌ Booking failed:', result.error || result.message);
-          setValidationErrorName('Booking Save Error');
-          setValidationMessage(result.error || result.message || 'Failed to save booking. Please try again.');
+          setValidationErrorName('Booking Failed');
+          setValidationMessage(result.error || 'Failed to save booking. Please try again.');
           setShowValidationPopup(true);
         }
-      } catch (error) {
-        console.error('❌ Booking error:', error);
-        setValidationErrorName('Booking Save Error');
-        setValidationMessage('An unexpected error occurred. Please try again.');
+      } catch (error: any) {
+        console.error('❌ Booking failed:', error);
+        setValidationErrorName('Booking Failed');
+        setValidationMessage(error.message || 'Failed to create booking. Please try again.');
         setShowValidationPopup(true);
       }
-    }
-  };
-
-  const handleSkip = () => {
-    console.log(`⏭️ Skip button clicked for tab: ${activeTab}`);
-    
-    // Check if current tab is a dynamic service
-    const isServiceTab = allServices.some(s => s.name === activeTab);
-    
-    if (isServiceTab) {
-      console.log(`⏭️ Skipping service: ${activeTab}`);
-      // Set service to No and clear selected items
-      setSelectedServices(prev => ({ ...prev, [activeTab]: 'No' }));
-      setSelectedServiceItems(prev => ({ ...prev, [activeTab]: [] }));
-    }
-    
-    // Move to next tab
-    const currentIndex = tabs.indexOf(activeTab);
-    if (currentIndex < tabs.length - 1) {
-      setActiveTab(tabs[currentIndex + 1]);
-      // Scroll to top of popup content
-      setTimeout(() => {
-        const popupContent = document.querySelector('.booking-popup-content');
-        if (popupContent) {
-          popupContent.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      }, 100);
     }
   };
 
@@ -3144,9 +3142,17 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                   }
                   
                   return (
-                    <button onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} className="booking-popup-btn">
-                      <span>{activeTab === tabs[tabs.length - 1] ? 'Confirm Booking' : 'Continue'}</span>
-                      <ArrowRight className="w-5 h-5" />
+                    <button 
+                      onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} 
+                      className="booking-popup-btn"
+                      disabled={activeTab === tabs[tabs.length - 1] && isSubmittingBooking}
+                    >
+                      <span>{activeTab === tabs[tabs.length - 1] ? (isSubmittingBooking ? 'Processing...' : 'Confirm Booking') : 'Continue'}</span>
+                      {activeTab === tabs[tabs.length - 1] && isSubmittingBooking ? (
+                        <Clock className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <ArrowRight className="w-5 h-5" />
+                      )}
                     </button>
                   );
                 })()}
@@ -4557,6 +4563,19 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           .booking-popup-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(255, 0, 5, 0.6);
+          }
+
+          .booking-popup-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            background: linear-gradient(135deg, #999999, #666666);
+            box-shadow: none;
+            pointer-events: none;
+          }
+
+          .booking-popup-btn:disabled:hover {
+            transform: none;
+            box-shadow: none;
           }
 
           .booking-popup-cart {

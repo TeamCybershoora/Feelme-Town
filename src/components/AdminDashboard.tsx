@@ -13,7 +13,8 @@ import {
   Eye,
   Edit,
   X,
-  Check
+  Check,
+  DollarSign
 } from 'lucide-react';
 import MoviesModal from './MoviesModal';
 import ConfirmationModal from './ConfirmationModal';
@@ -155,6 +156,11 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
   });
   const [showEditBookingPopup, setShowEditBookingPopup] = useState(false);
   
+  // Payment method modal states
+  const [isPaymentMethodModalOpen, setIsPaymentMethodModalOpen] = useState(false);
+  const [bookingPendingPayment, setBookingPendingPayment] = useState<Booking | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'cash'>('online');
+  const [paymentUpdatingId, setPaymentUpdatingId] = useState<string | null>(null);
 
   // Helper function to convert UTC to IST
   const convertToIST = (utcDate: string) => {
@@ -526,7 +532,7 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
       let cancelledBy = 'Administrator';
       let staffName = null;
       let userId = null;
-      
+
       // Check if logged in as staff
       const staffUser = localStorage.getItem('staffUser');
       if (staffUser) {
@@ -579,12 +585,9 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
           console.error('⚠️ Excel sync failed:', syncError);
         }
 
-        // Call the refresh function if provided
+        // Call the refresh function to update bookings without page reload
         if (onRefresh) {
           onRefresh();
-        } else {
-          // Fallback to page reload if no refresh function provided
-          window.location.reload();
         }
       } else {
         (window as any).showToast?.({ type: 'error', message: 'Failed to update booking status' });
@@ -595,7 +598,98 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
     }
   };
 
-  
+  const handleMarkAsPaid = (booking: Booking) => {
+    // Open payment method modal
+    setBookingPendingPayment(booking);
+    setSelectedPaymentMethod('online');
+    setIsPaymentMethodModalOpen(true);
+  };
+
+  const handleConfirmPaymentMethod = async () => {
+    if (!bookingPendingPayment) return;
+
+    const booking = bookingPendingPayment;
+    
+    try {
+      setPaymentUpdatingId(String(booking.id));
+
+      // Get current user info (admin or staff)
+      let paidBy = 'Administrator';
+      let staffName = null;
+      let userId = null;
+
+      // Check if logged in as staff
+      const staffUser = localStorage.getItem('staffUser');
+      if (staffUser) {
+        try {
+          const staffData = JSON.parse(staffUser);
+          if (staffData.role === 'staff') {
+            paidBy = 'Staff';
+            staffName = staffData.name;
+            userId = staffData.userId;
+          }
+        } catch (e) {
+          console.error('Failed to parse staff user data:', e);
+        }
+      }
+
+      // Prepare request body - only include staff fields if staff marked it
+      const requestBody: any = {
+        bookingId: booking.id,
+        paymentStatus: 'paid',
+        venuePaymentMethod: selectedPaymentMethod,
+        paidBy: paidBy,
+        paidAt: new Date().toISOString(),
+        sendInvoice: true
+      };
+
+      // Only add staff fields if marked by staff
+      if (paidBy === 'Staff' && userId) {
+        requestBody.staffName = staffName;
+        requestBody.userId = userId;
+      }
+
+      const response = await fetch('/api/admin/update-booking', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const methodLabel = selectedPaymentMethod === 'cash' ? 'Cash' : 'Online';
+        (window as any).showToast?.({ type: 'success', message: `Payment marked as paid (${methodLabel}). Invoice email sent.` });
+        
+        setIsPaymentMethodModalOpen(false);
+        setBookingPendingPayment(null);
+
+        // Call the refresh function to update bookings without page reload
+        if (onRefresh) {
+          onRefresh();
+        }
+      } else {
+        (window as any).showToast?.({ type: 'error', message: result.error || 'Failed to mark booking as paid' });
+      }
+    } catch (error) {
+      console.error('Error marking booking as paid:', error);
+      (window as any).showToast?.({ type: 'error', message: 'Error marking booking as paid' });
+    } finally {
+      setPaymentUpdatingId(null);
+    }
+  };
+
+  const handleClosePaymentMethodModal = () => {
+    if (paymentUpdatingId !== null && bookingPendingPayment && paymentUpdatingId === String(bookingPendingPayment.id)) {
+      return;
+    }
+    setIsPaymentMethodModalOpen(false);
+    setBookingPendingPayment(null);
+  };
+
+
 
   const handleEditBooking = (booking: Booking) => {
     setSelectedBooking(booking);
@@ -888,7 +982,7 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
   const calculatePrice = (theater: string, items: { movie?: unknown; cakes?: unknown[]; decor?: unknown[]; gifts?: unknown[] }) => {
     let totalPrice = 0;
 
-   
+
 
     // Add movie price
     if (selectedMovie) {
@@ -1267,8 +1361,16 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
                         </div>
                       </td>
                       <td>
-                        <span className={`status-badge ${booking.status.toLowerCase()}`}>
-                          {booking.status}
+                        <span 
+                          className={`payment-badge ${booking.paymentStatus === 'paid' ? 'paid' : 'unpaid'}`}
+                          title={booking.paymentStatus === 'paid' 
+                            ? `Paid via ${booking.venuePaymentMethod === 'cash' ? 'Cash' : 'Online'} | Marked by: ${booking.paidBy || 'Admin'}${booking.staffName ? ` (${booking.staffName})` : ''}${booking.userId ? ` - ${booking.userId}` : ''}`
+                            : 'Payment pending'}
+                        >
+                          {booking.paymentStatus === 'paid' 
+                            ? `💰 ${booking.venuePaymentMethod === 'cash' ? 'Cash' : 'Online'}${booking.staffName ? ` - ${booking.staffName}` : (booking.paidBy === 'Administrator' ? ' - Admin' : '')}`
+                            : '⏳ Unpaid'
+                          }
                         </span>
                       </td>
                       <td>₹{booking.amount ? booking.amount.toLocaleString() : '0'}</td>
@@ -1299,6 +1401,16 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
                             <Edit size={14} />
                             Edit
                           </button>
+                          {booking.status.toLowerCase() === 'confirmed' && booking.paymentStatus !== 'paid' && (
+                            <button
+                              className="action-btn paid-btn"
+                              onClick={() => handleMarkAsPaid(booking)}
+                              title="Mark as Paid"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"><path fill="currentColor" d="M10.565 2.075c-.394.189-.755.497-1.26.928l-.079.066a2.56 2.56 0 0 1-1.58.655l-.102.008c-.662.053-1.135.09-1.547.236a3.33 3.33 0 0 0-2.03 2.029c-.145.412-.182.885-.235 1.547l-.008.102a2.56 2.56 0 0 1-.655 1.58l-.066.078c-.431.506-.74.867-.928 1.261a3.33 3.33 0 0 0 0 2.87c.189.394.497.755.928 1.26l.066.079c.41.48.604.939.655 1.58l.008.102c.053.662.09 1.135.236 1.547a3.33 3.33 0 0 0 2.029 2.03c.412.145.885.182 1.547.235l.102.008c.629.05 1.09.238 1.58.655l.079.066c.505.431.866.74 1.26.928a3.33 3.33 0 0 0 2.87 0c.394-.189.755-.497 1.26-.928l.079-.066c.48-.41.939-.604 1.58-.655l.102-.008c.662-.053 1.135-.09 1.547-.236a3.33 3.33 0 0 0 2.03-2.029c.145-.412.182-.885.235-1.547l.008-.102c.05-.629.238-1.09.655-1.58l.066-.079c.431-.505.74-.866.928-1.26a3.33 3.33 0 0 0 0-2.87c-.189-.394-.497-.755-.928-1.26l-.066-.079a2.56 2.56 0 0 1-.655-1.58l-.008-.102c-.053-.662-.09-1.135-.236-1.547a3.33 3.33 0 0 0-2.029-2.03c-.412-.145-.885-.182-1.547-.235l-.102-.008a2.56 2.56 0 0 1-1.58-.655l-.079-.066c-.505-.431-.866-.74-1.26-.928a3.33 3.33 0 0 0-2.87 0M8.25 7.5A.75.75 0 0 1 9 6.75h6a.75.75 0 0 1 0 1.5h-1.794c.238.393.395.83.476 1.278H15a.75.75 0 0 1 0 1.5h-1.318a3.65 3.65 0 0 1-.721 1.628a3.03 3.03 0 0 1-2.214 1.141l3.045 3.185a.75.75 0 0 1-1.084 1.036l-4.25-4.444A.75.75 0 0 1 9 12.306h1.5c.6 0 1.012-.24 1.29-.587a2 2 0 0 0 .352-.691H9a.75.75 0 0 1 0-1.5h3.142a2 2 0 0 0-.352-.691c-.278-.347-.69-.587-1.29-.587H9a.75.75 0 0 1-.75-.75" /></svg>
+                              Paid
+                            </button>
+                          )}
                           <button
                             className={`action-btn ${booking.status.toLowerCase() === 'confirmed' ? 'cancel-btn' : 'activate-btn'}`}
                             onClick={() => handleCancelOrActivateBooking(booking)}
@@ -1325,9 +1437,9 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
             </div>
           </div>
 
-          
 
-        
+
+
           {/* Booking Detail Popup */}
           <BookingDetailsPopup
             isOpen={showBookingDetail}
@@ -1348,433 +1460,433 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
             showEditButton={false}
           />
 
-      {/* Movie Selection Modal */}
-      <MoviesModal
-        isOpen={showMovieModal}
-        onClose={() => setShowMovieModal(false)}
-        onMovieSelect={(movieTitle) => {
-          setSelectedMovie(movieTitle);
+          {/* Movie Selection Modal */}
+          <MoviesModal
+            isOpen={showMovieModal}
+            onClose={() => setShowMovieModal(false)}
+            onMovieSelect={(movieTitle) => {
+              setSelectedMovie(movieTitle);
 
-          setShowMovieModal(false);
-        }}
-        selectedMovies={selectedMovie ? [selectedMovie] : []}
-      />
+              setShowMovieModal(false);
+            }}
+            selectedMovies={selectedMovie ? [selectedMovie] : []}
+          />
 
-      {/* Cakes Selection Modal */}
-      {showCakesModal && (
-        <div className="booking-detail-popup">
-          <div className="popup-overlay" onClick={() => setShowCakesModal(false)}></div>
-          <div className="popup-content">
-            <div className="popup-header">
-              <h3>Select Cakes</h3>
-              <div className="header-controls">
-                <select
-                  className="selection-mode-dropdown"
-                  value={cakeSelectionMode}
-                  onChange={(e) => {
-                    setCakeSelectionMode(e.target.value as 'multiple' | 'single');
-                    if (e.target.value === 'single') {
-                      setSelectedCakes([]);
+          {/* Cakes Selection Modal */}
+          {showCakesModal && (
+            <div className="booking-detail-popup">
+              <div className="popup-overlay" onClick={() => setShowCakesModal(false)}></div>
+              <div className="popup-content">
+                <div className="popup-header">
+                  <h3>Select Cakes</h3>
+                  <div className="header-controls">
+                    <select
+                      className="selection-mode-dropdown"
+                      value={cakeSelectionMode}
+                      onChange={(e) => {
+                        setCakeSelectionMode(e.target.value as 'multiple' | 'single');
+                        if (e.target.value === 'single') {
+                          setSelectedCakes([]);
+                        }
+                      }}
+                    >
+                      <option value="multiple">Multiple Items</option>
+                      <option value="single">Single Item</option>
+                    </select>
+                    <button className="close-btn" onClick={() => setShowCakesModal(false)}>×</button>
+                  </div>
+                </div>
+                <div className="popup-body">
+                  <div className="item-selection">
+                    <div className="item-options">
+                      {/* Show selected items first */}
+                      {selectedCakes.map((cakeId) => {
+                        const cakeNum = parseInt(cakeId.replace('cake', ''));
+                        return (
+                          <label key={`selected-${cakeNum}`} className="item-option selected-item">
+                            <input
+                              type={cakeSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
+                              name={cakeSelectionMode === 'single' ? 'cake-selection' : undefined}
+                              value={`cake${cakeNum}`}
+                              checked={selectedCakes.includes(`cake${cakeNum}`)}
+                              onChange={(e) => {
+                                if (cakeSelectionMode === 'multiple') {
+                                  if (e.target.checked) {
+                                    setSelectedCakes([...selectedCakes, `cake${cakeNum}`]);
+                                  } else {
+                                    setSelectedCakes(selectedCakes.filter(item => item !== `cake${cakeNum}`));
+                                  }
+                                } else {
+                                  // Single mode - toggle selection
+                                  if (selectedCakes.includes(`cake${cakeNum}`)) {
+                                    setSelectedCakes([]);
+                                  } else {
+                                    setSelectedCakes([`cake${cakeNum}`]);
+                                  }
+                                }
+                              }}
+                            />
+                            <div className="item-card">
+                              <img
+                                src={`/images/cakes/cake${cakeNum}.webp`}
+                                alt={`Cake ${cakeNum}`}
+                                className="item-image"
+                              />
+                              <h4>Cake {cakeNum}</h4>
+                              <p>Delicious Cake - ₹{300 + (cakeNum * 50)}</p>
+                            </div>
+                          </label>
+                        );
+                      })}
+
+                      {/* Show unselected items */}
+                      {Array.from({ length: 12 }, (_, i) => i + 1)
+                        .filter(cakeNum => !selectedCakes.includes(`cake${cakeNum}`))
+                        .map((cakeNum) => (
+                          <label key={cakeNum} className="item-option">
+                            <input
+                              type={cakeSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
+                              name={cakeSelectionMode === 'single' ? 'cake-selection' : undefined}
+                              value={`cake${cakeNum}`}
+                              onChange={(e) => {
+                                if (cakeSelectionMode === 'multiple') {
+                                  if (e.target.checked) {
+                                    setSelectedCakes([...selectedCakes, `cake${cakeNum}`]);
+                                  } else {
+                                    setSelectedCakes(selectedCakes.filter(item => item !== `cake${cakeNum}`));
+                                  }
+                                } else {
+                                  setSelectedCakes([`cake${cakeNum}`]);
+                                }
+                              }}
+                            />
+                            <div className="item-card">
+                              <img
+                                src={`/images/cakes/cake${cakeNum}.webp`}
+                                alt={`Cake ${cakeNum}`}
+                                className="item-image"
+                              />
+                              <h4>Cake {cakeNum}</h4>
+                              <p>Delicious Cake - ₹{300 + (cakeNum * 50)}</p>
+                            </div>
+                          </label>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="popup-footer">
+                  <button className="btn-secondary" onClick={() => setShowCakesModal(false)}>Cancel</button>
+                  <button className="btn-primary" onClick={() => {
+
+                    setShowCakesModal(false);
+                  }}>
+                    {cakeSelectionMode === 'single'
+                      ? selectedCakes.length > 0
+                        ? `Select ${selectedCakes[0].replace('cake', 'Cake ')}`
+                        : 'Select Cakes'
+                      : selectedCakes.length > 0
+                        ? `Select Cakes (${selectedCakes.length})`
+                        : 'Select Cakes'
                     }
-                  }}
-                >
-                  <option value="multiple">Multiple Items</option>
-                  <option value="single">Single Item</option>
-                </select>
-                <button className="close-btn" onClick={() => setShowCakesModal(false)}>×</button>
-              </div>
-            </div>
-            <div className="popup-body">
-              <div className="item-selection">
-                <div className="item-options">
-                  {/* Show selected items first */}
-                  {selectedCakes.map((cakeId) => {
-                    const cakeNum = parseInt(cakeId.replace('cake', ''));
-                    return (
-                      <label key={`selected-${cakeNum}`} className="item-option selected-item">
-                        <input
-                          type={cakeSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
-                          name={cakeSelectionMode === 'single' ? 'cake-selection' : undefined}
-                          value={`cake${cakeNum}`}
-                          checked={selectedCakes.includes(`cake${cakeNum}`)}
-                          onChange={(e) => {
-                            if (cakeSelectionMode === 'multiple') {
-                              if (e.target.checked) {
-                                setSelectedCakes([...selectedCakes, `cake${cakeNum}`]);
-                              } else {
-                                setSelectedCakes(selectedCakes.filter(item => item !== `cake${cakeNum}`));
-                              }
-                            } else {
-                              // Single mode - toggle selection
-                              if (selectedCakes.includes(`cake${cakeNum}`)) {
-                                setSelectedCakes([]);
-                              } else {
-                                setSelectedCakes([`cake${cakeNum}`]);
-                              }
-                            }
-                          }}
-                        />
-                        <div className="item-card">
-                          <img
-                            src={`/images/cakes/cake${cakeNum}.webp`}
-                            alt={`Cake ${cakeNum}`}
-                            className="item-image"
-                          />
-                          <h4>Cake {cakeNum}</h4>
-                          <p>Delicious Cake - ₹{300 + (cakeNum * 50)}</p>
-                        </div>
-                      </label>
-                    );
-                  })}
-
-                  {/* Show unselected items */}
-                  {Array.from({ length: 12 }, (_, i) => i + 1)
-                    .filter(cakeNum => !selectedCakes.includes(`cake${cakeNum}`))
-                    .map((cakeNum) => (
-                      <label key={cakeNum} className="item-option">
-                        <input
-                          type={cakeSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
-                          name={cakeSelectionMode === 'single' ? 'cake-selection' : undefined}
-                          value={`cake${cakeNum}`}
-                          onChange={(e) => {
-                            if (cakeSelectionMode === 'multiple') {
-                              if (e.target.checked) {
-                                setSelectedCakes([...selectedCakes, `cake${cakeNum}`]);
-                              } else {
-                                setSelectedCakes(selectedCakes.filter(item => item !== `cake${cakeNum}`));
-                              }
-                            } else {
-                              setSelectedCakes([`cake${cakeNum}`]);
-                            }
-                          }}
-                        />
-                        <div className="item-card">
-                          <img
-                            src={`/images/cakes/cake${cakeNum}.webp`}
-                            alt={`Cake ${cakeNum}`}
-                            className="item-image"
-                          />
-                          <h4>Cake {cakeNum}</h4>
-                          <p>Delicious Cake - ₹{300 + (cakeNum * 50)}</p>
-                        </div>
-                      </label>
-                    ))}
+                  </button>
                 </div>
               </div>
             </div>
-            <div className="popup-footer">
-              <button className="btn-secondary" onClick={() => setShowCakesModal(false)}>Cancel</button>
-              <button className="btn-primary" onClick={() => {
-
-                setShowCakesModal(false);
-              }}>
-                {cakeSelectionMode === 'single'
-                  ? selectedCakes.length > 0
-                    ? `Select ${selectedCakes[0].replace('cake', 'Cake ')}`
-                    : 'Select Cakes'
-                  : selectedCakes.length > 0
-                    ? `Select Cakes (${selectedCakes.length})`
-                    : 'Select Cakes'
-                }
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Decor Selection Modal */}
-      {showDecorModal && (
-        <div className="booking-detail-popup">
-          <div className="popup-overlay" onClick={() => setShowDecorModal(false)}></div>
-          <div className="popup-content">
-            <div className="popup-header">
-              <h3>Select Decor Items</h3>
-              <div className="header-controls">
-                <select
-                  className="selection-mode-dropdown"
-                  value={decorSelectionMode}
-                  onChange={(e) => {
-                    setDecorSelectionMode(e.target.value as 'multiple' | 'single');
-                    if (e.target.value === 'single') {
-                      setSelectedDecor([]);
-                    }
-                  }}
-                >
-                  <option value="multiple">Multiple Items</option>
-                  <option value="single">Single Item</option>
-                </select>
-                <button className="close-btn" onClick={() => setShowDecorModal(false)}>×</button>
-              </div>
-            </div>
-            <div className="popup-body">
-              <div className="item-selection">
-                <div className="item-options">
-                  {/* Show selected items first */}
-                  {selectedDecor.map((decorId) => {
-                    const partyNum = parseInt(decorId.replace('decor', ''));
-                    return (
-                      <label key={`selected-${partyNum}`} className="item-option selected-item">
-                        <input
-                          type={decorSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
-                          name={decorSelectionMode === 'single' ? 'decor-selection' : undefined}
-                          value={`decor${partyNum}`}
-                          checked={selectedDecor.includes(`decor${partyNum}`)}
-                          onChange={(e) => {
-                            if (decorSelectionMode === 'multiple') {
-                              if (e.target.checked) {
-                                setSelectedDecor([...selectedDecor, `decor${partyNum}`]);
-                              } else {
-                                setSelectedDecor(selectedDecor.filter(item => item !== `decor${partyNum}`));
-                              }
-                            } else {
-                              // Single mode - toggle selection
-                              if (selectedDecor.includes(`decor${partyNum}`)) {
-                                setSelectedDecor([]);
-                              } else {
-                                setSelectedDecor([`decor${partyNum}`]);
-                              }
-                            }
-                          }}
-                        />
-                        <div className="item-card">
-                          <img
-                            src={`/images/party/party${partyNum}.webp`}
-                            alt={`Decor ${partyNum}`}
-                            className="item-image"
-                          />
-                          <h4>Decor {partyNum}</h4>
-                          <p>Party Decor - ₹{200 + (partyNum * 100)}</p>
-                        </div>
-                      </label>
-                    );
-                  })}
-
-                  {/* Show unselected items */}
-                  {Array.from({ length: 6 }, (_, i) => i + 1)
-                    .filter(partyNum => !selectedDecor.includes(`decor${partyNum}`))
-                    .map((partyNum) => (
-                      <label key={partyNum} className="item-option">
-                        <input
-                          type={decorSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
-                          name={decorSelectionMode === 'single' ? 'decor-selection' : undefined}
-                          value={`decor${partyNum}`}
-                          onChange={(e) => {
-                            if (decorSelectionMode === 'multiple') {
-                              if (e.target.checked) {
-                                setSelectedDecor([...selectedDecor, `decor${partyNum}`]);
-                              } else {
-                                setSelectedDecor(selectedDecor.filter(item => item !== `decor${partyNum}`));
-                              }
-                            } else {
-                              setSelectedDecor([`decor${partyNum}`]);
-                            }
-                          }}
-                        />
-                        <div className="item-card">
-                          <img
-                            src={`/images/party/party${partyNum}.webp`}
-                            alt={`Decor ${partyNum}`}
-                            className="item-image"
-                          />
-                          <h4>Decor {partyNum}</h4>
-                          <p>Party Decor - ₹{200 + (partyNum * 100)}</p>
-                        </div>
-                      </label>
-                    ))}
-                </div>
-              </div>
-            </div>
-            <div className="popup-footer">
-              <button className="btn-secondary" onClick={() => setShowDecorModal(false)}>Cancel</button>
-              <button className="btn-primary" onClick={() => {
-
-                setShowDecorModal(false);
-              }}>
-                {decorSelectionMode === 'single'
-                  ? selectedDecor.length > 0
-                    ? `Select ${selectedDecor[0].replace('decor', 'Decor ')}`
-                    : 'Select Decor'
-                  : selectedDecor.length > 0
-                    ? `Select Decor (${selectedDecor.length})`
-                    : 'Select Decor'
-                }
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Gifts Selection Modal */}
-      {showGiftsModal && (
-        <div className="booking-detail-popup">
-          <div className="popup-overlay" onClick={() => setShowGiftsModal(false)}></div>
-          <div className="popup-content">
-            <div className="popup-header">
-              <h3>Select Gifts</h3>
-              <div className="header-controls">
-                <select
-                  className="selection-mode-dropdown"
-                  value={giftSelectionMode}
-                  onChange={(e) => {
-                    setGiftSelectionMode(e.target.value as 'multiple' | 'single');
-                    if (e.target.value === 'single') {
-                      setSelectedGifts([]);
-                    }
-                  }}
-                >
-                  <option value="multiple">Multiple Items</option>
-                  <option value="single">Single Item</option>
-                </select>
-                <button className="close-btn" onClick={() => setShowGiftsModal(false)}>×</button>
-              </div>
-            </div>
-            <div className="popup-body">
-              <div className="item-selection">
-                <div className="item-options">
-                  {/* Show selected items first */}
-                  {selectedGifts.map((giftId) => {
-                    const giftNum = parseInt(giftId.replace('gift', ''));
-                    return (
-                      <label key={`selected-${giftNum}`} className="item-option selected-item">
-                        <input
-                          type={giftSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
-                          name={giftSelectionMode === 'single' ? 'gift-selection' : undefined}
-                          value={`gift${giftNum}`}
-                          checked={selectedGifts.includes(`gift${giftNum}`)}
-                          onChange={(e) => {
-                            if (giftSelectionMode === 'multiple') {
-                              if (e.target.checked) {
-                                setSelectedGifts([...selectedGifts, `gift${giftNum}`]);
-                              } else {
-                                setSelectedGifts(selectedGifts.filter(item => item !== `gift${giftNum}`));
-                              }
-                            } else {
-                              // Single mode - toggle selection
-                              if (selectedGifts.includes(`gift${giftNum}`)) {
-                                setSelectedGifts([]);
-                              } else {
-                                setSelectedGifts([`gift${giftNum}`]);
-                              }
-                            }
-                          }}
-                        />
-                        <div className="item-card">
-                          <img
-                            src={`/images/gifts/gift${giftNum}.webp`}
-                            alt={`Gift ${giftNum}`}
-                            className="item-image"
-                          />
-                          <h4>Gift {giftNum}</h4>
-                          <p>Special Gift - ₹{150 + (giftNum * 50)}</p>
-                        </div>
-                      </label>
-                    );
-                  })}
-
-                  {/* Show unselected items */}
-                  {Array.from({ length: 7 }, (_, i) => i + 1)
-                    .filter(giftNum => !selectedGifts.includes(`gift${giftNum}`))
-                    .map((giftNum) => (
-                      <label key={giftNum} className="item-option">
-                        <input
-                          type={giftSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
-                          name={giftSelectionMode === 'single' ? 'gift-selection' : undefined}
-                          value={`gift${giftNum}`}
-                          onChange={(e) => {
-                            if (giftSelectionMode === 'multiple') {
-                              if (e.target.checked) {
-                                setSelectedGifts([...selectedGifts, `gift${giftNum}`]);
-                              } else {
-                                setSelectedGifts(selectedGifts.filter(item => item !== `gift${giftNum}`));
-                              }
-                            } else {
-                              setSelectedGifts([`gift${giftNum}`]);
-                            }
-                          }}
-                        />
-                        <div className="item-card">
-                          <img
-                            src={`/images/gifts/gift${giftNum}.webp`}
-                            alt={`Gift ${giftNum}`}
-                            className="item-image"
-                          />
-                          <h4>Gift {giftNum}</h4>
-                          <p>Special Gift - ₹{150 + (giftNum * 50)}</p>
-                        </div>
-                      </label>
-                    ))}
-                </div>
-              </div>
-            </div>
-            <div className="popup-footer">
-              <button className="btn-secondary" onClick={() => setShowGiftsModal(false)}>Cancel</button>
-              <button className="btn-primary" onClick={() => {
-
-                setShowGiftsModal(false);
-              }}>
-                {giftSelectionMode === 'single'
-                  ? selectedGifts.length > 0
-                    ? `Select ${selectedGifts[0].replace('gift', 'Gift ')}`
-                    : 'Select Gifts'
-                  : selectedGifts.length > 0
-                    ? `Select Gifts (${selectedGifts.length})`
-                    : 'Select Gifts'
-                }
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Decoration Alert Popup */}
-      {showDecorationAlert && (
-        <div className="booking-detail-popup">
-          <div className="popup-overlay" onClick={() => setShowDecorationAlert(false)}></div>
-          <div className="popup-content">
-            <div className="popup-header">
-              <h3>Decoration Required</h3>
-              <button className="close-btn" onClick={() => setShowDecorationAlert(false)}>×</button>
-            </div>
-            <div className="popup-body">
-              <p>You have selected decoration but haven&apos;t selected any items. Please select at least one item or cancel decoration.</p>
-            </div>
-            <div className="popup-footer">
-              <button className="btn-secondary" onClick={() => {
-                setDecorationValue('no');
-                setShowDecorationOptions(false);
-                setShowDecorationAlert(false);
-              }}>Cancel Decoration</button>
-              <button className="btn-primary" onClick={() => setShowDecorationAlert(false)}>OK</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Decorative Image Section - Gallery Slideshow */}
-      <div className="decorative-section">
-        <div className="decorative-image slideshow">
-          {galleryImages.length > 0 ? (
-            <>
-              {galleryImages.map((image, index) => (
-                <img
-                  key={image._id || index}
-                  src={image.imageUrl}
-                  alt={image.title || 'Gallery Image'}
-                  className={`slideshow-image ${index === currentImageIndex ? 'active' : ''}`}
-                />
-              ))}
-              <div className="image-overlay">
-                <h3>{galleryImages[currentImageIndex]?.title || 'Beautiful Event Spaces'}</h3>
-                <p>{galleryImages[currentImageIndex]?.description || 'Create unforgettable memories in our premium theaters'}</p>
-              </div>
-            </>
-          ) : (
-            <div className="no-gallery">No images in gallery</div>
           )}
-        </div>
-      </div>
 
-      <style jsx>{`
+          {/* Decor Selection Modal */}
+          {showDecorModal && (
+            <div className="booking-detail-popup">
+              <div className="popup-overlay" onClick={() => setShowDecorModal(false)}></div>
+              <div className="popup-content">
+                <div className="popup-header">
+                  <h3>Select Decor Items</h3>
+                  <div className="header-controls">
+                    <select
+                      className="selection-mode-dropdown"
+                      value={decorSelectionMode}
+                      onChange={(e) => {
+                        setDecorSelectionMode(e.target.value as 'multiple' | 'single');
+                        if (e.target.value === 'single') {
+                          setSelectedDecor([]);
+                        }
+                      }}
+                    >
+                      <option value="multiple">Multiple Items</option>
+                      <option value="single">Single Item</option>
+                    </select>
+                    <button className="close-btn" onClick={() => setShowDecorModal(false)}>×</button>
+                  </div>
+                </div>
+                <div className="popup-body">
+                  <div className="item-selection">
+                    <div className="item-options">
+                      {/* Show selected items first */}
+                      {selectedDecor.map((decorId) => {
+                        const partyNum = parseInt(decorId.replace('decor', ''));
+                        return (
+                          <label key={`selected-${partyNum}`} className="item-option selected-item">
+                            <input
+                              type={decorSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
+                              name={decorSelectionMode === 'single' ? 'decor-selection' : undefined}
+                              value={`decor${partyNum}`}
+                              checked={selectedDecor.includes(`decor${partyNum}`)}
+                              onChange={(e) => {
+                                if (decorSelectionMode === 'multiple') {
+                                  if (e.target.checked) {
+                                    setSelectedDecor([...selectedDecor, `decor${partyNum}`]);
+                                  } else {
+                                    setSelectedDecor(selectedDecor.filter(item => item !== `decor${partyNum}`));
+                                  }
+                                } else {
+                                  // Single mode - toggle selection
+                                  if (selectedDecor.includes(`decor${partyNum}`)) {
+                                    setSelectedDecor([]);
+                                  } else {
+                                    setSelectedDecor([`decor${partyNum}`]);
+                                  }
+                                }
+                              }}
+                            />
+                            <div className="item-card">
+                              <img
+                                src={`/images/party/party${partyNum}.webp`}
+                                alt={`Decor ${partyNum}`}
+                                className="item-image"
+                              />
+                              <h4>Decor {partyNum}</h4>
+                              <p>Party Decor - ₹{200 + (partyNum * 100)}</p>
+                            </div>
+                          </label>
+                        );
+                      })}
+
+                      {/* Show unselected items */}
+                      {Array.from({ length: 6 }, (_, i) => i + 1)
+                        .filter(partyNum => !selectedDecor.includes(`decor${partyNum}`))
+                        .map((partyNum) => (
+                          <label key={partyNum} className="item-option">
+                            <input
+                              type={decorSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
+                              name={decorSelectionMode === 'single' ? 'decor-selection' : undefined}
+                              value={`decor${partyNum}`}
+                              onChange={(e) => {
+                                if (decorSelectionMode === 'multiple') {
+                                  if (e.target.checked) {
+                                    setSelectedDecor([...selectedDecor, `decor${partyNum}`]);
+                                  } else {
+                                    setSelectedDecor(selectedDecor.filter(item => item !== `decor${partyNum}`));
+                                  }
+                                } else {
+                                  setSelectedDecor([`decor${partyNum}`]);
+                                }
+                              }}
+                            />
+                            <div className="item-card">
+                              <img
+                                src={`/images/party/party${partyNum}.webp`}
+                                alt={`Decor ${partyNum}`}
+                                className="item-image"
+                              />
+                              <h4>Decor {partyNum}</h4>
+                              <p>Party Decor - ₹{200 + (partyNum * 100)}</p>
+                            </div>
+                          </label>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="popup-footer">
+                  <button className="btn-secondary" onClick={() => setShowDecorModal(false)}>Cancel</button>
+                  <button className="btn-primary" onClick={() => {
+
+                    setShowDecorModal(false);
+                  }}>
+                    {decorSelectionMode === 'single'
+                      ? selectedDecor.length > 0
+                        ? `Select ${selectedDecor[0].replace('decor', 'Decor ')}`
+                        : 'Select Decor'
+                      : selectedDecor.length > 0
+                        ? `Select Decor (${selectedDecor.length})`
+                        : 'Select Decor'
+                    }
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Gifts Selection Modal */}
+          {showGiftsModal && (
+            <div className="booking-detail-popup">
+              <div className="popup-overlay" onClick={() => setShowGiftsModal(false)}></div>
+              <div className="popup-content">
+                <div className="popup-header">
+                  <h3>Select Gifts</h3>
+                  <div className="header-controls">
+                    <select
+                      className="selection-mode-dropdown"
+                      value={giftSelectionMode}
+                      onChange={(e) => {
+                        setGiftSelectionMode(e.target.value as 'multiple' | 'single');
+                        if (e.target.value === 'single') {
+                          setSelectedGifts([]);
+                        }
+                      }}
+                    >
+                      <option value="multiple">Multiple Items</option>
+                      <option value="single">Single Item</option>
+                    </select>
+                    <button className="close-btn" onClick={() => setShowGiftsModal(false)}>×</button>
+                  </div>
+                </div>
+                <div className="popup-body">
+                  <div className="item-selection">
+                    <div className="item-options">
+                      {/* Show selected items first */}
+                      {selectedGifts.map((giftId) => {
+                        const giftNum = parseInt(giftId.replace('gift', ''));
+                        return (
+                          <label key={`selected-${giftNum}`} className="item-option selected-item">
+                            <input
+                              type={giftSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
+                              name={giftSelectionMode === 'single' ? 'gift-selection' : undefined}
+                              value={`gift${giftNum}`}
+                              checked={selectedGifts.includes(`gift${giftNum}`)}
+                              onChange={(e) => {
+                                if (giftSelectionMode === 'multiple') {
+                                  if (e.target.checked) {
+                                    setSelectedGifts([...selectedGifts, `gift${giftNum}`]);
+                                  } else {
+                                    setSelectedGifts(selectedGifts.filter(item => item !== `gift${giftNum}`));
+                                  }
+                                } else {
+                                  // Single mode - toggle selection
+                                  if (selectedGifts.includes(`gift${giftNum}`)) {
+                                    setSelectedGifts([]);
+                                  } else {
+                                    setSelectedGifts([`gift${giftNum}`]);
+                                  }
+                                }
+                              }}
+                            />
+                            <div className="item-card">
+                              <img
+                                src={`/images/gifts/gift${giftNum}.webp`}
+                                alt={`Gift ${giftNum}`}
+                                className="item-image"
+                              />
+                              <h4>Gift {giftNum}</h4>
+                              <p>Special Gift - ₹{150 + (giftNum * 50)}</p>
+                            </div>
+                          </label>
+                        );
+                      })}
+
+                      {/* Show unselected items */}
+                      {Array.from({ length: 7 }, (_, i) => i + 1)
+                        .filter(giftNum => !selectedGifts.includes(`gift${giftNum}`))
+                        .map((giftNum) => (
+                          <label key={giftNum} className="item-option">
+                            <input
+                              type={giftSelectionMode === 'multiple' ? 'checkbox' : 'radio'}
+                              name={giftSelectionMode === 'single' ? 'gift-selection' : undefined}
+                              value={`gift${giftNum}`}
+                              onChange={(e) => {
+                                if (giftSelectionMode === 'multiple') {
+                                  if (e.target.checked) {
+                                    setSelectedGifts([...selectedGifts, `gift${giftNum}`]);
+                                  } else {
+                                    setSelectedGifts(selectedGifts.filter(item => item !== `gift${giftNum}`));
+                                  }
+                                } else {
+                                  setSelectedGifts([`gift${giftNum}`]);
+                                }
+                              }}
+                            />
+                            <div className="item-card">
+                              <img
+                                src={`/images/gifts/gift${giftNum}.webp`}
+                                alt={`Gift ${giftNum}`}
+                                className="item-image"
+                              />
+                              <h4>Gift {giftNum}</h4>
+                              <p>Special Gift - ₹{150 + (giftNum * 50)}</p>
+                            </div>
+                          </label>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="popup-footer">
+                  <button className="btn-secondary" onClick={() => setShowGiftsModal(false)}>Cancel</button>
+                  <button className="btn-primary" onClick={() => {
+
+                    setShowGiftsModal(false);
+                  }}>
+                    {giftSelectionMode === 'single'
+                      ? selectedGifts.length > 0
+                        ? `Select ${selectedGifts[0].replace('gift', 'Gift ')}`
+                        : 'Select Gifts'
+                      : selectedGifts.length > 0
+                        ? `Select Gifts (${selectedGifts.length})`
+                        : 'Select Gifts'
+                    }
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Decoration Alert Popup */}
+          {showDecorationAlert && (
+            <div className="booking-detail-popup">
+              <div className="popup-overlay" onClick={() => setShowDecorationAlert(false)}></div>
+              <div className="popup-content">
+                <div className="popup-header">
+                  <h3>Decoration Required</h3>
+                  <button className="close-btn" onClick={() => setShowDecorationAlert(false)}>×</button>
+                </div>
+                <div className="popup-body">
+                  <p>You have selected decoration but haven&apos;t selected any items. Please select at least one item or cancel decoration.</p>
+                </div>
+                <div className="popup-footer">
+                  <button className="btn-secondary" onClick={() => {
+                    setDecorationValue('no');
+                    setShowDecorationOptions(false);
+                    setShowDecorationAlert(false);
+                  }}>Cancel Decoration</button>
+                  <button className="btn-primary" onClick={() => setShowDecorationAlert(false)}>OK</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Decorative Image Section - Gallery Slideshow */}
+          <div className="decorative-section">
+            <div className="decorative-image slideshow">
+              {galleryImages.length > 0 ? (
+                <>
+                  {galleryImages.map((image, index) => (
+                    <img
+                      key={image._id || index}
+                      src={image.imageUrl}
+                      alt={image.title || 'Gallery Image'}
+                      className={`slideshow-image ${index === currentImageIndex ? 'active' : ''}`}
+                    />
+                  ))}
+                  <div className="image-overlay">
+                    <h3>{galleryImages[currentImageIndex]?.title || 'Beautiful Event Spaces'}</h3>
+                    <p>{galleryImages[currentImageIndex]?.description || 'Create unforgettable memories in our premium theaters'}</p>
+                  </div>
+                </>
+              ) : (
+                <div className="no-gallery">No images in gallery</div>
+              )}
+            </div>
+          </div>
+
+          <style jsx>{`
         .admin-dashboard {
           padding: 2rem;
           max-width: 1400px;
@@ -2116,6 +2228,29 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
           color: #721c24;
         }
 
+        .payment-badge {
+          padding: 0.25rem 0.75rem;
+          border-radius: 20px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.25rem;
+        }
+
+        .payment-badge.paid {
+          background: #d1fae5;
+          color: #065f46;
+          border: 1px solid #10b981;
+        }
+
+        .payment-badge.unpaid {
+          background: #fef3c7;
+          color: #92400e;
+          border: 1px solid #f59e0b;
+        }
+
         .action-buttons {
           display: flex;
           gap: 0.5rem;
@@ -2173,6 +2308,162 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
 
         .activate-btn:hover {
           background: #218838;
+        }
+
+        .paid-btn {
+          background: #10b981;
+          color: white;
+        }
+
+        .paid-btn:hover {
+          background: #059669;
+          transform: translateY(-1px);
+          box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+
+        /* Payment Method Modal */
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10000;
+        }
+
+        .payment-method-modal {
+          background: white;
+          border-radius: 12px;
+          padding: 2rem;
+          max-width: 500px;
+          width: 90%;
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .payment-method-modal .modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1rem;
+        }
+
+        .payment-method-modal .modal-header h2 {
+          font-size: 1.5rem;
+          font-weight: 600;
+          color: #333;
+          margin: 0;
+        }
+
+        .payment-method-modal .close-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 0.5rem;
+          color: #666;
+          transition: color 0.2s;
+        }
+
+        .payment-method-modal .close-btn:hover {
+          color: #333;
+        }
+
+        .payment-method-modal .modal-subtitle {
+          color: #666;
+          margin-bottom: 1.5rem;
+        }
+
+        .payment-method-options {
+          display: flex;
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .payment-method-option {
+          flex: 1;
+          padding: 1.5rem;
+          border: 2px solid #e5e7eb;
+          border-radius: 8px;
+          background: white;
+          cursor: pointer;
+          transition: all 0.2s;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .payment-method-option:hover {
+          border-color: #10b981;
+          background: #f0fdf4;
+        }
+
+        .payment-method-option.selected {
+          border-color: #10b981;
+          background: #d1fae5;
+        }
+
+        .payment-method-option:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .method-icon {
+          font-size: 2rem;
+        }
+
+        .method-title {
+          font-weight: 600;
+          color: #333;
+        }
+
+        .method-subtitle {
+          font-size: 0.85rem;
+          color: #666;
+          text-align: center;
+        }
+
+        .modal-actions {
+          display: flex;
+          gap: 1rem;
+          justify-content: flex-end;
+        }
+
+        .modal-actions .cancel-btn,
+        .modal-actions .save-btn {
+          padding: 0.75rem 1.5rem;
+          border-radius: 8px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .modal-actions .cancel-btn {
+          background: #f3f4f6;
+          border: 1px solid #e5e7eb;
+          color: #666;
+        }
+
+        .modal-actions .cancel-btn:hover {
+          background: #e5e7eb;
+        }
+
+        .modal-actions .save-btn {
+          background: #10b981;
+          border: none;
+          color: white;
+        }
+
+        .modal-actions .save-btn:hover {
+          background: #059669;
+        }
+
+        .modal-actions button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
 
         /* Booking Detail Popup */
@@ -2885,26 +3176,85 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
         }
       `}</style>
 
-      {/* Reset Confirmation Modal */}
-      <ConfirmationModal
-        isOpen={showResetConfirmation}
-        title="Reset Counters"
-        message="Are you sure you want to reset Today/Week/Month/Year counters to 0?
+          {/* Reset Confirmation Modal */}
+          <ConfirmationModal
+            isOpen={showResetConfirmation}
+            title="Reset Counters"
+            message="Are you sure you want to reset Today/Week/Month/Year counters to 0?
 
 Note: Total counters will be preserved and never reset."
-        confirmText="Reset Counters"
-        cancelText="Cancel"
-        onConfirm={resetAllCounters}
-        onCancel={() => setShowResetConfirmation(false)}
-        type="warning"
-      />
+            confirmText="Reset Counters"
+            cancelText="Cancel"
+            onConfirm={resetAllCounters}
+            onCancel={() => setShowResetConfirmation(false)}
+            type="warning"
+          />
 
-      {/* Toast Manager */}
-      <ToastManager />
+          {/* Payment Method Modal */}
+          {isPaymentMethodModalOpen && bookingPendingPayment && (
+            <div className="modal-overlay" onClick={handleClosePaymentMethodModal}>
+              <div className="payment-method-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>How was the payment received?</h2>
+                  <button className="close-btn" onClick={handleClosePaymentMethodModal} disabled={paymentUpdatingId === String(bookingPendingPayment.id)}>
+                    <X size={20} />
+                  </button>
+                </div>
 
-      {/* Edit booking popup removed */}
+                <p className="modal-subtitle">
+                  Select the payment method used for booking #{bookingPendingPayment.id}.
+                </p>
 
-    </div>
+                <div className="payment-method-options">
+                  <button
+                    type="button"
+                    className={`payment-method-option ${selectedPaymentMethod === 'online' ? 'selected' : ''}`}
+                    onClick={() => setSelectedPaymentMethod('online')}
+                    disabled={paymentUpdatingId === String(bookingPendingPayment.id)}
+                  >
+                    <span className="method-icon">💳</span>
+                    <span className="method-title">Paid Online</span>
+                    <span className="method-subtitle">UPI, card, or any digital mode</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`payment-method-option ${selectedPaymentMethod === 'cash' ? 'selected' : ''}`}
+                    onClick={() => setSelectedPaymentMethod('cash')}
+                    disabled={paymentUpdatingId === String(bookingPendingPayment.id)}
+                  >
+                    <span className="method-icon">💵</span>
+                    <span className="method-title">Paid in Cash</span>
+                    <span className="method-subtitle">Amount collected at the venue</span>
+                  </button>
+                </div>
+
+                <div className="modal-actions">
+                  <button
+                    className="cancel-btn"
+                    onClick={handleClosePaymentMethodModal}
+                    disabled={paymentUpdatingId === String(bookingPendingPayment.id)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="save-btn"
+                    onClick={handleConfirmPaymentMethod}
+                    disabled={paymentUpdatingId === String(bookingPendingPayment.id)}
+                  >
+                    {paymentUpdatingId === String(bookingPendingPayment.id) ? 'Processing...' : 'Mark as Paid'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Toast Manager */}
+          <ToastManager />
+
+          {/* Edit booking popup removed */}
+
+        </div>
       </DatePickerProvider >
     </BookingProvider >
   );

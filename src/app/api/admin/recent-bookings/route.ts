@@ -60,7 +60,14 @@ export async function GET() {
         valentineName: booking.valentineName,
         customCelebration: booking.customCelebration,
         createdBy: booking.createdBy,
-        createdAt: booking.createdAt
+        createdAt: booking.createdAt,
+        // Payment tracking fields
+        paymentStatus: booking.paymentStatus,
+        venuePaymentMethod: booking.venuePaymentMethod,
+        paidBy: booking.paidBy,
+        staffName: booking.staffName,
+        userId: booking.userId,
+        paidAt: booking.paidAt
       }));
 
     return NextResponse.json({

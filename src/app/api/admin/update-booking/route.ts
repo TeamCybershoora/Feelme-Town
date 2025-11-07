@@ -21,6 +21,10 @@ export async function PUT(request: NextRequest) {
       numberOfPeople,
       paymentStatus,
       venuePaymentMethod,
+      paidBy,
+      staffName,
+      userId,
+      paidAt,
       sendInvoice = true,
       isManualBooking = false 
     } = body;
@@ -56,6 +60,12 @@ export async function PUT(request: NextRequest) {
       updateData.venuePaymentMethod = normalizedVenuePaymentMethod;
       updateData.paymentMethod = normalizedVenuePaymentMethod;
     }
+    
+    // Add payment tracking fields
+    if (paidBy !== undefined) updateData.paidBy = paidBy;
+    if (staffName !== undefined) updateData.staffName = staffName;
+    if (userId !== undefined) updateData.userId = userId;
+    if (paidAt !== undefined) updateData.paidAt = paidAt;
 
     // Get current booking to check status change
     let currentBooking;
