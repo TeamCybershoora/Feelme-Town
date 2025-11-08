@@ -1517,6 +1517,30 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       }
     }
     
+    // Add payment tracking fields as uncompressed for easy querying
+    if (bookingData.paidBy !== undefined) {
+      updateData.paidBy = bookingData.paidBy;
+    } else if ((originalBooking as any).paidBy !== undefined) {
+      updateData.paidBy = (originalBooking as any).paidBy;
+    }
+    if (bookingData.staffName !== undefined) {
+      updateData.staffName = bookingData.staffName;
+    } else if ((originalBooking as any).staffName !== undefined) {
+      updateData.staffName = (originalBooking as any).staffName;
+    }
+    if (bookingData.userId !== undefined) {
+      updateData.userId = bookingData.userId;
+      updateData.staffId = bookingData.userId; // Also save as staffId for backward compatibility
+    } else if ((originalBooking as any).userId !== undefined) {
+      updateData.userId = (originalBooking as any).userId;
+      updateData.staffId = (originalBooking as any).userId;
+    }
+    if (bookingData.paidAt !== undefined) {
+      updateData.paidAt = bookingData.paidAt;
+    } else if ((originalBooking as any).paidAt !== undefined) {
+      updateData.paidAt = (originalBooking as any).paidAt;
+    }
+    
     // Try to update by ObjectId first, then by custom bookingId
     let updateResult;
     
@@ -1721,7 +1745,13 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
         ? bookingData.paymentStatus
         : (originalBooking as any).paymentStatus || 'unpaid',
       venuePaymentMethod: bookingData.venuePaymentMethod ?? bookingData.paymentMethod ?? (originalBooking as any).venuePaymentMethod ?? (originalBooking as any).paymentMethod ?? null,
-      paymentMethod: bookingData.paymentMethod ?? bookingData.venuePaymentMethod ?? (originalBooking as any).paymentMethod ?? (originalBooking as any).venuePaymentMethod ?? null
+      paymentMethod: bookingData.paymentMethod ?? bookingData.venuePaymentMethod ?? (originalBooking as any).paymentMethod ?? (originalBooking as any).venuePaymentMethod ?? null,
+      // Add payment tracking fields as uncompressed for easy querying
+      paidBy: bookingData.paidBy ?? (originalBooking as any).paidBy ?? null,
+      staffName: bookingData.staffName ?? (originalBooking as any).staffName ?? null,
+      userId: bookingData.userId ?? (originalBooking as any).userId ?? null,
+      staffId: bookingData.userId ?? (originalBooking as any).userId ?? null, // Also save as staffId for backward compatibility
+      paidAt: bookingData.paidAt ?? (originalBooking as any).paidAt ?? null
     };
     
     // Try to update by ObjectId first, then by custom bookingId

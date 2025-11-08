@@ -62,10 +62,26 @@ export async function PUT(request: NextRequest) {
     }
     
     // Add payment tracking fields
-    if (paidBy !== undefined) updateData.paidBy = paidBy;
-    if (staffName !== undefined) updateData.staffName = staffName;
-    if (userId !== undefined) updateData.userId = userId;
-    if (paidAt !== undefined) updateData.paidAt = paidAt;
+    console.log('🔍 [API] Payment tracking fields received:', { paidBy, staffName, userId, paidAt });
+    
+    if (paidBy !== undefined) {
+      updateData.paidBy = paidBy;
+      console.log('✅ [API] Added paidBy:', paidBy);
+    }
+    if (staffName !== undefined) {
+      updateData.staffName = staffName;
+      console.log('✅ [API] Added staffName:', staffName);
+    }
+    if (userId !== undefined) {
+      updateData.userId = userId;
+      console.log('✅ [API] Added userId:', userId);
+    }
+    if (paidAt !== undefined) {
+      updateData.paidAt = paidAt;
+      console.log('✅ [API] Added paidAt:', paidAt);
+    }
+    
+    console.log('📦 [API] Final updateData for database:', updateData);
 
     // Get current booking to check status change
     let currentBooking;

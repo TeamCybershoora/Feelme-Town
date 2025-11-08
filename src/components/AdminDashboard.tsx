@@ -620,17 +620,26 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
 
       // Check if logged in as staff
       const staffUser = localStorage.getItem('staffUser');
+      console.log('🔍 [Payment] staffUser from localStorage:', staffUser);
+      
       if (staffUser) {
         try {
           const staffData = JSON.parse(staffUser);
+          console.log('🔍 [Payment] Parsed staffData:', staffData);
+          
           if (staffData.role === 'staff') {
             paidBy = 'Staff';
             staffName = staffData.name;
             userId = staffData.userId;
+            console.log('✅ [Payment] Staff detected:', { paidBy, staffName, userId });
+          } else {
+            console.log('⚠️ [Payment] Not a staff role:', staffData.role);
           }
         } catch (e) {
-          console.error('Failed to parse staff user data:', e);
+          console.error('❌ [Payment] Failed to parse staff user data:', e);
         }
+      } else {
+        console.log('ℹ️ [Payment] No staffUser in localStorage - using Administrator');
       }
 
       // Prepare request body - only include staff fields if staff marked it
@@ -643,11 +652,18 @@ export default function AdminDashboard({ stats, recentBookings, onRefresh, refre
         sendInvoice: true
       };
 
-      // Only add staff fields if marked by staff
+      // Add staff fields - null for Admin, actual values for Staff
       if (paidBy === 'Staff' && userId) {
         requestBody.staffName = staffName;
         requestBody.userId = userId;
+        console.log('✅ [Payment] Adding staff fields to request:', { staffName, userId });
+      } else {
+        requestBody.staffName = null;
+        requestBody.userId = null;
+        console.log('ℹ️ [Payment] Adding null staff fields (Administrator)');
       }
+
+      console.log('📤 [Payment] Final request body:', requestBody);
 
       const response = await fetch('/api/admin/update-booking', {
         method: 'PUT',
