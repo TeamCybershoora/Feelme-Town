@@ -3629,8 +3629,70 @@ const getAllServices = async () => {
   }
 };
 
+const getAllServicesIncludingInactive = async () => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+    
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    
+    const collection = db.collection(SERVICE_COLLECTION_NAME);
+    // Fetch ALL services (including inactive) for admin panel
+    const services = await collection.find({}).toArray();
+    
+    const decompressedServices = await Promise.all(
+      services.map(async (service) => {
+        let decompressedData: any = {};
+        
+        if (service.compressedData) {
+          try {
+            decompressedData = await decompressData(service.compressedData);
+            console.log(`📦 Decompressed service "${service.name}":`, decompressedData);
+          } catch (error) {
+            console.error('❌ Error decompressing service data:', error);
+          }
+        }
+        
+        // Merge database fields with decompressed data
+        // Direct fields take priority over decompressed data
+        const mergedService = {
+          _id: service._id,
+          serviceId: service.serviceId,
+          name: service.name,
+          items: service.items || [],
+          isActive: service.isActive,
+          includeInDecoration: service.includeInDecoration, // Direct field from database
+          compulsory: service.compulsory, // Direct field from database
+          createdAt: service.createdAt,
+          updatedAt: service.updatedAt,
+          // Include other decompressed data
+          ...decompressedData
+        };
+        
+        console.log(`🔍 Service "${service.name}":`, {
+          includeInDecoration: mergedService.includeInDecoration,
+          isActive: mergedService.isActive
+        });
+        
+        return mergedService;
+      })
+    );
+    
+    console.log(`✅ Fetched ${decompressedServices.length} services (including inactive) from MongoDB`);
+    return decompressedServices;
+  } catch (error) {
+    console.error('❌ Error fetching all services from MongoDB:', error);
+    return [];
+  }
+};
+
 const updateService = async (id: string, serviceData: Record<string, unknown>) => {
   try {
+    console.log('🔄 updateService called with:', { id, serviceData });
+    
     if (!isConnected) {
       await connectToDatabase();
     }
@@ -3650,6 +3712,16 @@ const updateService = async (id: string, serviceData: Record<string, unknown>) =
     if (serviceData.name !== undefined) updateData.name = serviceData.name;
     if (serviceData.items !== undefined) updateData.items = serviceData.items;
     if (serviceData.isActive !== undefined) updateData.isActive = serviceData.isActive;
+    if (serviceData.includeInDecoration !== undefined) {
+      updateData.includeInDecoration = serviceData.includeInDecoration;
+      console.log('✅ Setting includeInDecoration to:', serviceData.includeInDecoration);
+    }
+    if (serviceData.compulsory !== undefined) {
+      updateData.compulsory = serviceData.compulsory;
+      console.log('✅ Setting compulsory to:', serviceData.compulsory);
+    }
+    
+    console.log('📦 Final updateData:', updateData);
     
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
@@ -5085,6 +5157,7 @@ const database = {
   deleteOccasion: deleteOccasion,
   saveService: saveService,
   getAllServices: getAllServices,
+  getAllServicesIncludingInactive: getAllServicesIncludingInactive,
   updateService: updateService,
   deleteService: deleteService,
   saveStaff: saveStaff,

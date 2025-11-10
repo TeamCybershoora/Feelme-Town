@@ -1019,7 +1019,7 @@ const emailTemplates = {
                     Your booking invoice PDF is attached to this email. You can also view and download it using the button below.
                   </p>
                 </div>
-                <a href="${(process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000')}/invoice/${encodeURIComponent(bookingData.id || (bookingData as any).bookingId || '')}" class="cta-button">View & Download Invoice</a>
+                
                 <a href="${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/theater?cancelBookingId=${bookingData.id}&email=${encodeURIComponent(bookingData.email)}" class="cta-button cancel-button">Cancel Booking</a>
               </div>
               

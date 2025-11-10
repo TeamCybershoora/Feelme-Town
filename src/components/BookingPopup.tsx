@@ -36,10 +36,10 @@ interface BookingForm {
   whatsappNumber: string;
   emailAddress: string;
   occasion: string;
-  selectedCakes: string[];
-  selectedDecorItems: string[];
-  selectedGifts: string[];
-  selectedMovies: string[];
+  selectedCakes: Array<{id?: string; name: string; price: number; quantity?: number}>;
+  selectedDecorItems: Array<{id?: string; name: string; price: number; quantity?: number}>;
+  selectedGifts: Array<{id?: string; name: string; price: number; quantity?: number}>;
+  selectedMovies: Array<{id?: string; name: string; price: number; quantity?: number}>;
   // Overview section options
   wantCakes: 'Yes' | 'No';
   wantDecorItems: 'Yes' | 'No';
@@ -75,7 +75,7 @@ interface BookingPopupProps {
 export default function BookingPopup({ isOpen, onClose, isManualMode = false, onSuccess }: BookingPopupProps) {
   const { selectedTheater, selectedDate, selectedTimeSlot, setSelectedTimeSlot, setSelectedTheater, setSelectedDate, openBookingPopup, closeBookingPopup, refreshBookedSlots } = useBooking();
   const { isDatePickerOpen, openDatePicker, closeDatePicker } = useDatePicker();
-  
+
   // Track date changes
   useEffect(() => {
     // Date change tracking
@@ -94,6 +94,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [isTimeSelectionOpen, setIsTimeSelectionOpen] = useState(false);
   const [bookedTimeSlots, setBookedTimeSlots] = useState<string[]>([]);
   const autoCloseTimerRef = useRef<number | null>(null);
+  const lastClickedItemRef = useRef<string | null>(null);
+  const clickTimeoutRef = useRef<number | null>(null);
+  const toastShownRef = useRef<boolean>(false);
   const [hasSentEditRequest, setHasSentEditRequest] = useState(false);
   const [isMoviesModalOpen, setIsMoviesModalOpen] = useState(false);
   const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
@@ -139,10 +142,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         console.log('💰 BookingPopup: Fetching pricing from /api/pricing...');
         const response = await fetch('/api/pricing', { cache: 'no-store' });
         console.log('💰 BookingPopup: Response status:', response.status);
-        
+
         const data = await response.json();
         console.log('💰 BookingPopup: API response:', data);
-        
+
         if (data.success && data.pricing) {
           console.log('✅ BookingPopup: Setting pricing data:', data.pricing);
           setPricingData(data.pricing);
@@ -169,7 +172,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       try {
         const response = await fetch('/api/admin/theaters');
         const data = await response.json();
-        
+
         if (data.success && data.theaters) {
           setRealTheaterData(data.theaters);
         }
@@ -254,7 +257,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       for (const fieldKey of selectedOccasionData.requiredFields) {
         const fieldValue = formData.occasionData?.[fieldKey];
         const fieldLabel = selectedOccasionData.fieldLabels[fieldKey] || fieldKey;
-        
+
         if (!fieldValue || fieldValue.trim() === '') {
           setValidationErrorName(`Missing ${fieldLabel}`);
           setValidationMessage(`Please enter ${fieldLabel.toLowerCase()} to continue.`);
@@ -357,7 +360,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       const discountedTotal = getFinalTotal();
       const advancePayment = getPayableAmount(); // Use slot booking fee from pricing data
       const venuePayment = discountedTotal - advancePayment;
-      
+
       // Get theater base price
       const theaterBasePrice = selectedTheater
         ? parseFloat(selectedTheater.price.replace(/[₹,\s]/g, ''))
@@ -373,29 +376,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         occasion: formData.occasion,
         occasionData: formData.occasionData || {},
         numberOfPeople: formData.numberOfPeople,
-        selectedCakes: formData.selectedCakes.map((cakeName) => {
-          const cake = cakeOptions.find(c => c.name === cakeName);
-          return { id: cake?.id || cakeName.toLowerCase().replace(/\s+/g, '-'), name: cake?.name || cakeName, price: Number(cake?.price ?? 0), quantity: 1 };
-        }),
-        selectedDecorItems: formData.selectedDecorItems.map((decorName) => {
-          const decor = decorOptions.find(d => d.name === decorName);
-          return { id: decor?.id || decorName.toLowerCase().replace(/\s+/g, '-'), name: decor?.name || decorName, price: Number(decor?.price ?? 0), quantity: 1 };
-        }),
-        selectedGifts: formData.selectedGifts.map((giftName) => {
-          const gift = giftOptions.find(g => g.name === giftName);
-          return { id: gift?.id || giftName.toLowerCase().replace(/\s+/g, '-'), name: gift?.name || giftName, price: Number(gift?.price ?? 0), quantity: 1 };
-        }),
-        selectedMovies: formData.selectedMovies.map(movieTitle => {
-          // Ensure we store the complete movie title
-          const fullMovieTitle = movieTitle || 'Unknown Movie';
-          return {
-            id: fullMovieTitle.toLowerCase().replace(/\s+/g, '_'),
-            name: fullMovieTitle,
-            title: fullMovieTitle, // Also store as title for compatibility
-            price: 0,
-            quantity: 1
-          };
-        }),
+        selectedCakes: formData.selectedCakes,
+        selectedDecorItems: formData.selectedDecorItems,
+        selectedGifts: formData.selectedGifts,
+        selectedMovies: formData.selectedMovies,
         totalAmount: discountedTotal,
         advancePayment,
         venuePayment,
@@ -469,7 +453,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       const discountedTotal = getFinalTotal();
       const advancePayment = getPayableAmount(); // Use slot booking fee from pricing data
       const venuePayment = discountedTotal - advancePayment;
-      
+
       // Get theater base price
       const theaterBasePrice = selectedTheater
         ? parseFloat(selectedTheater.price.replace(/[₹,\s]/g, ''))
@@ -485,29 +469,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         occasion: formData.occasion,
         occasionData: formData.occasionData || {},
         numberOfPeople: formData.numberOfPeople,
-        selectedCakes: formData.selectedCakes.map((cakeName) => {
-          const cake = cakeOptions.find(c => c.name === cakeName);
-          return { id: cake?.id || cakeName.toLowerCase().replace(/\s+/g, '-'), name: cake?.name || cakeName, price: Number(cake?.price ?? 0), quantity: 1 };
-        }),
-        selectedDecorItems: formData.selectedDecorItems.map((decorName) => {
-          const decor = decorOptions.find(d => d.name === decorName);
-          return { id: decor?.id || decorName.toLowerCase().replace(/\s+/g, '-'), name: decor?.name || decorName, price: Number(decor?.price ?? 0), quantity: 1 };
-        }),
-        selectedGifts: formData.selectedGifts.map((giftName) => {
-          const gift = giftOptions.find(g => g.name === giftName);
-          return { id: gift?.id || giftName.toLowerCase().replace(/\s+/g, '-'), name: gift?.name || giftName, price: Number(gift?.price ?? 0), quantity: 1 };
-        }),
-        selectedMovies: formData.selectedMovies.map(movieTitle => {
-          // Ensure we store the complete movie title
-          const fullMovieTitle = movieTitle || 'Unknown Movie';
-          return {
-            id: fullMovieTitle.toLowerCase().replace(/\s+/g, '_'),
-            name: fullMovieTitle,
-            title: fullMovieTitle, // Also store as title for compatibility
-            price: 0,
-            quantity: 1
-          };
-        }),
+        selectedCakes: formData.selectedCakes,
+        selectedDecorItems: formData.selectedDecorItems,
+        selectedGifts: formData.selectedGifts,
+        selectedMovies: formData.selectedMovies,
         totalAmount: discountedTotal,
         advancePayment,
         venuePayment,
@@ -598,6 +563,16 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     setOriginalFormData(null); // Reset original form data
     setEditingBookingId(null); // Reset editing booking ID
     setHasSentEditRequest(false); // Reset edit request sent flag
+    setSelectedServiceItems({}); // 🔥 Reset selected service items
+    setSelectedServices({}); // 🔥 Reset selected services
+    
+    // 🔥 Clear sessionStorage items
+    sessionStorage.removeItem('editingBooking');
+    sessionStorage.removeItem('bookingFromPopup');
+    sessionStorage.removeItem('bookingFormData');
+    sessionStorage.removeItem('selectedMovie');
+    sessionStorage.removeItem('selectedMovies');
+    sessionStorage.removeItem('selectedTimeSlot');
   };
 
   useEffect(() => {
@@ -605,22 +580,22 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       // Reset submitting state when popup opens (for new bookings)
       setIsSubmittingBooking(false);
       setIsProcessingPayment(false);
-      
+
       // Check if editing an existing booking
       const editingBooking = sessionStorage.getItem('editingBooking');
       if (editingBooking) {
         try {
           const bookingData = JSON.parse(editingBooking);
           console.log('📝 Loading booking data for editing:', bookingData);
-          
+
           // Set as editing mode
           setIsEditingBooking(true);
           setEditingBookingId(bookingData.bookingId || bookingData.id);
           console.log('✅ Edit mode enabled. BookingID:', bookingData.bookingId || bookingData.id);
-          
+
           // Build occasionData from booking data (include all possible occasion fields)
           const occasionDataFromBooking: { [key: string]: string } = {};
-          
+
           // List of all possible occasion field keys
           const possibleOccasionFields = [
             'birthdayName', 'birthdayGender',
@@ -634,80 +609,80 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             'farewellPersonName', 'farewellReason',
             'congratulationsPersonName', 'congratulationsReason'
           ];
-          
+
           // Populate occasionData with any occasion-related fields from booking
           possibleOccasionFields.forEach(fieldKey => {
             if (bookingData[fieldKey]) {
               occasionDataFromBooking[fieldKey] = bookingData[fieldKey];
             }
           });
-          
+
           // Also check if there's an occasionData object in booking
           if (bookingData.occasionData && typeof bookingData.occasionData === 'object') {
             Object.assign(occasionDataFromBooking, bookingData.occasionData);
           }
-          
+
           // IMPORTANT: Also check for fields stored with full label names (e.g., "Nickname of Bride to be")
           // These need to be converted to camelCase keys for the form
           Object.keys(bookingData).forEach(key => {
             // Skip system fields
-            if (['_id', 'bookingId', 'compressedData', 'createdAt', 'status', 'name', 'email', 
-                 'theaterName', 'date', 'time', 'occasion', 'totalAmount', 'selectedMovies', 
-                 'selectedCakes', 'selectedDecorItems', 'selectedGifts', 'isManualBooking',
-                 'bookingType', 'createdBy', 'staffId', 'staffName', 'notes', 'expiredAt',
-                 'occasionPersonName'].includes(key)) {
+            if (['_id', 'bookingId', 'compressedData', 'createdAt', 'status', 'name', 'email',
+              'theaterName', 'date', 'time', 'occasion', 'totalAmount', 'selectedMovies',
+              'selectedCakes', 'selectedDecorItems', 'selectedGifts', 'isManualBooking',
+              'bookingType', 'createdBy', 'staffId', 'staffName', 'notes', 'expiredAt',
+              'occasionPersonName'].includes(key)) {
               return;
             }
-            
+
             // Check if this is a _label field (e.g., "Nickname of Bride to be_label")
             if (key.endsWith('_label')) {
               // Get the base field name by removing _label
               const baseFieldName = key.replace('_label', '');
-              
+
               // Get the actual value from the base field or _value field
               const fieldValue = bookingData[baseFieldName] || bookingData[`${baseFieldName}_value`];
-              
+
               if (fieldValue) {
                 // Convert base field name to camelCase
                 const camelCaseKey = baseFieldName
                   .split(' ')
-                  .map((word, index) => 
-                    index === 0 
-                      ? word.toLowerCase() 
+                  .map((word, index) =>
+                    index === 0
+                      ? word.toLowerCase()
                       : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
                   )
                   .join('');
-                
+
                 occasionDataFromBooking[camelCaseKey] = fieldValue;
                 console.log(`📝 Mapped occasion field from _label: "${baseFieldName}" → "${camelCaseKey}" = "${fieldValue}"`);
               }
               return;
             }
-            
+
             // Skip _value fields (already handled above)
             if (key.endsWith('_value')) {
               return;
             }
-            
+
             // Check if field name has spaces (old format with full labels)
             if (key.includes(' ')) {
               // This is likely an occasion field with full label - convert to camelCase
               const camelCaseKey = key
                 .split(' ')
-                .map((word, index) => 
-                  index === 0 
-                    ? word.toLowerCase() 
+                .map((word, index) =>
+                  index === 0
+                    ? word.toLowerCase()
                     : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
                 )
                 .join('');
-              
+
               occasionDataFromBooking[camelCaseKey] = bookingData[key];
               console.log(`📝 Mapped occasion field: "${key}" → "${camelCaseKey}" = "${bookingData[key]}"`);
             }
           });
-          
+
           console.log('📝 Populated occasion data for editing:', occasionDataFromBooking);
-          
+
           // Pre-fill form with existing booking data
           setFormData({
             bookingName: bookingData.customerName || bookingData.bookingName || '',
@@ -739,11 +714,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             valentineName: bookingData.valentineName,
             customCelebration: bookingData.customCelebration,
           });
-          
+
           // Set context data
           if (bookingData.date) setSelectedDate(bookingData.date);
           if (bookingData.time) setSelectedTimeSlot(bookingData.time);
-          
+
           // Set selected occasion data for showing required fields
           if (bookingData.occasion && occasionOptions.length > 0) {
             const selectedOccasion = occasionOptions.find(occ => occ.name === bookingData.occasion);
@@ -751,17 +726,17 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
               setSelectedOccasionData(selectedOccasion);
             }
           }
-          
+
           // Fetch full theater object from database if we only have theater name
           if (bookingData.theater && typeof bookingData.theater === 'string') {
             const fetchTheaterObject = async () => {
               try {
                 const response = await fetch('/api/admin/theaters');
                 const data = await response.json();
-                
+
                 if (data.success && data.theaters) {
-                  const theaterObj = data.theaters.find((t: any) => 
-                    t.name === bookingData.theater || 
+                  const theaterObj = data.theaters.find((t: any) =>
+                    t.name === bookingData.theater ||
                     `${t.name} (${t.type}) (${t.hallNumber})` === bookingData.theater
                   );
                   if (theaterObj) {
@@ -780,14 +755,14 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           } else if (bookingData.theater) {
             setSelectedTheater(bookingData.theater);
           }
-          
+
           setIsLoaded(true);
           return;
         } catch (error) {
           console.error('Error loading editing booking:', error);
         }
       }
-      
+
       // Check if returning from movies page and restore form data
       const bookingFromPopup = sessionStorage.getItem('bookingFromPopup');
       const storedFormData = sessionStorage.getItem('bookingFormData');
@@ -799,9 +774,14 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           // Check if there's a new selected movie to add
           const selectedMovie = sessionStorage.getItem('selectedMovie');
           if (selectedMovie) {
-            
+
             // Replace existing movie with new selection (only one movie allowed)
-            parsedFormData.selectedMovies = [selectedMovie];
+            parsedFormData.selectedMovies = [{
+              id: selectedMovie.toLowerCase().replace(/\s+/g, '_'),
+              name: selectedMovie,
+              price: 0,
+              quantity: 1
+            }];
             parsedFormData.wantMovies = 'Yes';
             // Clear the selected movie from sessionStorage
             sessionStorage.removeItem('selectedMovie');
@@ -809,19 +789,19 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
           // Extract theater from form data and restore it
           const { selectedTheater: storedTheater, ...formDataWithoutTheater } = parsedFormData;
-          
+
           setFormData(formDataWithoutTheater);
 
           // Restore selected theater if it was stored in form data
           if (storedTheater) {
-            
+
             setSelectedTheater(storedTheater);
           }
 
           // Restore selected time slot if it was stored
           const storedTimeSlot = sessionStorage.getItem('selectedTimeSlot');
           if (storedTimeSlot) {
-            
+
             setSelectedTimeSlot(storedTimeSlot);
             // Clear the stored time slot
             sessionStorage.removeItem('selectedTimeSlot');
@@ -831,7 +811,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           sessionStorage.removeItem('bookingFromPopup');
           sessionStorage.removeItem('bookingFormData');
         } catch (error) {
-          
+
           // If error, reset form
           resetForm();
         }
@@ -840,10 +820,15 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         const selectedMovie = sessionStorage.getItem('selectedMovie');
         if (selectedMovie) {
           console.log('🎬 BookingPopup: Found selected movie:', selectedMovie);
-          // Set movie selection for fresh booking
+          // Set movie selection for fresh booking as object with price
           setFormData(prev => ({
             ...prev,
-            selectedMovies: [selectedMovie],
+            selectedMovies: [{
+              id: selectedMovie.toLowerCase().replace(/\s+/g, '_'),
+              name: selectedMovie,
+              price: 0, // Movies are free
+              quantity: 1
+            }],
             wantMovies: 'Yes'
           }));
           console.log('🎬 BookingPopup: Movie auto-selected and wantMovies set to Yes');
@@ -855,19 +840,23 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           if (selectedMovies) {
             try {
               const parsedMovies = JSON.parse(selectedMovies);
+              // Convert to objects if they're strings
+              const movieObjects = Array.isArray(parsedMovies) 
+                ? parsedMovies.map((movie: any) => 
+                    typeof movie === 'string' 
+                      ? { id: movie.toLowerCase().replace(/\s+/g, '_'), name: movie, price: 0, quantity: 1 }
+                      : movie
+                  )
+                : [];
               setFormData(prev => ({
                 ...prev,
-                selectedMovies: parsedMovies,
+                selectedMovies: movieObjects,
                 wantMovies: 'Yes'
               }));
-              // Clear the stored movies
               sessionStorage.removeItem('selectedMovies');
             } catch (error) {
-              
+              console.error('Error parsing selected movies:', error);
             }
-          } else {
-            // Reset form when popup opens to ensure fresh start (only if no movie selected)
-            resetForm();
           }
         }
       }
@@ -931,13 +920,13 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       autoCloseTimerRef.current = window.setTimeout(() => {
         // Check editing state BEFORE resetting
         const wasEditingBooking = isEditingBooking;
-        
+
         // Same behavior as Close: reset and navigate
         setIsBookingSuccessful(false);
         setBookingResult(null);
         resetForm();
         onClose();
-        
+
         // Only redirect to theater page if not editing from admin
         if (!wasEditingBooking) {
           router.push('/theater');
@@ -990,11 +979,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         setIsLoadingOccasions(true);
         const response = await fetch('/api/occasions');
         const data = await response.json();
-        
+
         if (data.success && data.occasions) {
-          
+
           setOccasionOptions(data.occasions);
-          
+
           // If editing, set selectedOccasionData after occasions are loaded
           const editingBooking = sessionStorage.getItem('editingBooking');
           if (editingBooking) {
@@ -1017,10 +1006,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             }
           }
         } else {
-          
+
         }
       } catch (error) {
-        
+
       } finally {
         setIsLoadingOccasions(false);
       }
@@ -1032,14 +1021,14 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   // Handle occasion selection and set required fields
   const handleOccasionSelect = (occasionName: string) => {
     const selectedOccasion = occasionOptions.find(occ => occ.name === occasionName);
-    
-    
+
+
     setFormData(prev => ({
       ...prev,
       occasion: occasionName,
       occasionData: {} // Reset occasion data
     }));
-    
+
     setSelectedOccasionData(selectedOccasion || null);
   };
 
@@ -1100,19 +1089,25 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           const activeServices = services.filter((s: any) => s.isActive === true);
           console.log('📦 Fetched services from database:', activeServices);
           console.log('📦 Active service names:', activeServices.map((s: any) => s.name));
-          console.log('📦 Service items count:', activeServices.map((s: any) => ({ 
-            name: s.name, 
+          console.log('📦 Service items count:', activeServices.map((s: any) => ({
+            name: s.name,
             itemsCount: s.items?.length || 0,
             includeInDecoration: s.includeInDecoration || false
           })));
-          
+
           setAllServices(activeServices);
-          
+
           // Initialize selectedServices state
           const initialSelectedServices: { [key: string]: 'Yes' | 'No' } = {};
           activeServices.forEach((s: any) => {
-            initialSelectedServices[s.name] = 'No';
-            console.log(`📦 Initialized service: ${s.name} (includeInDecoration: ${s.includeInDecoration || false})`);
+            // Auto-set compulsory services to 'Yes'
+            if (s.compulsory) {
+              initialSelectedServices[s.name] = 'Yes';
+              console.log(`🔒 Initialized COMPULSORY service: ${s.name} = Yes`);
+            } else {
+              initialSelectedServices[s.name] = 'No';
+              console.log(`📦 Initialized service: ${s.name} (includeInDecoration: ${s.includeInDecoration || false})`);
+            }
           });
           setSelectedServices(initialSelectedServices);
 
@@ -1144,9 +1139,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
               setCakeOptions(cakes);
               setDecorOptions(decor);
               setGiftOptions(gifts);
-              
+
             } catch (fallbackError) {
-              
+
               setCakeOptions(categorized.cake);
               setDecorOptions(categorized.decor);
               setGiftOptions(categorized.gift);
@@ -1160,7 +1155,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           setServicesError('Services API returned no data');
         }
       } catch (error) {
-        
+
         setServicesError('Failed to fetch services');
       } finally {
         setIsLoadingServices(false);
@@ -1197,12 +1192,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   // Handle service selection changes
   const handleServiceSelection = (serviceName: string, value: 'Yes' | 'No') => {
     console.log(`🔄 Service selection changed: ${serviceName} = ${value}`);
-    
+
     setSelectedServices(prev => ({
       ...prev,
       [serviceName]: value
     }));
-    
+
     // Reset to Overview if current tab is being disabled
     if (value === 'No' && activeTab === serviceName) {
       console.log(`🔄 Resetting to Overview (service disabled)`);
@@ -1212,49 +1207,106 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
   // Handle service item selection
   const handleServiceItemToggle = (serviceName: string, itemName: string) => {
-    // Get item price
+    // Prevent duplicate clicks within 300ms
+    const clickKey = `${serviceName}-${itemName}`;
+    if (lastClickedItemRef.current === clickKey) {
+      console.log(`⚠️ [Duplicate Click] Ignoring duplicate click for "${itemName}"`);
+      return;
+    }
+    
+    // Set the clicked item and clear after 300ms
+    lastClickedItemRef.current = clickKey;
+    toastShownRef.current = false; // Reset toast flag for new click
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current);
+    }
+    clickTimeoutRef.current = window.setTimeout(() => {
+      lastClickedItemRef.current = null;
+      toastShownRef.current = false;
+    }, 300);
+    
+    // Get item details with price
     const service = allServices.find(s => s.name === serviceName);
     const item = service?.items?.find((i: any) => (i.name || i.title) === itemName);
     const itemPrice = Number(item?.price ?? item?.cost ?? 0);
-    
+    const itemId = item?.id || item?.itemId || itemName.toLowerCase().replace(/\s+/g, '-');
+
     setSelectedServiceItems(prev => {
       const currentItems = prev[serviceName] || [];
       const isSelected = currentItems.includes(itemName);
-      
+
       // Calculate new total
       const currentTotal = getFinalTotal();
       const newTotal = isSelected ? currentTotal - itemPrice : currentTotal + itemPrice;
-      
-      // Show toast notifications - 2 separate toasts
-      setTimeout(() => {
-        if (isSelected) {
-          // Toast 1: Item removed with price
-          showSuccess(`${itemName} removed - ₹${itemPrice}`);
-          // Toast 2: Total amount
-          setTimeout(() => {
-            showSuccess(`Total Amount: ₹${newTotal.toFixed(2)}`);
-          }, 300);
-        } else {
-          // Toast 1: Item added with price
-          showSuccess(`${itemName} added - ₹${itemPrice}`);
-          // Toast 2: Total amount
-          setTimeout(() => {
-            showSuccess(`Total Amount: ₹${newTotal.toFixed(2)}`);
-          }, 300);
-        }
-      }, 100);
-      
+
+      // 🔥 UPDATE FORMDATA - Map service names to formData fields
+      const formDataFieldMap: Record<string, 'selectedCakes' | 'selectedDecorItems' | 'selectedGifts' | 'selectedMovies'> = {
+        'Cakes': 'selectedCakes',
+        'Gifts': 'selectedGifts',
+        'Decoration': 'selectedDecorItems',
+        'Decoration Items': 'selectedDecorItems',
+        'Food': 'selectedCakes', // Food items go to cakes for now
+        'Extra Add Ons': 'selectedDecorItems' // Extra add-ons go to decor items
+      };
+
+      const formDataField = formDataFieldMap[serviceName];
+      if (formDataField) {
+        setFormData(prevFormData => {
+          const currentFormDataItems = prevFormData[formDataField] || [];
+          const itemObject = {
+            id: itemId,
+            name: itemName,
+            price: itemPrice,
+            quantity: 1
+          };
+          
+          let newFormDataItems;
+          if (isSelected) {
+            // Remove item
+            newFormDataItems = currentFormDataItems.filter(i => i.name !== itemName);
+          } else {
+            // Add item only if it doesn't already exist (prevent duplicates)
+            const itemExists = currentFormDataItems.some(i => i.name === itemName);
+            if (itemExists) {
+              console.log(`⚠️ [Item Selection] "${itemName}" already exists in ${formDataField}, skipping duplicate`);
+              newFormDataItems = currentFormDataItems;
+            } else {
+              newFormDataItems = [...currentFormDataItems, itemObject];
+            }
+          }
+          
+          console.log(`🎯 [Item Selection] ${isSelected ? 'Removed' : 'Added'} "${itemName}" (₹${itemPrice}) ${isSelected ? 'from' : 'to'} ${formDataField}:`, newFormDataItems);
+          
+          return {
+            ...prevFormData,
+            [formDataField]: newFormDataItems
+          };
+        });
+      }
+
+      // Show single toast notification with total (only once per click)
+      if (!toastShownRef.current) {
+        toastShownRef.current = true;
+        setTimeout(() => {
+          if (isSelected) {
+            showSuccess(`${itemName} removed • Total: ₹${newTotal.toFixed(2)}`);
+          } else {
+            showSuccess(`${itemName} added • Total: ₹${newTotal.toFixed(2)}`);
+          }
+        }, 100);
+      }
+
       // Scroll down to show Continue button after item selection
       setTimeout(() => {
         const popupContent = document.querySelector('.booking-popup-content');
         if (popupContent) {
-          popupContent.scrollTo({ 
-            top: popupContent.scrollHeight, 
-            behavior: 'smooth' 
+          popupContent.scrollTo({
+            top: popupContent.scrollHeight,
+            behavior: 'smooth'
           });
         }
       }, 200);
-      
+
       return {
         ...prev,
         [serviceName]: isSelected
@@ -1273,20 +1325,20 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   // Fetch booked slots when popup opens
   const fetchBookedSlots = async () => {
     if (!selectedTheater || !selectedDate) return;
-    
+
     try {
       const response = await fetch(`/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(selectedTheater.name)}`);
       const data = await response.json();
-      
+
       if (data.success) {
-        
+
         setBookedTimeSlots(data.bookedTimeSlots || []);
       } else {
-        
+
         setBookedTimeSlots([]);
       }
     } catch (error) {
-      
+
       setBookedTimeSlots([]);
     }
   };
@@ -1295,12 +1347,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   useEffect(() => {
     if (isOpen && selectedTheater && selectedDate) {
       fetchBookedSlots();
-      
+
       // Set up real-time refresh for booking popup (optimized)
       const refreshInterval = setInterval(() => {
         fetchBookedSlots();
       }, 5000); // Every 5 seconds when popup is open (faster performance)
-      
+
       return () => clearInterval(refreshInterval);
     }
   }, [isOpen, selectedTheater, selectedDate]);
@@ -1309,29 +1361,29 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   useEffect(() => {
     if (selectedTheater && isOpen && realTheaterData.length > 0) {
       // Find the theater in real database data
-      const realTheater = realTheaterData.find(theater => 
-        (selectedTheater.name && theater.name === selectedTheater.name) || 
+      const realTheater = realTheaterData.find(theater =>
+        (selectedTheater.name && theater.name === selectedTheater.name) ||
         (selectedTheater.id && theater.theaterId === selectedTheater.id) ||
         (selectedTheater.name && theater.name.includes(selectedTheater.name.split(' ')[0]))
       );
-      
+
       // Check if decoration is compulsory for this theater (from database)
       const isDecorationCompulsory = realTheater?.decorationCompulsory === true;
-      
+
       console.log('🎨 Checking decoration compulsory:', {
         theaterName: selectedTheater.name,
         realTheater: realTheater?.name,
         decorationCompulsory: realTheater?.decorationCompulsory,
         isDecorationCompulsory
       });
-      
+
       if (isDecorationCompulsory && selectedServices['__decoration__'] !== 'Yes') {
         // Auto-set decoration dropdown to Yes for theaters with decorationCompulsory flag
         console.log('🎨 Auto-setting decoration to Yes for', selectedTheater.name);
-        
+
         // Set decoration dropdown to Yes
         const updatedServices: { [key: string]: 'Yes' | 'No' } = { '__decoration__': 'Yes' };
-        
+
         // Auto-enable all services with includeInDecoration
         allServices.forEach(service => {
           if (service.includeInDecoration) {
@@ -1341,7 +1393,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             updatedServices[service.name] = selectedServices[service.name] || 'No';
           }
         });
-        
+
         setSelectedServices(updatedServices);
       }
     }
@@ -1351,7 +1403,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   useEffect(() => {
     if (selectedTheater && isOpen) {
       const capacity = getTheaterCapacity();
-      
+
       // Only update if current numberOfPeople is less than minimum or if it's the default value (2)
       if (formData.numberOfPeople < capacity.min || formData.numberOfPeople === 2) {
         setFormData(prev => ({
@@ -1366,7 +1418,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   useEffect(() => {
     if (formData.occasion) {
       let personName = '';
-      
+
       // Only get the name from the specific field for the selected occasion
       switch (formData.occasion) {
         case 'Birthday Party':
@@ -1390,7 +1442,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           personName = formData.customCelebration || '';
           break;
       }
-      
+
       // Only update occasionPersonName if the specific field has a value
       if (personName) {
         setFormData(prev => ({ ...prev, occasionPersonName: personName }));
@@ -1413,12 +1465,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
     // Priority 1: Check real database theater data (MAIN SOURCE)
     if (realTheaterData.length > 0) {
-      const realTheater = realTheaterData.find(theater => 
-        (selectedTheater.name && theater.name === selectedTheater.name) || 
+      const realTheater = realTheaterData.find(theater =>
+        (selectedTheater.name && theater.name === selectedTheater.name) ||
         (selectedTheater.id && theater.theaterId === selectedTheater.id) ||
         (selectedTheater.name && theater.name.includes(selectedTheater.name.split(' ')[0])) // Match by first word (EROS, PHILIA, etc.)
       );
-      
+
       if (realTheater && realTheater.capacity && realTheater.capacity.min && realTheater.capacity.max) {
         return {
           min: realTheater.capacity.min,
@@ -1443,11 +1495,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     setFormData(prev => {
       // Get dynamic theater capacity
       const capacity = getTheaterCapacity();
-      
+
       // Calculate new value with proper min/max limits
       const currentValue = prev[field];
       let newValue;
-      
+
       if (action === 'increment') {
         newValue = Math.min(currentValue + 1, capacity.max);
       } else {
@@ -1462,39 +1514,36 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     });
   };
 
-  const handleItemSelection = (field: 'selectedCakes' | 'selectedDecorItems' | 'selectedGifts' | 'selectedMovies', itemName: string) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: prev[field].includes(itemName)
-        ? prev[field].filter(item => item !== itemName)
-        : [...prev[field], itemName]
-    }));
-  };
 
   // Handle movie selection - open movies modal
   const handleSelectMovies = () => {
-    
-    
+
+
     setIsMoviesModalOpen(true);
-    
+
   };
 
   // Handle movie selection from modal
   const handleMovieSelect = (movieTitle: string) => {
-    
-    
-    
+
+
+
     setFormData(prev => {
       const newFormData = {
         ...prev,
-        selectedMovies: [movieTitle], // Only one movie allowed
+        selectedMovies: [{
+          id: movieTitle.toLowerCase().replace(/\s+/g, '_'),
+          name: movieTitle,
+          price: 0, // Movies are free
+          quantity: 1
+        }], // Only one movie allowed
         wantMovies: 'Yes' as 'Yes' | 'No'
       };
-      
+
       return newFormData;
     });
-    
-    
+
+
     setIsMoviesModalOpen(false);
   };
 
@@ -1598,7 +1647,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         });
       }
     } catch (e) {
-      
+
       setCouponError('Unable to validate coupon');
       setAppliedDiscountType(null);
       setAppliedDiscountValue(null);
@@ -1631,14 +1680,14 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     if (formData.wantDecorItems === 'Yes' && formData.selectedDecorItems.length > 0) {
       // Add decoration fees from pricing.json
       const pricingDecorationFee = pricingData.decorationFees || 0;
-      
+
       // Add individual decoration items prices
       let itemsDecorationFee = 0;
       formData.selectedDecorItems.forEach(decorName => {
         const decor = decorOptions.find(d => d.name === decorName);
         if (decor) itemsDecorationFee += decor.price;
       });
-      
+
       return pricingDecorationFee + itemsDecorationFee;
     }
     return 0;
@@ -1701,7 +1750,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             <div className="booking-popup-overview-summary-section">
               <h5 className="booking-popup-overview-summary-section-title">Movies</h5>
               <div className="booking-popup-overview-summary-item">
-                <span>{formData.selectedMovies[0]}</span>
+                <span>{typeof formData.selectedMovies[0] === 'string' ? formData.selectedMovies[0] : formData.selectedMovies[0]?.name || 'Movie'}</span>
                 <span>Free</span>
               </div>
             </div>
@@ -1812,49 +1861,49 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       // Check if booking time is within 1 hour
       const isBookingTimeNear = () => {
         if (!selectedDate || !selectedTimeSlot) return false;
-        
+
         try {
           const now = new Date();
           const selectedDateObj = new Date(selectedDate);
-          
+
           // If selected date is not today, booking is allowed
           if (selectedDateObj.toDateString() !== now.toDateString()) {
             return false;
           }
-          
+
           // Parse the time slot to get start time
           const timeMatch = selectedTimeSlot.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
           if (!timeMatch) return false;
-          
+
           const [, hours, minutes, period] = timeMatch;
           let hour24 = parseInt(hours);
-          
+
           // Convert to 24-hour format
           if (period.toLowerCase() === 'pm' && hour24 !== 12) {
             hour24 += 12;
           } else if (period.toLowerCase() === 'am' && hour24 === 12) {
             hour24 = 0;
           }
-          
+
           const slotStartTime = new Date(now);
           slotStartTime.setHours(hour24, parseInt(minutes), 0, 0);
-          
+
           // Check if current time is within 1 hour of slot start time
           const oneHourBefore = new Date(slotStartTime.getTime() - (60 * 60 * 1000));
           return now.getTime() >= oneHourBefore.getTime();
         } catch (error) {
-          
+
           return false;
         }
       };
-      
+
       // Check if booking time is near
       if (isBookingTimeNear()) {
         setValidationMessage('Booking is not allowed within 1 hour of the selected time slot. Please select a different time.');
         setShowValidationPopup(true);
         return;
       }
-      
+
       // Final step - validate entire form before saving
       if (!validateForm()) {
         return; // Validation failed, popup is already shown
@@ -1928,7 +1977,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           setShowValidationPopup(true);
           return;
         }
-        
+
         // Validate decoration selection on Occasion tab
         if (!selectedServices['__decoration__']) {
           setValidationErrorName('Decoration Selection Required');
@@ -1962,7 +2011,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         const discountedTotal = getFinalTotal();
         const advancePayment = getPayableAmount(); // Use slot booking fee from pricing data
         const venuePayment = discountedTotal - advancePayment; // Remaining amount to be paid at venue
-        
+
         // Get theater base price
         const theaterBasePrice = (selectedTheater && selectedTheater.price)
           ? parseFloat(String(selectedTheater.price).replace(/[₹,\s]/g, ''))
@@ -1995,40 +2044,27 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           ...(formData.dateNightName && { dateNightName: formData.dateNightName }),
           ...(formData.customCelebration && { customCelebration: formData.customCelebration }),
           numberOfPeople: formData.numberOfPeople,
-          // Use real prices from fetched service options instead of static placeholders
-          selectedCakes: formData.selectedCakes.map((cakeName) => {
-            const cake = cakeOptions.find(c => c.name === cakeName);
-            return {
-              id: cake?.id || cakeName.toLowerCase().replace(/\s+/g, '-'),
-              name: cake?.name || cakeName,
-              price: Number(cake?.price ?? 0),
-              quantity: 1
-            };
-          }),
-          selectedDecorItems: formData.selectedDecorItems.map((decorName) => {
-            const decor = decorOptions.find(d => d.name === decorName);
-            return {
-              id: decor?.id || decorName.toLowerCase().replace(/\s+/g, '-'),
-              name: decor?.name || decorName,
-              price: Number(decor?.price ?? 0),
-              quantity: 1
-            };
-          }),
-          selectedGifts: formData.selectedGifts.map((giftName) => {
-            const gift = giftOptions.find(g => g.name === giftName);
-            return {
-              id: gift?.id || giftName.toLowerCase().replace(/\s+/g, '-'),
-              name: gift?.name || giftName,
-              price: Number(gift?.price ?? 0),
-              quantity: 1
-            };
-          }),
-          selectedMovies: formData.selectedMovies.map(movieTitle => ({
-            id: movieTitle.toLowerCase().replace(/\s+/g, '_'),
-            name: movieTitle,
-            price: 0,
-            quantity: 1
-          })),
+          
+          // 🔍 DEBUG: Log what items are being sent
+          ...(() => {
+            console.log('📦 [Booking] Items Before Sending:', {
+              wantCakes: formData.wantCakes,
+              wantDecorItems: formData.wantDecorItems,
+              wantGifts: formData.wantGifts,
+              wantMovies: formData.wantMovies,
+              selectedCakes: formData.selectedCakes,
+              selectedDecorItems: formData.selectedDecorItems,
+              selectedGifts: formData.selectedGifts,
+              selectedMovies: formData.selectedMovies
+            });
+            return {};
+          })(),
+
+          // Items already have prices from handleServiceItemToggle
+          selectedCakes: formData.selectedCakes,
+          selectedDecorItems: formData.selectedDecorItems,
+          selectedGifts: formData.selectedGifts,
+          selectedMovies: formData.selectedMovies,
           // Payment breakdown
           totalAmount: discountedTotal,
           advancePayment: advancePayment, // Amount paid now (₹600)
@@ -2050,17 +2086,18 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             const capacity = getTheaterCapacity();
             const extraGuests = Math.max(0, formData.numberOfPeople - capacity.min);
             return extraGuests * pricingData.extraGuestFee;
-          })()        };
+          })()
+        };
 
-        
-        
+
+
         // Debug occasion data specifically
-        
-        
-        
-        
+
+
+
+
         // Booking data prepared for API
-        
+
         // Anniversary data processing
 
         // Decide endpoint/body for create vs edit
@@ -2091,10 +2128,15 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         const result = await response.json();
         console.log('📥 API Response:', result);
 
+        if (!response.ok) {
+          console.error('❌ HTTP Error:', response.status, response.statusText);
+          console.error('❌ Error Details:', result);
+        }
+
         if (result.success) {
-          
-          
-          
+
+
+
 
           // Show success animation instead of closing
           setBookingResult({
@@ -2140,12 +2182,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     if (e && e.target !== e.currentTarget) {
       return;
     }
-    
+
     // Prevent multiple confirmation popups
     if (isClosing || showCloseConfirmation) {
       return;
     }
-    
+
     // Set closing state and show confirmation popup
     setIsClosing(true);
     setShowCloseConfirmation(true);
@@ -2156,7 +2198,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     if (isClosing || showCloseConfirmation) {
       return;
     }
-    
+
     // Set closing state and show confirmation popup
     setIsClosing(true);
     setShowCloseConfirmation(true);
@@ -2180,7 +2222,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             time: selectedTimeSlot || '',
             occasion: formData.occasion
           });
-          
+
           // Send incomplete booking email for edited data
           try {
             const response = await fetch('/api/email/incomplete', {
@@ -2224,37 +2266,37 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
             const result = await response.json();
             if (result.success) {
-              
-              
-              
+
+
+
             }
           } catch (error) {
-            
+
           }
         }
       } else {
         // No changes made during editing - booking remains completed
-        
+
       }
     } else {
       // Not in editing mode - check if user has entered data but not completed booking
       const hasData = formData.bookingName || formData.emailAddress || formData.whatsappNumber || formData.occasion;
 
-        if (hasData && formData.emailAddress) {
-          // Log the data being sent
-          console.log('📧 Sending incomplete booking data:', {
-            name: formData.bookingName,
-            email: formData.emailAddress,
-            phone: formData.whatsappNumber,
-            theaterName: selectedTheater?.name || '',
-            date: selectedDate || '',
-            time: selectedTimeSlot || '',
-            occasion: formData.occasion
-          });
-          
-          // Send incomplete booking email
-          try {
-            const response = await fetch('/api/email/incomplete', {
+      if (hasData && formData.emailAddress) {
+        // Log the data being sent
+        console.log('📧 Sending incomplete booking data:', {
+          name: formData.bookingName,
+          email: formData.emailAddress,
+          phone: formData.whatsappNumber,
+          theaterName: selectedTheater?.name || '',
+          date: selectedDate || '',
+          time: selectedTimeSlot || '',
+          occasion: formData.occasion
+        });
+
+        // Send incomplete booking email
+        try {
+          const response = await fetch('/api/email/incomplete', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -2295,12 +2337,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
           const result = await response.json();
           if (result.success) {
-            
-            
-            
+
+
+
           }
         } catch (error) {
-          
+
         }
       }
     }
@@ -2314,11 +2356,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     document.body.classList.remove('popup-open');
     // Check editing state BEFORE resetting (resetForm will set isEditingBooking to false)
     const wasEditingBooking = isEditingBooking;
-    
+
     // Reset form when closing popup
     resetForm();
     onClose();
-    
+
     // Navigate to theater page when popup is closed (only if not editing from admin)
     if (!wasEditingBooking) {
       router.push('/theater');
@@ -2393,7 +2435,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
               </div>
               <div className="booking-popup-title-section">
                 <h1 className="booking-popup-title">Book Your Show</h1>
-                
+
               </div>
             </div>
             <button className="booking-popup-close-btn" onClick={handleCloseButtonClick}>
@@ -2409,7 +2451,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
               {selectedTheater ? selectedTheater.name : 'EROS (COUPLES) Theatre'}
             </h2>
             <div className="booking-popup-meta">
-              <div 
+              <div
                 className="booking-popup-meta-item booking-popup-date-selector-meta"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="booking-popup-meta-icon">
@@ -2480,7 +2522,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                       <div className="booking-popup-field">
                         <label>Number of People *</label>
                         <div className="booking-popup-number">
-                          <button 
+                          <button
                             onClick={() => handleNumberChange('numberOfPeople', 'decrement')}
                             disabled={formData.numberOfPeople <= 1}
                           >
@@ -2499,7 +2541,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                         </div>
                         {(() => {
                           const capacity = getTheaterCapacity();
-                          
+
                           // Show capacity info and warnings
                           if (formData.numberOfPeople >= capacity.max) {
                             return (
@@ -2584,10 +2626,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                   {formData.selectedMovies.length > 0 ? (
                                     <>
                                       {(() => {
-                                        const movieName = formData.selectedMovies[0];
-                                        if (!movieName || typeof movieName !== 'string') {
-                                          return 'Movie Selected';
-                                        }
+                                        const movie = formData.selectedMovies[0];
+                                        const movieName = typeof movie === 'string' ? movie : movie?.name || 'Movie';
                                         const words = movieName.split(' ');
                                         if (words.length > 2) {
                                           return words.slice(0, 2).join(' ') + '...';
@@ -2615,12 +2655,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                         {/* Decoration Dropdown - Only show if there are services with includeInDecoration */}
                         {allServices.some(service => service.includeInDecoration) && (() => {
                           // Check if decoration is compulsory for selected theater
-                          const realTheater = realTheaterData.find(theater => 
-                            (selectedTheater?.name && theater.name === selectedTheater.name) || 
+                          const realTheater = realTheaterData.find(theater =>
+                            (selectedTheater?.name && theater.name === selectedTheater.name) ||
                             (selectedTheater?.id && theater.theaterId === selectedTheater.id)
                           );
                           const isDecorationCompulsory = realTheater?.decorationCompulsory === true;
-                          
+
                           return (
                             <div className="booking-popup-field">
                               <label>
@@ -2632,9 +2672,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                 onChange={(e) => {
                                   const value = e.target.value as 'Yes' | 'No' | '';
                                   if (!value) return; // Don't process empty selection
-                                  
+
                                   console.log(`🎨 Decoration selection changed: ${value}`);
-                                  
+
                                   // If decoration is selected, automatically enable services with includeInDecoration
                                   if (value === 'Yes') {
                                     const updatedServices: { [key: string]: 'Yes' | 'No' } = { '__decoration__': value };
@@ -2672,9 +2712,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                           );
                         })()}
 
-                        {/* Dynamic Service Selection Dropdowns - Only for services NOT included in decoration */}
+                        {/* Dynamic Service Selection Dropdowns - Only for services NOT included in decoration AND NOT compulsory */}
                         {allServices
-                          .filter(service => !service.includeInDecoration)
+                          .filter(service => !service.includeInDecoration && !service.compulsory)
                           .map((service) => (
                             <div key={service.serviceId || service.name} className="booking-popup-field">
                               <label>Want {service.name}?</label>
@@ -2688,6 +2728,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                               </select>
                             </div>
                           ))}
+                        
+                        {/* Compulsory Services - Hidden from Overview, auto-selected in background */}
+                        {/* No UI display for compulsory services - they are silently included */}
 
 
                       </div>
@@ -2735,7 +2778,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                             <div className="booking-popup-overview-summary-section">
                               <h5 className="booking-popup-overview-summary-section-title">Movies</h5>
                               <div className="booking-popup-overview-summary-item">
-                                <span>{formData.selectedMovies[0]}</span>
+                                <span>{typeof formData.selectedMovies[0] === 'string' ? formData.selectedMovies[0] : formData.selectedMovies[0]?.name || 'Movie'}</span>
                                 <span>Free</span>
                               </div>
                             </div>
@@ -2796,7 +2839,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                   <span>-₹{appliedDiscount.toFixed(2)}</span>
                                 </div>
                               )}
-                             
+
                             </div>
 
                             {/* Divider Line */}
@@ -2819,13 +2862,13 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                 <span>₹{getFinalTotal().toFixed(2)}</span>
                               </div>
                             </div>
-                             
-                            </div>
+
                           </div>
                         </div>
                       </div>
                     </div>
-                  
+                  </div>
+
                 )}
 
                 {activeTab === 'Occasion' && (
@@ -2860,9 +2903,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                     ) : (
                       <div className="booking-popup-selected-occasion">
                         <div className="booking-popup-occasion-header">
-                            <div className="booking-popup-occasion-selected">
-                              <h4>{formData.occasion}</h4>
-                            </div>
+                          <div className="booking-popup-occasion-selected">
+                            <h4>{formData.occasion}</h4>
+                          </div>
                           <button
                             onClick={() => {
                               setFormData(prev => ({ ...prev, occasion: '', occasionData: {} }));
@@ -2879,9 +2922,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                             selectedOccasionData.requiredFields.map((fieldKey: string) => {
                               const fieldLabel = selectedOccasionData.fieldLabels?.[fieldKey] || fieldKey;
                               const currentValue = formData.occasionData?.[fieldKey] || '';
-                              
+
                               console.log('📋 Rendering field:', { fieldKey, fieldLabel, currentValue, selectedOccasionData });
-                              
+
                               // Special handling for gender fields
                               if (fieldKey.toLowerCase().includes('gender')) {
                                 return (
@@ -2948,7 +2991,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                     console.log(`🎨 Rendering service tab: ${service.name}`);
                     console.log(`🎨 Service has ${service.items?.length || 0} items`);
                     console.log(`🎨 Service items:`, service.items);
-                    
+
                     return (
                       <div key={service.serviceId || service.name} className="booking-popup-section">
                         <h3 className="booking-popup-section-title">
@@ -2963,9 +3006,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                               const itemRating = Number(item.rating ?? 4.5);
                               const itemImage = item.image || item.imageUrl || item.emoji || '🎁';
                               const isSelected = isServiceItemSelected(service.name, itemName);
-                              
+
                               console.log(`  🎁 Item: ${itemName}, Price: ₹${itemPrice}, Image: ${itemImage}`);
-                              
+
                               return (
                                 <div
                                   key={item.id || item.itemId || itemName}
@@ -3116,15 +3159,15 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                 {(() => {
                   const isServiceTab = allServices.some(s => s.name === activeTab);
                   const hasNoItemsSelected = isServiceTab && (!selectedServiceItems[activeTab] || selectedServiceItems[activeTab].length === 0);
-                  
+
                   // Check if decoration is compulsory for this theater
                   const realTheater = realTheaterData.find(
                     (theater) =>
-                      (selectedTheater?.name && theater.name === selectedTheater.name) || 
+                      (selectedTheater?.name && theater.name === selectedTheater.name) ||
                       (selectedTheater?.id && theater.theaterId === selectedTheater.id)
                   );
                   const isDecorationCompulsory = realTheater?.decorationCompulsory === true;
-                  
+
                   // If decoration is compulsory, don't show skip button for service tabs
                   // Show skip button only if: service tab, no items selected, decoration NOT compulsory, not last tab
                   if (hasNoItemsSelected && !isDecorationCompulsory && activeTab !== tabs[tabs.length - 1]) {
@@ -3140,10 +3183,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                       </div>
                     );
                   }
-                  
+
                   return (
-                    <button 
-                      onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep} 
+                    <button
+                      onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep}
                       className="booking-popup-btn"
                       disabled={activeTab === tabs[tabs.length - 1] && isSubmittingBooking}
                     >
@@ -3208,6 +3251,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                       clearTimeout(autoCloseTimerRef.current);
                       autoCloseTimerRef.current = null;
                     }
+                    // Reset form and states before opening new booking
+                    setIsBookingSuccessful(false);
+                    setBookingResult(null);
+                    resetForm();
                     onClose();
                     // Open new booking popup immediately
                     openBookingPopup();
@@ -3224,7 +3271,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                     }
                     // Check editing state BEFORE resetting (resetForm will set isEditingBooking to false)
                     const wasEditingBooking = isEditingBooking;
-                    
+
                     // Reset all booking states and close popup completely
                     setIsBookingSuccessful(false);
                     setBookingResult(null);
@@ -3330,7 +3377,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                     <Phone className="w-6 h-6" />
                   </span>
                   <div className="booking-popup-edit-request-btn-content">
-                  <span className="booking-popup-edit-request-btn-title">Call</span>
+                    <span className="booking-popup-edit-request-btn-title">Call</span>
                   </div>
                 </button>
 
@@ -3437,7 +3484,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           </div>
         )}
 
-    
+
 
         {/* Date Selection Popup */}
         <GlobalDatePicker
@@ -6377,7 +6424,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
               <p className="text-gray-600 mb-4">
                 Please complete your payment to confirm the booking.
               </p>
-              
+
               <div className="bg-gray-50 p-4 rounded-lg mb-4">
                 <div className="flex justify-between items-center mb-2">
                   <span className="font-medium">Theater:</span>
@@ -6473,11 +6520,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       <MoviesModal
         isOpen={isMoviesModalOpen}
         onClose={() => {
-          
+
           setIsMoviesModalOpen(false);
         }}
         onMovieSelect={handleMovieSelect}
-        selectedMovies={formData.selectedMovies}
+        selectedMovies={formData.selectedMovies.map(m => typeof m === 'string' ? m : m.name)}
       />
 
       {/* Toast Notifications */}

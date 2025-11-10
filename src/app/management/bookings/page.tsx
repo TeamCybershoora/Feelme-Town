@@ -805,18 +805,65 @@ export default function BookingsPage() {
     try {
       setPaymentUpdatingId(booking.id);
 
+      // Get current user info (admin or staff) - EXACT SAME LOGIC AS DASHBOARD
+      let paidBy = 'Administrator';
+      let staffName = null;
+      let userId = null;
+
+      // Check if logged in as staff
+      const staffUser = localStorage.getItem('staffUser');
+      console.log('🔍 [Payment] staffUser from localStorage:', staffUser);
+      
+      if (staffUser) {
+        try {
+          const staffData = JSON.parse(staffUser);
+          console.log('🔍 [Payment] Parsed staffData:', staffData);
+          
+          if (staffData.role === 'staff') {
+            paidBy = 'Staff';
+            staffName = staffData.name;
+            userId = staffData.userId;
+            console.log('✅ [Payment] Staff detected:', { paidBy, staffName, userId });
+          } else {
+            console.log('⚠️ [Payment] Not a staff role:', staffData.role);
+          }
+        } catch (e) {
+          console.error('❌ [Payment] Failed to parse staff user data:', e);
+        }
+      } else {
+        console.log('ℹ️ [Payment] No staffUser in localStorage - using Administrator');
+      }
+
+      // Prepare request body - only include staff fields if staff marked it
+      const requestBody: any = {
+        bookingId,
+        paymentStatus: targetStatus,
+        venuePaymentMethod: selectedPaymentMethod,
+        paidBy: paidBy,
+        paidAt: new Date().toISOString(),
+        sendInvoice: targetStatus === 'paid',
+        isManualBooking: (booking.bookingType || '').toLowerCase() === 'manual'
+      };
+
+      // Add staff fields - null for Admin, actual values for Staff
+      if (paidBy === 'Staff' && userId) {
+        requestBody.staffName = staffName;
+        requestBody.userId = userId;
+        console.log('✅ [Payment] Adding staff fields to request:', { staffName, userId });
+      } else {
+        requestBody.staffName = null;
+        requestBody.userId = null;
+        console.log('ℹ️ [Payment] Adding null staff fields (Administrator)');
+      }
+
+      console.log('📤 [Payment] Final request body:', requestBody);
+
       const response = await fetch('/api/admin/update-booking', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          bookingId,
-          paymentStatus: targetStatus,
-          venuePaymentMethod: selectedPaymentMethod,
-          sendInvoice: targetStatus === 'paid',
-          isManualBooking: (booking.bookingType || '').toLowerCase() === 'manual'
-        })
+        body: JSON.stringify(requestBody)
       });
 
       const data = await response.json();

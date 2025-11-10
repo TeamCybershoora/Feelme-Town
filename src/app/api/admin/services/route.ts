@@ -98,12 +98,20 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, items, isActive } = body;
+    const { name, items, isActive, includeInDecoration, compulsory } = body;
+
+    console.log('🔄 PUT /api/admin/services - Received body:', body);
+    console.log('🔍 includeInDecoration value:', includeInDecoration);
+    console.log('🔍 compulsory value:', compulsory);
 
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
     if (items !== undefined) updateData.items = items;
     if (isActive !== undefined) updateData.isActive = isActive;
+    if (includeInDecoration !== undefined) updateData.includeInDecoration = includeInDecoration;
+    if (compulsory !== undefined) updateData.compulsory = compulsory;
+    
+    console.log('📦 updateData being sent to database:', updateData);
 
     const result = await database.updateService(id, updateData);
 

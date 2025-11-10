@@ -17,6 +17,7 @@ interface Service {
   items: ServiceItem[];
   isActive: boolean;
   includeInDecoration?: boolean;
+  compulsory?: boolean;
   createdAt?: Date;
 }
 
@@ -60,7 +61,15 @@ export default function ServicesPage() {
       
       if (data.success) {
         console.log('📦 Admin fetched all services:', data.services);
-        setServices(data.services);
+        
+        // Normalize services to ensure includeInDecoration and compulsory fields exist
+        const normalizedServices = data.services.map((service: any) => ({
+          ...service,
+          includeInDecoration: service.includeInDecoration ?? false,
+          compulsory: service.compulsory ?? false
+        }));
+        
+        setServices(normalizedServices);
       }
     } catch (error) {
       
@@ -388,6 +397,67 @@ export default function ServicesPage() {
       );
       showToast('Failed to update service', 'error');
     }
+};
+
+  const handleToggleCompulsory = async (service: Service) => {
+    try {
+      // Handle undefined by treating it as false
+      const currentValue = service.compulsory ?? false;
+      const newValue = !currentValue;
+      console.log(`🔒 Toggling compulsory for ${service.name}:`, {
+        currentValue: currentValue,
+        newValue: newValue,
+        serviceId: service._id
+      });
+      
+      // Optimistic UI update
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, compulsory: newValue }
+            : s
+        )
+      );
+      
+      console.log('🔒 Sending request to:', `/api/admin/services?id=${service._id}`);
+      console.log('🔒 Request body:', { compulsory: newValue });
+      
+      const response = await fetch(`/api/admin/services?id=${service._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ compulsory: newValue })
+      });
+
+      console.log('🔒 Response status:', response.status);
+      const data = await response.json();
+      console.log('🔒 Toggle response:', data);
+
+      if (data.success) {
+        showToast(`Service ${newValue ? 'marked as' : 'removed from'} compulsory`, 'success');
+        fetchServices(); // Refresh to ensure sync
+      } else {
+        // Revert on error
+        setServices(prevServices => 
+          prevServices.map(s => 
+            s._id === service._id 
+              ? { ...s, compulsory: !newValue }
+              : s
+          )
+        );
+        showToast(data.error || 'Failed to update service', 'error');
+      }
+    } catch (error) {
+      console.error('🔒 Toggle error:', error);
+      // Revert on error
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, compulsory: service.compulsory }
+            : s
+        )
+      );
+      showToast('Failed to update service', 'error');
+    }
   };
 
   const handleToggleActive = async (service: Service) => {
@@ -527,6 +597,14 @@ export default function ServicesPage() {
                     onChange={() => handleToggleDecoration(service)}
                   />
                   <span className="toggle-label">Include in Decoration</span>
+                </label>
+                <label className="toggle-container">
+                  <input
+                    type="checkbox"
+                    checked={service.compulsory || false}
+                    onChange={() => handleToggleCompulsory(service)}
+                  />
+                  <span className="toggle-label">Compulsory</span>
                 </label>
                 <button 
                   className="expand-btn" 
