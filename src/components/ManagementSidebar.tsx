@@ -111,6 +111,13 @@ export default function ManagementSidebar({ isOpen }: ManagementSidebarProps) {
       badge: 0
     },
     {
+      id: 'invoices',
+      label: 'Invoices',
+      icon: Calendar,
+      path: '/management/invoices',
+      badge: null
+    },
+    {
       id: 'coupons',
       label: 'Coupons',
       icon: Tag,

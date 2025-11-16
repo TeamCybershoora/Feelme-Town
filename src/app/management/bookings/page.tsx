@@ -1733,24 +1733,26 @@ export default function BookingsPage() {
       `}</style>
 
       {/* Booking Details Popup */}
-      <BookingDetailsPopup
-        isOpen={isViewModalOpen && !isEditMode}
-        onClose={handleCloseModal}
-        booking={selectedBooking}
-        occasions={occasionOptions}
-        hidePaymentSummary={true}
-        onEdit={(booking) => {
-          // Handle edit functionality
-          sessionStorage.setItem('editingBooking', JSON.stringify({
-            bookingId: booking.id || booking.bookingId || booking._id,
-            isEditing: true,
-            isAdminEdit: true,
-            ...booking
-          }));
-          handleCloseModal();
-        }}
-        showEditButton={true}
-      />
+      {isViewModalOpen && !isEditMode && selectedBooking && (
+        <BookingDetailsPopup
+          isOpen={true}
+          onClose={handleCloseModal}
+          booking={selectedBooking}
+          occasions={occasionOptions}
+          hidePaymentSummary={false}
+          onEdit={(booking) => {
+            // Handle edit functionality
+            sessionStorage.setItem('editingBooking', JSON.stringify({
+              bookingId: booking.id || booking.bookingId || booking._id,
+              isEditing: true,
+              isAdminEdit: true,
+              ...booking
+            }));
+            handleCloseModal();
+          }}
+          showEditButton={true}
+        />
+      )}
 
       {/* Edit Modal - Keep the existing edit functionality */}
       {selectedBooking && isViewModalOpen && isEditMode && (

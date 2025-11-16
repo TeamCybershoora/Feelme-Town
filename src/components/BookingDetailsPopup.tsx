@@ -39,9 +39,8 @@ interface Booking {
   valentineName?: string;
   customCelebration?: string;
   selectedMovies?: string[];
-  selectedCakes?: string[];
-  selectedDecorItems?: string[];
-  selectedGifts?: string[];
+  // Dynamic service items (can be any service name)
+  [key: string]: any;
   occasionData?: { [key: string]: any };
   createdBy?: {
     type: 'admin' | 'staff' | 'customer';
@@ -51,8 +50,6 @@ interface Booking {
   };
   bookingDate?: string;
   createdAtIST?: string;
-  // Dynamic occasion fields - any field from database
-  [key: string]: any;
 }
 
 interface BookingDetailsPopupProps {
@@ -152,7 +149,17 @@ export default function BookingDetailsPopup({
                 </div>
                 <div className="detail-item">
                   <span className="label">Number of People:</span>
-                  <span className="value">{booking.numberOfPeople || 2}</span>
+                  <span className="value">
+                    {booking.numberOfPeople}
+                    {(() => {
+                      // Show theater base capacity if available
+                      const baseCapacity = booking.baseCapacity || booking.theaterCapacity?.min;
+                      if (baseCapacity) {
+                        return ` (Base Capacity: ${baseCapacity})`;
+                      }
+                      return '';
+                    })()}
+                  </span>
                 </div>
                 {/* Show Created By information for manual bookings */}
                 {booking.status === 'manual' && booking.createdBy && (
@@ -228,8 +235,7 @@ export default function BookingDetailsPopup({
                       const basicFields = [
                         'id', 'customerName', 'email', 'phone', 'theater', 'theaterName', 
                         'date', 'time', 'status', 'amount', 'occasion', 'selectedMovies', 
-                        'selectedCakes', 'selectedDecorItems', 'selectedGifts', 'bookingDate',
-                        'bookingType', 'createdAt', 'updatedAt', '_id', 'bookingId', 'name',
+                        'bookingDate', 'bookingType', 'createdAt', 'updatedAt', '_id', 'bookingId', 'name',
                         'totalAmount', 'createdBy', 'staffId', 'staffName', 'notes', 
                         'isManualBooking', 'expiredAt'
                       ];
@@ -272,8 +278,7 @@ export default function BookingDetailsPopup({
                       const basicFields = [
                         'id', 'customerName', 'email', 'phone', 'theater', 'theaterName', 
                         'date', 'time', 'status', 'amount', 'occasion', 'selectedMovies', 
-                        'selectedCakes', 'selectedDecorItems', 'selectedGifts', 'bookingDate',
-                        'bookingType', 'createdAt', 'updatedAt', '_id'
+                        'bookingDate', 'bookingType', 'createdAt', 'updatedAt', '_id'
                       ];
                       
                       if (basicFields.includes(key) || key.endsWith('_label') || key.endsWith('_value')) {
@@ -321,8 +326,7 @@ export default function BookingDetailsPopup({
                     const basicFields = [
                       'id', 'customerName', 'email', 'phone', 'theater', 'theaterName', 
                       'date', 'time', 'status', 'amount', 'occasion', 'selectedMovies', 
-                      'selectedCakes', 'selectedDecorItems', 'selectedGifts', 'bookingDate',
-                      'bookingType', 'createdAt', 'updatedAt', '_id', 'bookingId', 'name',
+                      'bookingDate', 'bookingType', 'createdAt', 'updatedAt', '_id', 'bookingId', 'name',
                       'totalAmount', 'createdBy', 'staffId', 'staffName', 'notes', 
                       'isManualBooking', 'expiredAt', 'occasionData'
                     ];
@@ -364,20 +368,28 @@ export default function BookingDetailsPopup({
               </div>
             )}
 
-            {/* Selected Items (conditional) */}
-            {(
-              (Array.isArray(booking.selectedMovies) && booking.selectedMovies.length > 0) ||
-              (Array.isArray(booking.selectedCakes) && booking.selectedCakes.length > 0) ||
-              (Array.isArray(booking.selectedDecorItems) && booking.selectedDecorItems.length > 0) ||
-              (Array.isArray(booking.selectedGifts) && booking.selectedGifts.length > 0)
-            ) && (
+            {/* Selected Items (conditional) - Dynamic check for any service items */}
+            {(() => {
+              // Check for movies
+              const hasMovies = Array.isArray(booking.selectedMovies) && booking.selectedMovies.length > 0;
+              
+              // Check for any dynamic service items (fields starting with "selected")
+              const hasDynamicItems = Object.keys(booking).some(key => 
+                key.startsWith('selected') && 
+                key !== 'selectedMovies' && 
+                Array.isArray(booking[key]) && 
+                booking[key].length > 0
+              );
+              
+              return hasMovies || hasDynamicItems;
+            })() && (
               <div className="detail-section">
                 <h4>Selected Items</h4>
                 <div className="items-container">
                   {/* Movies Section */}
                   {Array.isArray(booking.selectedMovies) && booking.selectedMovies.length > 0 && (
                     <div className="items-category">
-                      <h5 className="category-title">🎬 Movies</h5>
+                      <h5 className="category-title">Movies</h5>
                       <div className="items-list">
                         {booking.selectedMovies.map((movie: any, index: number) => {
                           // Extract full movie name from different possible formats
@@ -425,126 +437,61 @@ export default function BookingDetailsPopup({
                     </div>
                   )}
 
-                  {/* Cakes Section */}
-                  {Array.isArray(booking.selectedCakes) && booking.selectedCakes.length > 0 && (
-                    <div className="items-category">
-                      <h5 className="category-title">🎂 Cakes</h5>
-                      <div className="items-list">
-                        {booking.selectedCakes.map((cake: any, index: number) => {
-                          const cakeName = typeof cake === 'string' ? cake : (cake?.name ?? cake?.title ?? cake?.id ?? 'Unknown Cake');
-                          const cakePrice = typeof cake === 'object' ? cake?.price : 0;
-                          const cakeQuantity = typeof cake === 'object' ? cake?.quantity : 1;
-                          
-                          return (
-                            <div key={index} className="item-card">
-                              <div className="item-info">
-                                <span className="item-name">{cakeName}</span>
-                                {typeof cake === 'object' && (
-                                  <div className="item-details">
-                                    <span className="item-quantity">Qty: {cakeQuantity}</span>
-                                    <span className="item-price">₹{cakePrice?.toLocaleString() || 0}</span>
+                  {/* Dynamic Service Items Sections */}
+                  {Object.keys(booking)
+                    .filter(key => 
+                      key.startsWith('selected') && 
+                      key !== 'selectedMovies' && 
+                      Array.isArray(booking[key]) && 
+                      booking[key].length > 0
+                    )
+                    .map(serviceKey => {
+                      const serviceName = serviceKey.replace('selected', '');
+                      const serviceItems = booking[serviceKey];
+                      
+                      return (
+                        <div key={serviceKey} className="items-category">
+                          <h5 className="category-title">{serviceName}</h5>
+                          <div className="items-list">
+                            {serviceItems.map((item: any, index: number) => {
+                              const itemName = typeof item === 'string' ? item : (item?.name ?? item?.title ?? item?.id ?? `Unknown ${serviceName}`);
+                              const itemPrice = typeof item === 'object' ? item?.price : 0;
+                              const itemQuantity = typeof item === 'object' ? item?.quantity : 1;
+                              
+                              return (
+                                <div key={index} className="item-card">
+                                  <div className="item-info">
+                                    <span className="item-name">{itemName}</span>
+                                    {typeof item === 'object' && (
+                                      <div className="item-details">
+                                        <span className="item-quantity">Qty: {itemQuantity}</span>
+                                        <span className="item-price">₹{itemPrice?.toLocaleString() || 0}</span>
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Decoration Items Section */}
-                  {Array.isArray(booking.selectedDecorItems) && booking.selectedDecorItems.length > 0 && (
-                    <div className="items-category">
-                      <h5 className="category-title">🎨 Decoration Items</h5>
-                      <div className="items-list">
-                        {booking.selectedDecorItems.map((decor: any, index: number) => {
-                          const decorName = typeof decor === 'string' ? decor : (decor?.name ?? decor?.title ?? decor?.id ?? 'Unknown Decoration');
-                          const decorPrice = typeof decor === 'object' ? decor?.price : 0;
-                          const decorQuantity = typeof decor === 'object' ? decor?.quantity : 1;
-                          
-                          return (
-                            <div key={index} className="item-card">
-                              <div className="item-info">
-                                <span className="item-name">{decorName}</span>
-                                {typeof decor === 'object' && (
-                                  <div className="item-details">
-                                    <span className="item-quantity">Qty: {decorQuantity}</span>
-                                    <span className="item-price">₹{decorPrice?.toLocaleString() || 0}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Gifts Section */}
-                  {Array.isArray(booking.selectedGifts) && booking.selectedGifts.length > 0 && (
-                    <div className="items-category">
-                      <h5 className="category-title">🎁 Gifts</h5>
-                      <div className="items-list">
-                        {booking.selectedGifts.map((gift: any, index: number) => {
-                          const giftName = typeof gift === 'string' ? gift : (gift?.name ?? gift?.title ?? gift?.id ?? 'Unknown Gift');
-                          const giftPrice = typeof gift === 'object' ? gift?.price : 0;
-                          const giftQuantity = typeof gift === 'object' ? gift?.quantity : 1;
-                          
-                          return (
-                            <div key={index} className="item-card">
-                              <div className="item-info">
-                                <span className="item-name">{giftName}</span>
-                                {typeof gift === 'object' && (
-                                  <div className="item-details">
-                                    <span className="item-quantity">Qty: {giftQuantity}</span>
-                                    <span className="item-price">₹{giftPrice?.toLocaleString() || 0}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })
+                  }
 
                   {/* Items Total */}
                   {(() => {
                     let totalItemsPrice = 0;
                     
-                    // Calculate total from all items
-                    if (Array.isArray(booking.selectedMovies)) {
-                      booking.selectedMovies.forEach((movie: any) => {
-                        if (typeof movie === 'object' && movie?.price && movie?.quantity) {
-                          totalItemsPrice += movie.price * movie.quantity;
-                        }
-                      });
-                    }
-                    
-                    if (Array.isArray(booking.selectedCakes)) {
-                      booking.selectedCakes.forEach((cake: any) => {
-                        if (typeof cake === 'object' && cake?.price && cake?.quantity) {
-                          totalItemsPrice += cake.price * cake.quantity;
-                        }
-                      });
-                    }
-                    
-                    if (Array.isArray(booking.selectedDecorItems)) {
-                      booking.selectedDecorItems.forEach((decor: any) => {
-                        if (typeof decor === 'object' && decor?.price && decor?.quantity) {
-                          totalItemsPrice += decor.price * decor.quantity;
-                        }
-                      });
-                    }
-                    
-                    if (Array.isArray(booking.selectedGifts)) {
-                      booking.selectedGifts.forEach((gift: any) => {
-                        if (typeof gift === 'object' && gift?.price && gift?.quantity) {
-                          totalItemsPrice += gift.price * gift.quantity;
-                        }
-                      });
-                    }
+                    // Calculate total from all items dynamically
+                    Object.keys(booking).forEach(key => {
+                      if (key.startsWith('selected') && Array.isArray(booking[key])) {
+                        booking[key].forEach((item: any) => {
+                          if (typeof item === 'object' && item?.price && item?.quantity) {
+                            totalItemsPrice += item.price * item.quantity;
+                          }
+                        });
+                      }
+                    });
                     
                     if (totalItemsPrice > 0) {
                       return (
@@ -603,7 +550,9 @@ export default function BookingDetailsPopup({
                   };
                   
                   const capacity = getTheaterCapacity(booking.theater || booking.theaterName || '');
-                  const extraGuests = storedExtraGuestsCount !== undefined ? storedExtraGuestsCount : Math.max(0, numberOfPeople - capacity.min);
+                  // Use stored baseCapacity if available, otherwise calculate
+                  const baseCapacity = booking.baseCapacity || booking.theaterCapacity?.min || capacity.min;
+                  const extraGuests = storedExtraGuestsCount !== undefined ? storedExtraGuestsCount : Math.max(0, numberOfPeople - baseCapacity);
                   const extraGuestCharges = storedExtraGuestCharges || (extraGuests * extraGuestFee);
                   
                   if (extraGuests > 0) {
@@ -619,7 +568,7 @@ export default function BookingDetailsPopup({
                     return (
                       <div className="detail-item">
                         <span className="label">Price of Guests:</span>
-                        <span className="value">No extra guests (Base capacity: {capacity.min})</span>
+                        <span className="value">No extra guests (Base capacity: {booking.baseCapacity || booking.theaterCapacity?.min || capacity.min})</span>
                       </div>
                     );
                   }

@@ -76,6 +76,8 @@ export async function GET(
         advancePayment: booking.advancePayment,
         venuePayment: booking.venuePayment,
         status: booking.status || 'completed',
+        paymentStatus: booking.paymentStatus || booking.payment_status || 'pending',
+        invoiceDriveUrl: booking.invoiceDriveUrl || null,
         createdAt: booking.createdAt
       }
     }, { status: 200 });

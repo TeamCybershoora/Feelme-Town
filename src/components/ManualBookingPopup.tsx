@@ -424,15 +424,24 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         venuePayment,
         appliedCouponCode: appliedCouponCode || undefined,
         couponDiscount: appliedDiscount || 0,
+        // Persist Decoration choice from Overview
+        wantDecorItems: formData.wantDecorItems,
         status: isManualMode ? 'manual' : 'pending',
         paymentMode: 'pay_at_venue',
-        // Store pricing data used at time of booking
+        // Store pricing snapshot used at time of booking (for accurate invoices)
         pricingData: {
+          id: (pricingData as any).id || undefined,
+          name: (pricingData as any).name || undefined,
           slotBookingFee: pricingData.slotBookingFee,
           extraGuestFee: pricingData.extraGuestFee,
           convenienceFee: pricingData.convenienceFee,
+          decorationFees: (pricingData as any).decorationFees || 0,
           theaterBasePrice: theaterBasePrice
         },
+        // Store applied decoration fee if decoration is selected
+        decorationAppliedFee: (formData.wantDecorItems === 'Yes' && formData.selectedDecorItems.length > 0)
+          ? ((pricingData as any).decorationFees || 0)
+          : 0,
         // Store calculated guest charges for easy reference
         extraGuestCharges: (() => {
           const capacity = getTheaterCapacity();

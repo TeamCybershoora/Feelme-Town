@@ -8,6 +8,7 @@ interface ServiceItem {
   name: string;
   imageUrl: string;
   price?: number;
+  showTag?: boolean; // Individual item tag toggle
 }
 
 interface Service {
@@ -18,6 +19,8 @@ interface Service {
   isActive: boolean;
   includeInDecoration?: boolean;
   compulsory?: boolean;
+  itemTagName?: string; // Name for the tag (e.g., "Popular", "Recommended", "Bestseller")
+  itemTagEnabled?: boolean; // Whether to show tags on items
   createdAt?: Date;
 }
 
@@ -30,7 +33,7 @@ export default function ServicesPage() {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; type?: 'service' | 'item'; serviceId?: string; service?: Service; itemId?: string }>({ show: false });
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('active');
   
   const [serviceName, setServiceName] = useState('');
   const [itemName, setItemName] = useState('');
@@ -38,6 +41,9 @@ export default function ServicesPage() {
   const [imagePreview, setImagePreview] = useState<string>('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [savingTagName, setSavingTagName] = useState<string | null>(null);
+  const [savedTagNames, setSavedTagNames] = useState<Set<string>>(new Set());
+  const [editingTagName, setEditingTagName] = useState<string | null>(null);
 
   useEffect(() => {
     fetchServices();
@@ -53,6 +59,12 @@ export default function ServicesPage() {
     }
   };
 
+  // Helper function to check if service has existing tag name from database
+  const hasExistingTagName = (service: Service) => {
+    // Check if this service has a saved tag name in database
+    return savedTagNames.has(service._id!);
+  };
+
   const fetchServices = async () => {
     try {
       // Fetch all services including inactive ones for admin panel
@@ -62,14 +74,29 @@ export default function ServicesPage() {
       if (data.success) {
         console.log('📦 Admin fetched all services:', data.services);
         
-        // Normalize services to ensure includeInDecoration and compulsory fields exist
+        // Normalize services to ensure all toggle fields exist
         const normalizedServices = data.services.map((service: any) => ({
           ...service,
           includeInDecoration: service.includeInDecoration ?? false,
-          compulsory: service.compulsory ?? false
+          compulsory: service.compulsory ?? false,
+          itemTagName: service.itemTagName ?? '', // No default, use database value
+          itemTagEnabled: service.itemTagEnabled ?? false,
+          items: (service.items || []).map((item: any) => ({
+            ...item,
+            showTag: item.showTag ?? false // Ensure showTag field exists for all items
+          }))
         }));
         
         setServices(normalizedServices);
+        
+        // Track which services have existing tag names from database
+        const servicesWithTagNames = new Set<string>();
+        normalizedServices.forEach((service: Service) => {
+          if (service.itemTagName?.trim()) {
+            servicesWithTagNames.add(service._id!);
+          }
+        });
+        setSavedTagNames(servicesWithTagNames);
       }
     } catch (error) {
       
@@ -217,7 +244,8 @@ export default function ServicesPage() {
         id: `ITEM${Date.now()}`,
         name: itemName.trim(),
         imageUrl: imageUrl,
-        price: itemPrice ? parseFloat(itemPrice) : undefined
+        price: itemPrice ? parseFloat(itemPrice) : undefined,
+        showTag: false // Default to no tag for new items
       };
 
       const updatedItems = [...(selectedService?.items || []), newItem];
@@ -515,6 +543,206 @@ export default function ServicesPage() {
     }
   };
 
+  const handleToggleServiceTag = async (service: Service) => {
+    try {
+      const newValue = !service.itemTagEnabled;
+      console.log(`🏷️ Toggling itemTagEnabled for ${service.name}:`, {
+        currentValue: service.itemTagEnabled,
+        newValue: newValue,
+        tagName: service.itemTagName,
+        serviceId: service._id
+      });
+      
+      // Optimistic UI update
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, itemTagEnabled: newValue }
+            : s
+        )
+      );
+      
+      const response = await fetch(`/api/admin/services?id=${service._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemTagEnabled: newValue })
+      });
+
+      const data = await response.json();
+      console.log('🏷️ Toggle response:', data);
+
+      if (data.success) {
+        showToast(`Item tags ${newValue ? 'enabled' : 'disabled'} for ${service.name}`, 'success');
+        // Don't call fetchServices() to avoid resetting the UI state
+      } else {
+        // Revert on error
+        setServices(prevServices => 
+          prevServices.map(s => 
+            s._id === service._id 
+              ? { ...s, itemTagEnabled: !newValue }
+              : s
+          )
+        );
+        showToast(data.error || 'Failed to update service', 'error');
+      }
+    } catch (error) {
+      console.error('🏷️ Toggle error:', error);
+      // Revert on error
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, itemTagEnabled: service.itemTagEnabled }
+            : s
+        )
+      );
+      showToast('Failed to update service', 'error');
+    }
+  };
+
+  const handleUpdateTagName = async (service: Service, newTagName: string) => {
+    const trimmedName = newTagName.trim();
+    if (!trimmedName) {
+      showToast('Tag name cannot be empty', 'error');
+      return;
+    }
+
+    // Set loading state for this specific service
+    setSavingTagName(service._id!);
+
+    try {
+      console.log(`🏷️ Updating tag name for ${service.name}:`, {
+        oldTagName: service.itemTagName || '',
+        newTagName: trimmedName,
+        serviceId: service._id
+      });
+      
+      // Optimistic UI update
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, itemTagName: newTagName.trim() }
+            : s
+        )
+      );
+      
+      const response = await fetch(`/api/admin/services?id=${service._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemTagName: newTagName.trim() })
+      });
+
+      const data = await response.json();
+      console.log('🏷️ Tag name update response:', data);
+
+      if (data.success) {
+        const isNewTag = !savedTagNames.has(service._id!);
+        showToast(isNewTag ? `Tag name added: "${trimmedName}"` : `Tag name updated to "${trimmedName}"`, 'success');
+        
+        // Update the local state to reflect the saved tag name immediately
+        setServices(prevServices => 
+          prevServices.map(s => 
+            s._id === service._id 
+              ? { ...s, itemTagName: trimmedName }
+              : s
+          )
+        );
+        
+        console.log('✅ Tag name updated in local state:', trimmedName);
+        
+        // Add service to saved tag names set
+        setSavedTagNames(prev => new Set([...prev, service._id!]));
+      } else {
+        // Revert on error
+        setServices(prevServices => 
+          prevServices.map(s => 
+            s._id === service._id 
+              ? { ...s, itemTagName: service.itemTagName }
+              : s
+          )
+        );
+        showToast(data.error || 'Failed to update tag name', 'error');
+      }
+    } catch (error) {
+      console.error('🏷️ Tag name update error:', error);
+      // Revert on error
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, itemTagName: service.itemTagName }
+            : s
+        )
+      );
+      showToast('Failed to update tag name', 'error');
+    } finally {
+      // Clear loading state
+      setSavingTagName(null);
+    }
+  };
+
+  const handleToggleItemTag = async (service: Service, itemId: string) => {
+    try {
+      // Find the item and toggle its showTag property
+      const updatedItems = service.items.map(item => 
+        item.id === itemId 
+          ? { ...item, showTag: !item.showTag }
+          : item
+      );
+
+      const toggledItem = updatedItems.find(item => item.id === itemId);
+      const newValue = toggledItem?.showTag || false;
+
+      console.log(`🏷️ Toggling item tag for "${toggledItem?.name}":`, {
+        itemId: itemId,
+        newValue: newValue,
+        serviceId: service._id
+      });
+      
+      // Optimistic UI update
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, items: updatedItems }
+            : s
+        )
+      );
+      
+      const response = await fetch(`/api/admin/services?id=${service._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: updatedItems })
+      });
+
+      const data = await response.json();
+      console.log('🏷️ Item tag toggle response:', data);
+
+      if (data.success) {
+        showToast(`Tag ${newValue ? 'enabled' : 'disabled'} for "${toggledItem?.name}"`, 'success');
+        // Don't call fetchServices() to avoid resetting the UI state
+      } else {
+        // Revert on error
+        setServices(prevServices => 
+          prevServices.map(s => 
+            s._id === service._id 
+              ? { ...s, items: service.items }
+              : s
+          )
+        );
+        showToast(data.error || 'Failed to update item tag', 'error');
+      }
+    } catch (error) {
+      console.error('🏷️ Item tag toggle error:', error);
+      // Revert on error
+      setServices(prevServices => 
+        prevServices.map(s => 
+          s._id === service._id 
+            ? { ...s, items: service.items }
+            : s
+        )
+      );
+      showToast('Failed to update item tag', 'error');
+    }
+  };
+
   if (loading) {
     return (
       <div className="services-page">
@@ -551,12 +779,6 @@ export default function ServicesPage() {
       {/* Filter Buttons */}
       <div className="filter-buttons">
         <button 
-          className={`filter-btn ${filterStatus === 'all' ? 'active' : ''}`}
-          onClick={() => setFilterStatus('all')}
-        >
-          All Services ({services.length})
-        </button>
-        <button 
           className={`filter-btn ${filterStatus === 'active' ? 'active' : ''}`}
           onClick={() => setFilterStatus('active')}
         >
@@ -567,6 +789,12 @@ export default function ServicesPage() {
           onClick={() => setFilterStatus('inactive')}
         >
           Inactive ({services.filter(s => !s.isActive).length})
+        </button>
+        <button 
+          className={`filter-btn ${filterStatus === 'all' ? 'active' : ''}`}
+          onClick={() => setFilterStatus('all')}
+        >
+          All Services ({services.length})
         </button>
       </div>
 
@@ -606,6 +834,104 @@ export default function ServicesPage() {
                   />
                   <span className="toggle-label">Compulsory</span>
                 </label>
+                <div className="tag-control-container">
+                  <label className="toggle-container">
+                    <input
+                      type="checkbox"
+                      checked={service.itemTagEnabled || false}
+                      onChange={() => handleToggleServiceTag(service)}
+                    />
+                    <span className="toggle-label">Item Tags</span>
+                  </label>
+                  {service.itemTagEnabled && (
+                    <div className="tag-input-container">
+                      <input
+                        type="text"
+                        className={`tag-name-input ${hasExistingTagName(service) && editingTagName !== service._id ? 'disabled' : ''}`}
+                        value={service.itemTagName || ''}
+                        onChange={(e) => {
+                          const newValue = e.target.value;
+                          console.log('🏷️ Tag name typing:', newValue);
+                          
+                          // Update local state immediately for smooth typing
+                          setServices(prevServices => 
+                            prevServices.map(s => 
+                              s._id === service._id 
+                                ? { ...s, itemTagName: newValue }
+                                : s
+                            )
+                          );
+                          
+                          // Clear any existing timeout
+                          if ((window as any).tagNameTimeout) {
+                            clearTimeout((window as any).tagNameTimeout);
+                          }
+                        }}
+                        onFocus={(e) => {
+                          // Select all text when clicking on input for easy replacement
+                          e.target.select();
+                          console.log('🏷️ Tag name input focused, text selected');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const inputValue = e.currentTarget.value.trim();
+                            if (inputValue) {
+                              console.log('🏷️ Enter pressed, saving tag name');
+                              if (hasExistingTagName(service)) {
+                                handleUpdateTagName(service, inputValue);
+                                setEditingTagName(null); // Exit edit mode
+                              } else {
+                                handleUpdateTagName(service, inputValue);
+                              }
+                            }
+                          }
+                        }}
+                        disabled={hasExistingTagName(service) && editingTagName !== service._id}
+                        placeholder="Enter tag name (e.g., Bestseller, Trending)"
+                        maxLength={20}
+                        readOnly={hasExistingTagName(service) && editingTagName !== service._id}
+                      />
+                      <button
+                        type="button"
+                        className={hasExistingTagName(service) ? "tag-edit-btn" : "tag-add-btn"}
+                        onClick={() => {
+                          const currentTagName = service.itemTagName?.trim();
+                          
+                          if (hasExistingTagName(service)) {
+                            // Edit mode - enable input for editing
+                            if (editingTagName === service._id) {
+                              // Save the edited name
+                              if (currentTagName) {
+                                console.log('🏷️ Saving edited tag name:', currentTagName);
+                                handleUpdateTagName(service, currentTagName);
+                                setEditingTagName(null); // Exit edit mode
+                              }
+                            } else {
+                              // Enter edit mode
+                              console.log('🏷️ Entering edit mode for:', service.name);
+                              setEditingTagName(service._id!);
+                            }
+                          } else {
+                            // Add mode - save new tag name
+                            if (currentTagName) {
+                              console.log('🏷️ Adding new tag name:', currentTagName);
+                              handleUpdateTagName(service, currentTagName);
+                            } else {
+                              showToast('Please enter a tag name first', 'error');
+                            }
+                          }
+                        }}
+                        disabled={!service.itemTagName?.trim() || savingTagName === service._id}
+                        title={hasExistingTagName(service) ? "Update tag name" : "Save tag name to database"}
+                      >
+                        {savingTagName === service._id ? 'Saving...' : 
+                         hasExistingTagName(service) ? 
+                           (editingTagName === service._id ? 'Save' : 'Edit') : 
+                           'Add'}
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button 
                   className="expand-btn" 
                   onClick={() => toggleExpand(service._id!)}
@@ -631,10 +957,27 @@ export default function ServicesPage() {
                   <div key={item.id} className="item-card">
                     <div className="item-image">
                       <img src={item.imageUrl} alt={item.name} />
+                      {service.itemTagEnabled && service.itemTagName && item.showTag && (
+                        <div className="item-tag">
+                          {service.itemTagName}
+                        </div>
+                      )}
                     </div>
                     <div className="item-info">
                       <h4>{item.name}</h4>
                       {item.price && <p className="item-price">₹{item.price}</p>}
+                      {service.itemTagEnabled && (
+                        <div className="item-tag-control">
+                          <label className="item-toggle-container">
+                            <input
+                              type="checkbox"
+                              checked={item.showTag || false}
+                              onChange={() => handleToggleItemTag(service, item.id)}
+                            />
+                            <span className="item-toggle-label">Show Tag</span>
+                          </label>
+                        </div>
+                      )}
                     </div>
                     <button 
                       className="item-delete-btn" 
@@ -718,6 +1061,16 @@ export default function ServicesPage() {
 
               <div className="form-group">
                 <label>Item Image *</label>
+                {selectedService?.itemTagEnabled && (
+                  <div className="tag-name-input-container">
+                    <input
+                      type="text"
+                      className="tag-name-input"
+                      value={selectedService?.itemTagName || 'Popular'}
+                      readOnly
+                    />
+                  </div>
+                )}
                 {!imagePreview ? (
                   <div className="image-upload-placeholder">
                     <input
@@ -1375,6 +1728,220 @@ export default function ServicesPage() {
           justify-content: flex-end;
           padding: 1.5rem;
           border-top: 1px solid #e5e7eb;
+        }
+
+        /* Tag Control Styles */
+        .tag-control-container {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 0.5rem;
+          background: #f8fafc;
+          border-radius: 8px;
+          border: 1px solid #e2e8f0;
+        }
+
+        .tag-input-container {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .tag-name-input-container {
+          display: flex;
+          align-items: center;
+          position: relative;
+        }
+
+        .tag-name-input {
+          padding: 0.375rem 0.75rem;
+          border: 1px solid #d1d5db;
+          border-radius: 4px;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.875rem;
+          background: white;
+          color: #374151;
+          min-width: 120px;
+          transition: border-color 0.2s ease;
+          flex: 1;
+        }
+
+        .tag-name-input:focus {
+          outline: none;
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .tag-name-input::placeholder {
+          color: #9ca3af;
+        }
+
+        .tag-name-input.disabled {
+          background: #f3f4f6;
+          color: #6b7280;
+          cursor: not-allowed;
+          border-color: #d1d5db;
+        }
+
+        .tag-name-input:disabled {
+          background: #f3f4f6;
+          color: #6b7280;
+          cursor: not-allowed;
+        }
+
+        .tag-add-btn {
+          padding: 0.375rem 0.75rem;
+          background: #10b981;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.875rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          white-space: nowrap;
+        }
+
+        .tag-add-btn:hover:not(:disabled) {
+          background: #059669;
+          transform: translateY(-1px);
+          box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+        }
+
+        .tag-add-btn:disabled {
+          background: #9ca3af;
+          cursor: not-allowed;
+          opacity: 0.6;
+        }
+
+        .tag-edit-btn {
+          padding: 0.375rem 0.75rem;
+          background: #f59e0b;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.875rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          white-space: nowrap;
+        }
+
+        .tag-edit-btn:hover:not(:disabled) {
+          background: #d97706;
+          transform: translateY(-1px);
+          box-shadow: 0 2px 4px rgba(245, 158, 11, 0.3);
+        }
+
+        .tag-edit-btn:disabled {
+          background: #9ca3af;
+          cursor: not-allowed;
+          opacity: 0.6;
+        }
+
+        .tag-clear-btn {
+          position: absolute;
+          right: 4px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: #ef4444;
+          color: white;
+          border: none;
+          border-radius: 50%;
+          width: 20px;
+          height: 20px;
+          font-size: 12px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+          z-index: 10;
+        }
+
+        .tag-clear-btn:hover {
+          background: #dc2626;
+          transform: translateY(-50%) scale(1.1);
+        }
+
+        /* Item Tag Styles */
+        .item-image {
+          position: relative;
+          width: 100%;
+          height: 120px;
+          border-radius: 8px;
+          overflow: hidden;
+        }
+
+        .item-tag {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+          color: white;
+          font-size: 0.75rem;
+          font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+          padding: 0.25rem 0.5rem;
+          border-radius: 12px;
+          box-shadow: 0 2px 8px rgba(238, 90, 36, 0.3);
+          z-index: 10;
+          animation: tagPulse 2s infinite;
+        }
+
+        @keyframes tagPulse {
+          0%, 100% {
+            transform: scale(1);
+            box-shadow: 0 2px 8px rgba(238, 90, 36, 0.3);
+          }
+          50% {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(238, 90, 36, 0.5);
+          }
+        }
+
+        .item-tag:hover {
+          animation-play-state: paused;
+          transform: scale(1.1);
+        }
+
+        /* Item Toggle Control Styles */
+        .item-tag-control {
+          margin-top: 0.5rem;
+          padding: 0.375rem;
+          background: #f1f5f9;
+          border-radius: 6px;
+          border: 1px solid #e2e8f0;
+        }
+
+        .item-toggle-container {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          cursor: pointer;
+        }
+
+        .item-toggle-container input[type="checkbox"] {
+          width: 16px;
+          height: 16px;
+          accent-color: #ff6b6b;
+          cursor: pointer;
+        }
+
+        .item-toggle-label {
+          font-size: 0.75rem;
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          color: #475569;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .item-toggle-container:hover .item-toggle-label {
+          color: #334155;
+        }
+
+        .item-toggle-container input[type="checkbox"]:checked + .item-toggle-label {
+          color: #ff6b6b;
+          font-weight: 600;
         }
 
       `}</style>

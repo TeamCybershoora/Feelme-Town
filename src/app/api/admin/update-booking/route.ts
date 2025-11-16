@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
+import { uploadInvoiceToCloudinary } from '@/lib/cloudinary-invoices';
 import { ExportsStorage } from '@/lib/exports-storage'; // Dummy - no longer used
 
 export async function PUT(request: NextRequest) {
@@ -437,9 +438,15 @@ export async function PUT(request: NextRequest) {
         }
         }
 
-        if (paymentStatus !== undefined && paymentStatus !== oldPaymentStatus) {
+        if (paymentStatus !== undefined) {
           const normalizedPaymentStatus = String(paymentStatus).toLowerCase();
-          if (normalizedPaymentStatus === 'paid' && sendInvoice) {
+          const normalizedOldPaymentStatus = String(oldPaymentStatus || '').toLowerCase();
+          const alreadyHasInvoiceUrl = !!(currentBooking as any)?.invoiceDriveUrl;
+
+          const becamePaidNow = normalizedPaymentStatus === 'paid' && normalizedOldPaymentStatus !== 'paid';
+          const isPaidButMissingInvoice = normalizedPaymentStatus === 'paid' && !alreadyHasInvoiceUrl;
+
+          if ((becamePaidNow || isPaidButMissingInvoice) && sendInvoice) {
             let updatedBookingData: any = null;
             try {
               if (isManual) {
@@ -467,6 +474,43 @@ export async function PUT(request: NextRequest) {
                   numberOfPeople: bookingForEmail.numberOfPeople,
                   totalAmount: bookingForEmail.totalAmount
                 };
+
+                // Generate invoice PDF and upload to Cloudinary (invoices folder)
+                try {
+                  const { GET: generateInvoiceHandler } = await import('@/app/api/generate-invoice/route');
+                  const invoiceId = encodeURIComponent(mailData.id);
+                  const requestUrl = new URL(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/generate-invoice?bookingId=${invoiceId}&format=pdf`);
+                  const request = new Request(requestUrl.toString(), { method: 'GET' });
+                  const pdfResponse = await generateInvoiceHandler(request as any);
+
+                  if (pdfResponse.ok) {
+                    const arrayBuffer = await pdfResponse.arrayBuffer();
+                    const pdfBuffer = Buffer.from(arrayBuffer);
+
+                    const cleanCustomerName = (mailData.name || 'Customer')
+                      .replace(/[^a-zA-Z0-9\s]/g, '')
+                      .replace(/\s+/g, '-');
+                    const filename = `Invoice-${mailData.id}-${cleanCustomerName}.pdf`;
+
+                    const cloudinaryFile = await uploadInvoiceToCloudinary(filename, pdfBuffer);
+                    if (cloudinaryFile && (cloudinaryFile.inlineUrl || cloudinaryFile.secureUrl)) {
+                      const invoiceUrl = cloudinaryFile.inlineUrl || cloudinaryFile.secureUrl;
+                      mailData.invoiceDriveUrl = invoiceUrl;
+                      try {
+                        if (isManual) {
+                          await database.updateManualBooking?.(bookingId, { invoiceDriveUrl: invoiceUrl });
+                        }
+                        await database.updateBooking(bookingId, { invoiceDriveUrl: invoiceUrl });
+                      } catch (updateInvoiceUrlError) {
+                        console.warn('⚠️ Failed to persist invoice URL on booking:', updateInvoiceUrlError);
+                      }
+                    }
+                  } else {
+                    console.warn('⚠️ Failed to generate invoice PDF for Cloudinary upload, status:', pdfResponse.status);
+                  }
+                } catch (cloudinaryError) {
+                  console.error('❌ Failed to upload invoice PDF to Cloudinary:', cloudinaryError);
+                }
 
                 emailService.sendBookingInvoiceReady(mailData).catch(() => {});
               } catch (mailError) {

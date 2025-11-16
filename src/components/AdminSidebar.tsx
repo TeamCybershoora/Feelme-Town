@@ -202,6 +202,13 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       icon: FileText,
       path: '/Administrator/history',
       badge: null
+    },
+    {
+      id: 'invoices',
+      label: 'Invoices',
+      icon: FileText,
+      path: '/Administrator/invoices',
+      badge: null
     }
   ];
 

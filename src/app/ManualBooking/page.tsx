@@ -13,6 +13,15 @@ import GlobalDatePicker from '@/components/GlobalDatePicker';
 
 function ManualBookingContent() {
     const { openBookingPopup, setIncompleteBookingData, openCancelBookingPopup, resetPopupState, isBookingPopupOpen, closeBookingPopup, isCancelBookingPopupOpen, closeCancelBookingPopup, cancelBookingData } = useBooking();
+    
+    // Pre-fetch booking data for faster popup opening
+    const [preloadedData, setPreloadedData] = useState({
+        services: null,
+        theaters: null,
+        occasions: null,
+        isLoaded: false
+    });
+
     const searchParams = useSearchParams();
     const trustedCustomerPrefill = useMemo(() => {
         const customerId = searchParams.get('trustedCustomerId') || undefined;
@@ -502,6 +511,57 @@ function ManualBookingContent() {
         fetchTheaters();
     }, []);
 
+    // Pre-fetch booking data on page load for instant popup opening
+    useEffect(() => {
+        const preloadBookingData = async () => {
+            if (preloadedData.isLoaded) return; // Already loaded
+            
+            console.log('🚀 [ManualBooking Page] Pre-loading booking data...');
+            const startTime = performance.now();
+            
+            try {
+                // Fetch all booking data in parallel
+                const [theatersResponse, servicesResponse, occasionsResponse] = await Promise.all([
+                    fetch('/api/admin/theaters'),
+                    fetch('/api/admin/services'),
+                    fetch('/api/occasions')
+                ]);
+                
+                const [theatersData, servicesData, occasionsData] = await Promise.all([
+                    theatersResponse.json(),
+                    servicesResponse.json(),
+                    occasionsResponse.json()
+                ]);
+                
+                const endTime = performance.now();
+                console.log(`⚡ [ManualBooking Page] Pre-loaded booking data in ${(endTime - startTime).toFixed(0)}ms`);
+                
+                // Store preloaded data
+                setPreloadedData({
+                    services: servicesData,
+                    theaters: theatersData,
+                    occasions: occasionsData,
+                    isLoaded: true
+                });
+                
+                // Store in window for BookingPopup to access
+                (window as any).preloadedBookingData = {
+                    services: servicesData,
+                    theaters: theatersData,
+                    occasions: occasionsData,
+                    timestamp: Date.now()
+                };
+                
+                console.log('✅ [ManualBooking Page] Booking data cached for instant popup opening');
+                
+            } catch (error) {
+                console.error('❌ [ManualBooking Page] Error pre-loading booking data:', error);
+            }
+        };
+        
+        // Start preloading after a short delay to not block initial page render
+        setTimeout(preloadBookingData, 500);
+    }, [preloadedData.isLoaded]);
 
     // Real-time theater updates every 5 seconds
     useEffect(() => {
@@ -1671,7 +1731,7 @@ function ManualBookingContent() {
                                         
                                         
                                         // Simple direct approach - no time restrictions
-                                        resetPopupState();
+                                        // Auto-reset is now handled in openBookingPopup function
                                         openBookingPopup(filteredTheaters[selectedTheater], selectedDate, selectedTimeSlot);
                                     }}
                                 >

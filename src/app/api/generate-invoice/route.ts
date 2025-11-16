@@ -81,8 +81,60 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Helper to enrich booking selections (services/items) with latest prices from DB
+    const enrichWithServicePrices = (invoiceData: any, services: any[]) => {
+      try {
+        if (!Array.isArray(services) || services.length === 0) return invoiceData;
+        const itemPriceByKey = new Map<string, number>();
+
+        for (const svc of services) {
+          const items = Array.isArray(svc.items) ? svc.items : [];
+          for (const it of items) {
+            const key1 = (it.id || it.itemId || '').toString().toLowerCase();
+            const key2 = (it.name || it.title || '').toString().trim().toLowerCase();
+            const price = Number(it.price || 0);
+            if (key1) itemPriceByKey.set(`id:${key1}`, price);
+            if (key2) itemPriceByKey.set(`name:${key2}`, price);
+          }
+        }
+
+        const fixItems = (arr: any[]) =>
+          (Array.isArray(arr) ? arr : []).map((x) => {
+            const nx = { ...x };
+            const idKey = (nx.id || nx.itemId || '').toString().toLowerCase();
+            const nameKey = (nx.name || nx.title || '').toString().trim().toLowerCase();
+            if (!(nx.price > 0)) {
+              let p = 0;
+              if (idKey && itemPriceByKey.has(`id:${idKey}`)) p = itemPriceByKey.get(`id:${idKey}`)!;
+              else if (nameKey && itemPriceByKey.has(`name:${nameKey}`)) p = itemPriceByKey.get(`name:${nameKey}`)!;
+              nx.price = p;
+            }
+            if (!(nx.quantity > 0)) nx.quantity = 1;
+            return nx;
+          });
+
+        return {
+          ...invoiceData,
+          selectedDecorItems: fixItems(invoiceData.selectedDecorItems || invoiceData.decorationItems || []),
+          selectedCakes: fixItems(invoiceData.selectedCakes || invoiceData.cakeItems || []),
+          selectedGifts: fixItems(invoiceData.selectedGifts || invoiceData.giftItems || []),
+          selectedExtraAddOns: fixItems(invoiceData.selectedExtraAddOns || []),
+        };
+      } catch {
+        return invoiceData;
+      }
+    };
+
     // Helper to build invoice HTML from normalized data
-    const buildHtml = async (invoiceData: any) => generateInvoiceHtml(invoiceData);
+    const buildHtml = async (invoiceData: any) => {
+      try {
+        const services = await (database as any).getAllServices?.();
+        const enriched = enrichWithServicePrices(invoiceData, Array.isArray(services) ? services : []);
+        return generateInvoiceHtml(enriched);
+      } catch {
+        return generateInvoiceHtml(invoiceData);
+      }
+    };
 
     // Try to fetch booking from database first
     const result = await database.getBookingById(bookingId);

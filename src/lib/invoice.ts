@@ -94,7 +94,12 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
   // Format numbers with Indian number format
   const fmt = (n: number) => new Intl.NumberFormat('en-IN').format(Math.round(Number(n || 0)));
 
-  const invoiceNo = String(bd.id || 'FMT-2025-89');
+  // Show only Booking ID and Customer Name (no extra 'Invoice' prefix) in Invoice No.
+  const bookingIdForDisplay = String(bd.id || 'FMT-2025-89');
+  const customerNameForDisplay = String(bd.name || '').trim();
+  const invoiceNo = customerNameForDisplay
+    ? `${bookingIdForDisplay} - ${customerNameForDisplay}`
+    : bookingIdForDisplay;
   const invoiceDate = String(bd.date || new Date().toLocaleDateString('en-GB'));
 
   return `
@@ -641,46 +646,55 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
           ${(() => {
       let itemsHtml = '';
 
-      // Add decoration items if they exist
-      const decorItems = bd.selectedDecorItems || bd.decorationItems || [];
-      if (Array.isArray(decorItems) && decorItems.length > 0) {
-        itemsHtml += decorItems.map(item => `
-                <tr class="table-row">
-                  <td>Decoration - ${item.name || item.title || 'Item'}</td>
-                  <td>${fmt(item.price || 0)}</td>
-                  <td>${item.quantity || 1}</td>
-                  <td>${fmt((item.price || 0) * (item.quantity || 1))}</td>
-                </tr>
-              `).join('');
-      }
+      // Generic renderer: any selected service arrays saved on booking
+      const entries = Object.entries(bd) as Array<[string, any]>;
+      for (const [key, value] of entries) {
+        if (!key || typeof key !== 'string') continue;
+        if (!key.startsWith('selected')) continue;
+        if (key === 'selectedMovies') continue; // movies are free/visual, skip pricing
+        const items = Array.isArray(value) ? value : [];
+        if (items.length === 0) continue;
 
-      // Add cake items if they exist
-      const cakeItems = bd.selectedCakes || bd.cakeItems || [];
-      if (Array.isArray(cakeItems) && cakeItems.length > 0) {
-        itemsHtml += cakeItems.map(item => `
-                <tr class="table-row">
-                  <td>Cake - ${item.name || item.title || 'Item'}</td>
-                  <td>${fmt(item.price || 0)}</td>
-                  <td>${item.quantity || 1}</td>
-                  <td>${fmt((item.price || 0) * (item.quantity || 1))}</td>
-                </tr>
-              `).join('');
-      }
+        // Derive a user-friendly label from the key, e.g., "selectedDecorItems" → "Decor"
+        const label = (() => {
+          const raw = key.replace(/^selected/i, '');
+          const cleaned = raw.replace(/Items?$/i, '').replace(/_/g, ' ').trim();
+          if (!cleaned) return 'Item';
+          // Capitalize first letter
+          return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+        })();
 
-      // Add gift items if they exist
-      const giftItems = bd.selectedGifts || bd.giftItems || [];
-      if (Array.isArray(giftItems) && giftItems.length > 0) {
-        itemsHtml += giftItems.map(item => `
+        itemsHtml += items.map((item: any) => {
+          const name = item?.name || item?.title || 'Item';
+          const price = Number(item?.price || 0);
+          const qty = Number(item?.quantity || 1);
+          const total = price * qty;
+          return `
                 <tr class="table-row">
-                  <td>Gift - ${item.name || item.title || 'Item'}</td>
-                  <td>${fmt(item.price || 0)}</td>
-                  <td>${item.quantity || 1}</td>
-                  <td>${fmt((item.price || 0) * (item.quantity || 1))}</td>
+                  <td>${label} - ${name}</td>
+                  <td>${fmt(price)}</td>
+                  <td>${fmt(qty)}</td>
+                  <td>${fmt(total)}</td>
                 </tr>
-              `).join('');
+              `;
+        }).join('');
       }
 
       return itemsHtml;
+    })()}
+
+          ${(() => {
+      const dec = Number((bd as any).decorationFee ?? 0);
+      if (dec > 0) {
+        return `
+          <tr class="table-row">
+            <td>Decoration Service Fee</td>
+            <td>${fmt(dec)}</td>
+            <td>1</td>
+            <td>${fmt(dec)}</td>
+          </tr>`;
+      }
+      return '';
     })()}
           
           <tr class="table-row">

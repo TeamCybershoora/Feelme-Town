@@ -23,6 +23,8 @@ export async function GET() {
     // Use first pricing configuration
     const firstPricing = result.pricing[0];
     const pricing = {
+      id: firstPricing._id || firstPricing.id || null,
+      name: firstPricing.name || 'Pricing',
       slotBookingFee: firstPricing.slotBookingFee ?? 0,
       extraGuestFee: firstPricing.extraGuestFee ?? 0,
       convenienceFee: firstPricing.convenienceFee ?? 0,

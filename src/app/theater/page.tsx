@@ -9,6 +9,15 @@ import { useBooking } from '@/contexts/BookingContext';
 
 export default function Theater() {
     const { openBookingPopup, setIncompleteBookingData, openCancelBookingPopup, resetPopupState } = useBooking();
+    const [isBookingButtonClicked, setIsBookingButtonClicked] = useState(false);
+    
+    // Pre-fetch booking data for faster popup opening
+    const [preloadedData, setPreloadedData] = useState({
+        services: null,
+        theaters: null,
+        occasions: null,
+        isLoaded: false
+    });
     const searchParams = useSearchParams();
     const [selectedTheater, setSelectedTheater] = useState(0);
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -431,6 +440,58 @@ export default function Theater() {
             
         }
     }, [searchParams, fetchIncompleteBooking, openBookingPopup, openCancelBookingPopup, isFetchingIncompleteBooking, fetchedBookingIds, fetchedCancelBookingIds, selectedTheater, selectedDate, selectedTimeSlot]);
+
+    // Pre-fetch booking data on page load for instant popup opening
+    useEffect(() => {
+        const preloadBookingData = async () => {
+            if (preloadedData.isLoaded) return; // Already loaded
+            
+            console.log('🚀 [Theater Page] Pre-loading booking data...');
+            const startTime = performance.now();
+            
+            try {
+                // Fetch all booking data in parallel
+                const [theatersResponse, servicesResponse, occasionsResponse] = await Promise.all([
+                    fetch('/api/admin/theaters'),
+                    fetch('/api/admin/services'),
+                    fetch('/api/occasions')
+                ]);
+                
+                const [theatersData, servicesData, occasionsData] = await Promise.all([
+                    theatersResponse.json(),
+                    servicesResponse.json(),
+                    occasionsResponse.json()
+                ]);
+                
+                const endTime = performance.now();
+                console.log(`⚡ [Theater Page] Pre-loaded booking data in ${(endTime - startTime).toFixed(0)}ms`);
+                
+                // Store preloaded data
+                setPreloadedData({
+                    services: servicesData,
+                    theaters: theatersData,
+                    occasions: occasionsData,
+                    isLoaded: true
+                });
+                
+                // Store in window for BookingPopup to access
+                (window as any).preloadedBookingData = {
+                    services: servicesData,
+                    theaters: theatersData,
+                    occasions: occasionsData,
+                    timestamp: Date.now()
+                };
+                
+                console.log('✅ [Theater Page] Booking data cached for instant popup opening');
+                
+            } catch (error) {
+                console.error('❌ [Theater Page] Error pre-loading booking data:', error);
+            }
+        };
+        
+        // Start preloading after a short delay to not block initial page render
+        setTimeout(preloadBookingData, 500);
+    }, [preloadedData.isLoaded]);
 
     const handleTheaterSelection = (index: number) => {
         setSelectedTheater(index);
@@ -1445,14 +1506,15 @@ export default function Theater() {
                                     className={`book-button ${!selectedTimeSlot ? 'disabled' : ''}`}
                                     disabled={!selectedTimeSlot}
                                     onClick={() => {
-                                        if (!selectedTimeSlot) return; // Guard click when disabled
+                                        if (!selectedTimeSlot || isBookingButtonClicked) return; // Guard click when disabled or already clicked
                                         
-                                        
-                                        
-                                        
+                                        // Debounce button clicks
+                                        setIsBookingButtonClicked(true);
+                                        setTimeout(() => setIsBookingButtonClicked(false), 1000); // Reset after 1 second
                                         
                                         // Simple direct approach - no time restrictions
-                                        resetPopupState();
+                                        // Auto-reset is now handled in openBookingPopup function
+                                        console.log('🎯 [Theater] Book button clicked, opening popup...');
                                         openBookingPopup(filteredTheaters[selectedTheater], selectedDate, selectedTimeSlot);
                                     }}
                                 >

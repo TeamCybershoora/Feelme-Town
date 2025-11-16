@@ -2,9 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import { db as mockDb } from '@/lib/mock-db';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const services = await database.getAllServices();
+    const { searchParams } = new URL(request.url);
+    const includeInactive = searchParams.get('includeInactive') === 'true';
+
+    // Admin panel may request all services including inactive ones
+    const services = includeInactive
+      ? await database.getAllServicesIncludingInactive()
+      : await database.getAllServices();
 
     // If no services found or items arrays are empty, provide a robust fallback from mock DB
     const hasUsableItems = Array.isArray(services) && services.some(s => Array.isArray(s.items) && s.items.length > 0);
@@ -98,11 +104,13 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, items, isActive, includeInDecoration, compulsory } = body;
+    const { name, items, isActive, includeInDecoration, compulsory, itemTagEnabled, itemTagName } = body;
 
     console.log('🔄 PUT /api/admin/services - Received body:', body);
     console.log('🔍 includeInDecoration value:', includeInDecoration);
     console.log('🔍 compulsory value:', compulsory);
+    console.log('🏷️ itemTagEnabled value:', itemTagEnabled);
+    console.log('🏷️ itemTagName value:', itemTagName);
 
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
@@ -110,6 +118,8 @@ export async function PUT(request: NextRequest) {
     if (isActive !== undefined) updateData.isActive = isActive;
     if (includeInDecoration !== undefined) updateData.includeInDecoration = includeInDecoration;
     if (compulsory !== undefined) updateData.compulsory = compulsory;
+    if (itemTagEnabled !== undefined) updateData.itemTagEnabled = itemTagEnabled;
+    if (itemTagName !== undefined) updateData.itemTagName = itemTagName;
     
     console.log('📦 updateData being sent to database:', updateData);
 

@@ -106,7 +106,9 @@ export async function POST(request: NextRequest) {
     );
 
     const { password: _, ...adminInfo } = adminUser;
-    return NextResponse.json({
+
+    // Create HTTP-only cookie for server-side auth (middleware)
+    const response = NextResponse.json({
       success: true,
       message: 'Admin authentication successful',
       admin: {
@@ -116,6 +118,18 @@ export async function POST(request: NextRequest) {
         role: adminInfo.role
       }
     });
+
+    // 30 days
+    const maxAge = 30 * 24 * 60 * 60;
+    response.cookies.set('adminToken', 'authenticated', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge,
+    });
+
+    return response;
   } catch (error) {
     return NextResponse.json(
       {

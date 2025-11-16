@@ -26,6 +26,8 @@ interface IncompleteBookingData {
   selectedCakes?: Array<{ id: string; name: string; price: number; quantity: number }>;
   selectedDecorItems?: Array<{ id: string; name: string; price: number; quantity: number }>;
   selectedGifts?: Array<{ id: string; name: string; price: number; quantity: number }>;
+  // Dynamic service items (can be any service name)
+  [key: string]: any;
   totalAmount?: number;
   createdAt: string;
   expiresAt: string;
@@ -72,16 +74,20 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   // Popup control state
   const [isPopupClosed, setIsPopupClosed] = useState(false);
 
-  const openBookingPopup = (theater?: TheaterData, date?: string, timeSlot?: string, incompleteData?: IncompleteBookingData) => {
-    // Don't open if popup was manually closed
+  const openBookingPopup = (theater?: TheaterData, date?: string, timeSlot?: string, incompleteData?: IncompleteBookingData, forceOpen?: boolean) => {
+    // Auto-reset popup state if it was manually closed
     if (isPopupClosed) {
+      console.log('🔄 [BookingPopup] Auto-resetting popup state because it was closed');
+      setIsPopupClosed(false);
+    }
+    
+    // Don't open if popup is already open (unless force open)
+    if (isBookingPopupOpen && !forceOpen) {
+      console.log('🚫 [BookingPopup] Popup is already open');
       return;
     }
     
-    // Don't open if popup is already open
-    if (isBookingPopupOpen) {
-      return;
-    }
+    console.log('✅ [BookingPopup] Opening popup', { theater: theater?.name, date, timeSlot, forceOpen });
     
     if (theater) {
       setSelectedTheater(theater);
@@ -133,6 +139,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   };
 
   const resetPopupState = () => {
+    console.log('🔄 [BookingPopup] Resetting popup state');
     setIsPopupClosed(false);
   };
 

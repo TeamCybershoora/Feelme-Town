@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -32,14 +32,13 @@ interface OccasionOption {
 
 interface BookingForm {
   bookingName: string;
-  numberOfPeople: number;
   whatsappNumber: string;
   emailAddress: string;
   occasion: string;
-  selectedCakes: Array<{id?: string; name: string; price: number; quantity?: number}>;
-  selectedDecorItems: Array<{id?: string; name: string; price: number; quantity?: number}>;
-  selectedGifts: Array<{id?: string; name: string; price: number; quantity?: number}>;
+  // Movies kept hardcoded as it's static
   selectedMovies: Array<{id?: string; name: string; price: number; quantity?: number}>;
+  // Dynamic service items (no hardcoded fields)
+  [key: string]: any; // This allows dynamic selectedXXX fields
   // Overview section options
   wantCakes: 'Yes' | 'No';
   wantDecorItems: 'Yes' | 'No';
@@ -47,8 +46,8 @@ interface BookingForm {
   wantMovies: 'Yes' | 'No';
   promoCode: string;
   agreeToTerms: boolean;
-  // Dynamic occasion specific details
-  occasionData?: { [key: string]: string };
+  numberOfPeople: number;
+  occasionData: { [key: string]: string };
   // Legacy fields (for backward compatibility)
   occasionPersonName?: string;
   birthdayName?: string;
@@ -84,7 +83,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [activeTab, setActiveTab] = useState<string>('Overview');
   const [isLoaded, setIsLoaded] = useState(false);
   const [isBookingSuccessful, setIsBookingSuccessful] = useState(false);
-  const [bookingResult, setBookingResult] = useState<{ success: boolean; message: string; bookingId?: string } | null>(null);
+  const [bookingResult, setBookingResult] = useState<{ success: boolean; message: string; bookingId?: string; wasEditing?: boolean } | null>(null);
   const [isEditingBooking, setIsEditingBooking] = useState(false);
   const [originalFormData, setOriginalFormData] = useState<BookingForm | null>(null);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
@@ -111,14 +110,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
   const [formData, setFormData] = useState<BookingForm>({
     bookingName: '',
-    numberOfPeople: 2,
+    numberOfPeople: 1, // Will be auto-adjusted by useEffect when theater data loads
     whatsappNumber: '',
     emailAddress: '',
     occasion: '',
-    selectedCakes: [],
-    selectedDecorItems: [],
-    selectedGifts: [],
-    selectedMovies: [],
+    selectedMovies: [], // Keep movies hardcoded as it's static
     wantCakes: 'No',
     wantDecorItems: 'No',
     wantGifts: 'No',
@@ -166,23 +162,202 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     }
   }, [isOpen]);
 
-  // Fetch real theater data from database
-  useEffect(() => {
-    const fetchTheaterData = async () => {
-      try {
-        const response = await fetch('/api/admin/theaters');
-        const data = await response.json();
+  // Helper function to process all fetched data
+  const processAllData = (theatersData: any, servicesData: any, occasionsData: any) => {
+    try {
+      // Set loading states
+      setIsLoadingServices(true);
+      setIsLoadingOccasions(true);
+      setServicesError(null);
+      
+      // Process theater data
+      if (theatersData.success && theatersData.theaters) {
+        setRealTheaterData(theatersData.theaters);
+        console.log('✅ [Theater] Successfully loaded', theatersData.theaters.length, 'theaters');
+      }
+      
+      // Process services data
+      if (servicesData?.success && Array.isArray(servicesData.services)) {
+        const services = servicesData.services;
+        const cleanUrl = (u: any) => {
+          if (typeof u !== 'string') return '';
+          return u.trim().replace(/^`+|`+$/g, '').replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '');
+        };
 
-        if (data.success && data.theaters) {
-          setRealTheaterData(data.theaters);
+        const activeServices = services.filter((s: any) => s.isActive === true).map((s: any) => ({
+          ...s,
+          items: (s.items || []).map((item: any) => ({
+            ...item,
+            image: cleanUrl(item.image),
+            name: item.name || item.title || 'Unnamed Item',
+            price: Number(item.price) || Number(item.cost) || 0,
+            id: item.id || item.itemId || item.name?.toLowerCase().replace(/\s+/g, '-') || 'unknown'
+          })),
+          includeInDecoration: s.includeInDecoration || false
+        }));
+
+        setAllServices(activeServices);
+
+        // Initialize selectedServices state
+        const initialSelectedServices: { [key: string]: 'Yes' | 'No' } = {};
+        const initialSelectedServiceItems: { [key: string]: string[] } = {};
+        
+        activeServices.forEach((s: any) => {
+          if (s.compulsory) {
+            initialSelectedServices[s.name] = 'Yes';
+          } else {
+            initialSelectedServices[s.name] = 'No';
+          }
+          initialSelectedServiceItems[s.name] = [];
+        });
+
+        // Initialize decoration dropdown (always start with 'No' unless editing)
+        initialSelectedServices['__decoration__'] = 'No';
+
+        // Check if we're editing a booking and override with existing service selections
+        const editingBooking = sessionStorage.getItem('editingBooking');
+        if (editingBooking) {
+          try {
+            const bookingData = JSON.parse(editingBooking);
+
+            // Process all services and check if they have items in booking
+            let hasDecorationServices = false;
+            
+            activeServices.forEach((service: any) => {
+              const serviceKey = `selected${service.name}`;
+              const serviceItems = bookingData[serviceKey];
+              
+              if (Array.isArray(serviceItems) && serviceItems.length > 0) {
+                // Service has items in booking - set to Yes
+                initialSelectedServices[service.name] = 'Yes';
+                
+                // Extract item names from booking data
+                const itemNames = serviceItems.map((item: any) => {
+                  if (typeof item === 'string') return item;
+                  return item.name || item.title || item.id || 'Unknown Item';
+                });
+                
+                initialSelectedServiceItems[service.name] = itemNames;
+                
+                // Check if this service is included in decoration
+                if (service.includeInDecoration) {
+                  hasDecorationServices = true;
+                }
+              } else {
+                // Service has no items - keep default (No for non-compulsory, Yes for compulsory)
+                initialSelectedServiceItems[service.name] = [];
+              }
+            });
+
+            // If any decoration-included service has items, set decoration to Yes
+            // and ensure all decoration-included services are also set to Yes
+            if (hasDecorationServices) {
+              initialSelectedServices['__decoration__'] = 'Yes';
+              
+              // Also enable all decoration-included services
+              activeServices.forEach((service: any) => {
+                if (service.includeInDecoration) {
+                  initialSelectedServices[service.name] = 'Yes';
+                }
+              });
+            }
+          } catch (e) {
+            // Silent error handling for editing booking services
+          }
         }
+
+        setSelectedServices(initialSelectedServices);
+        setSelectedServiceItems(initialSelectedServiceItems);
+      }
+      
+      // Process occasions data
+      if (occasionsData.success && occasionsData.occasions) {
+        setOccasionOptions(occasionsData.occasions);
+        
+        // If editing, set selectedOccasionData after occasions are loaded
+        const editingBooking = sessionStorage.getItem('editingBooking');
+        if (editingBooking) {
+          try {
+            const bookingData = JSON.parse(editingBooking);
+            if (bookingData.occasion) {
+              const selectedOccasion = occasionsData.occasions.find((occ: any) => occ.name === bookingData.occasion);
+              if (selectedOccasion) {
+                setSelectedOccasionData(selectedOccasion);
+              }
+            }
+          } catch (e) {
+            console.error('Error setting occasion data for editing:', e);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ [Data] Error processing data:', error);
+      setServicesError('Failed to process data');
+    } finally {
+      setIsLoadingServices(false);
+      setIsLoadingOccasions(false);
+    }
+  };
+
+  // Combined data fetching - use preloaded data if available, otherwise fetch
+  useEffect(() => {
+    const fetchAllData = async () => {
+      if (!isOpen) return;
+      
+      // Check for preloaded data from theater page
+      const preloadedData = (window as any).preloadedBookingData;
+      const isPreloadedDataFresh = preloadedData && (Date.now() - preloadedData.timestamp < 300000); // 5 minutes
+      
+      if (isPreloadedDataFresh) {
+        console.log('⚡ [Data] Using preloaded data from theater page');
+        
+        // Use preloaded data directly
+        const { services: servicesData, theaters: theatersData, occasions: occasionsData } = preloadedData;
+        
+        // Process data same as fetch
+        processAllData(theatersData, servicesData, occasionsData);
+        return;
+      }
+      
+      console.log('🚀 [Data] Fetching all data in parallel...');
+      const startTime = performance.now();
+      
+      try {
+        // Set loading states
+        setIsLoadingServices(true);
+        setIsLoadingOccasions(true);
+        setServicesError(null);
+        
+        // Fetch all data in parallel
+        const [theatersResponse, servicesResponse, occasionsResponse] = await Promise.all([
+          fetch('/api/admin/theaters'),
+          fetch('/api/admin/services'),
+          fetch('/api/occasions')
+        ]);
+        
+        const [theatersData, servicesData, occasionsData] = await Promise.all([
+          theatersResponse.json(),
+          servicesResponse.json(),
+          occasionsResponse.json()
+        ]);
+        
+        const endTime = performance.now();
+        console.log(`⚡ [Data] All data fetched in ${(endTime - startTime).toFixed(0)}ms`);
+        
+        // Process fetched data using the same function
+        processAllData(theatersData, servicesData, occasionsData);
+        
       } catch (error) {
-        // Failed to fetch theater data
+        console.error('❌ [Data] Error fetching data:', error);
+        setServicesError('Failed to fetch data');
+        setIsLoadingServices(false);
+        setIsLoadingOccasions(false);
       }
     };
 
-    fetchTheaterData();
-  }, []);
+    fetchAllData();
+  }, [isOpen]);
 
   // Track movie selection changes
   useEffect(() => {
@@ -252,6 +427,35 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       return false;
     }
 
+    // If decoration is selected, ensure at least ONE decoration-included service has items
+    if (selectedServices['__decoration__'] === 'Yes') {
+      // Find all services which are part of decoration package
+      const decorationServices = allServices.filter(service => service.includeInDecoration);
+
+      if (decorationServices.length > 0) {
+        const hasAtLeastOneDecorationServiceSelected = decorationServices.some(service => {
+          const isServiceSelected = selectedServices[service.name] === 'Yes';
+          const serviceItems = selectedServiceItems[service.name] || [];
+          return isServiceSelected && serviceItems.length > 0;
+        });
+
+        if (!hasAtLeastOneDecorationServiceSelected) {
+          setValidationErrorName('Decoration Service Required');
+          setValidationMessage('You selected "Yes" for decoration, but did not choose any decoration services. Please select at least one decoration service, or select "No" for decoration in the Overview tab.');
+          setShowValidationPopup(true);
+          return false;
+        }
+      }
+    }
+
+    // Validate movies selection: if Movies = Yes, at least one movie must be selected
+    if (formData.wantMovies === 'Yes' && (!formData.selectedMovies || formData.selectedMovies.length === 0)) {
+      setValidationErrorName('Movie Selection Required');
+      setValidationMessage('You selected "Yes" for movies, but did not choose any movie. Please select at least one movie or select "No" for movies in the Overview tab.');
+      setShowValidationPopup(true);
+      return false;
+    }
+
     // Validate dynamic occasion required fields
     if (selectedOccasionData && selectedOccasionData.requiredFields) {
       for (const fieldKey of selectedOccasionData.requiredFields) {
@@ -267,38 +471,13 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       }
     }
 
-    // Check if user selected "Yes" for items but didn&apos;t select any
-    // Cakes validation is now handled by decoration dropdown
-    if ((formData.wantDecorItems === 'Yes' || formData.wantGifts === 'Yes') && formData.selectedCakes.length === 0) {
-      setValidationErrorName('Cake Selection Required');
-      setValidationMessage('Cakes are automatically included with decoration & gifts. Please select cake items or click "Skip" to skip this service.');
-      setShowValidationPopup(true);
-      return false;
-    }
-
-    if (formData.wantDecorItems === 'Yes' && formData.selectedDecorItems.length === 0) {
-      setValidationErrorName('Decoration Items Selection Required');
-      setValidationMessage('You selected "Yes" for decoration items. Please select at least one decoration item or click "Skip" to skip this service.');
-      setShowValidationPopup(true);
-      return false;
-    }
-
-    if (formData.wantGifts === 'Yes' && formData.selectedGifts.length === 0) {
-      setValidationErrorName('Gift Items Selection Required');
-      setValidationMessage('You selected "Yes" for gift items but didn&apos;t choose any gift items. Please select gift items or click "Skip" to skip this service.');
-      setShowValidationPopup(true);
-      return false;
-    }
-
-    if (formData.wantMovies === 'Yes' && formData.selectedMovies.length === 0) {
-      setValidationErrorName('Movie Selection Required');
-      setValidationMessage('You selected "Yes" for movies but didn&apos;t choose any movies. Please select movies or click "Skip" to skip this service.');
-      setShowValidationPopup(true);
-      return false;
-    }
-
-    // Validate dynamic services - check if "Yes" but no items selected
+    // Dynamic service validation - check if "Yes" but no items selected (except explicitly skipped services)
     for (const service of allServices) {
+      // If user explicitly skipped this service in this flow, don't force them to select items
+      if (skippedServices.has(service.name)) {
+        continue;
+      }
+
       if (selectedServices[service.name] === 'Yes') {
         const serviceItems = selectedServiceItems[service.name] || [];
         if (serviceItems.length === 0) {
@@ -362,8 +541,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       const venuePayment = discountedTotal - advancePayment;
 
       // Get theater base price
-      const theaterBasePrice = selectedTheater
-        ? parseFloat(selectedTheater.price.replace(/[₹,\s]/g, ''))
+      const theaterBasePrice = selectedTheater && selectedTheater.price
+        ? parseFloat(String(selectedTheater.price).replace(/[₹,\s]/g, ''))
         : 1399.00;
 
       const bookingData = {
@@ -375,11 +554,13 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         time: selectedTimeSlot || '6:00 PM',
         occasion: formData.occasion,
         occasionData: formData.occasionData || {},
+        // Persist Decoration choice from Overview
+        wantDecorItems: formData.wantDecorItems,
         numberOfPeople: formData.numberOfPeople,
-        selectedCakes: formData.selectedCakes,
-        selectedDecorItems: formData.selectedDecorItems,
-        selectedGifts: formData.selectedGifts,
-        selectedMovies: formData.selectedMovies,
+        
+        // Dynamic service items (completely dynamic - no hardcoded fields!)
+        ...getDynamicServiceItemsFromFormData(formData),
+        
         totalAmount: discountedTotal,
         advancePayment,
         venuePayment,
@@ -395,6 +576,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           decorationFees: pricingData.decorationFees,
           theaterBasePrice: theaterBasePrice
         },
+        // Always persist dropdown-shown Decoration fee value for reference
+        decorationDropdownFee: pricingData.decorationFees || 0,
         // Store calculated guest charges for easy reference
         extraGuestCharges: (() => {
           const capacity = getTheaterCapacity();
@@ -408,28 +591,42 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         })()
       };
 
-      // Save as confirmed booking with pay at venue option
-      const res = await fetch('/api/new-booking', {
+      // Save as confirmed booking with pay at venue option or update existing booking
+      const isEdit = isEditingBooking && !!editingBookingId;
+      const url = isEdit ? '/api/admin/edit-booking' : '/api/new-booking';
+      const payload = isEdit 
+        ? { bookingId: editingBookingId, data: bookingData }
+        : bookingData;
+
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bookingData)
+        body: JSON.stringify(payload)
       });
+      
       const json = await res.json();
 
       if (json.success) {
-        setBookingResult({ success: true, message: 'Booking confirmed successfully! Our team will contact you to collect payment at the venue.', bookingId: json.bookingId });
+        setBookingResult({ 
+          success: true, 
+          message: isEditingBooking 
+            ? 'Booking updated successfully! Changes have been saved to our system.' 
+            : 'Booking confirmed successfully! Our team will contact you to collect payment at the venue.', 
+          bookingId: json.bookingId,
+          wasEditing: isEditingBooking
+        });
         setIsBookingSuccessful(true);
         // Keep button disabled on success - booking is complete
         // Remove slow API calls - booking popup will close anyway
       } else {
-        setValidationErrorName('Booking Save Failed');
+        setValidationErrorName(isEditingBooking ? 'Booking Update Failed' : 'Booking Save Failed');
         setValidationMessage(json.error || 'Unable to save booking. Please try again.');
         setShowValidationPopup(true);
         setIsSubmittingBooking(false); // Re-enable button on failure
       }
     } catch (error) {
-      setValidationErrorName('Booking Save Error');
-      setValidationMessage('Something went wrong while saving your booking. Please try again.');
+      setValidationErrorName(isEditingBooking ? 'Booking Update Error' : 'Booking Save Error');
+      setValidationMessage(`Something went wrong while ${isEditingBooking ? 'updating' : 'saving'} your booking. Please try again.`);
       setShowValidationPopup(true);
       setIsSubmittingBooking(false); // Re-enable button on error
     }
@@ -456,75 +653,158 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
       // Get theater base price
       const theaterBasePrice = selectedTheater
-        ? parseFloat(selectedTheater.price.replace(/[₹,\s]/g, ''))
-        : 1399.00;
+        ? parseFloat(String(selectedTheater.price).replace(/[₹,\s]/g, ''))
+        : 1399.0;
 
-      const bookingData = {
+      // Prepare base booking data (will be sent AFTER successful Razorpay payment)
+      const baseBookingData = {
         name: formData.bookingName,
         email: formData.emailAddress,
         phone: formData.whatsappNumber,
-        theaterName: selectedTheater?.name || 'FeelME Town Theater',
+        theaterName: selectedTheater?.name || '',
         date: selectedDate || new Date().toISOString().split('T')[0],
-        time: selectedTimeSlot || '6:00 PM',
+        time: selectedTimeSlot || '',
         occasion: formData.occasion,
         occasionData: formData.occasionData || {},
+        // Persist whether user enabled Decoration in Overview
+        wantDecorItems: formData.wantDecorItems,
         numberOfPeople: formData.numberOfPeople,
-        selectedCakes: formData.selectedCakes,
-        selectedDecorItems: formData.selectedDecorItems,
-        selectedGifts: formData.selectedGifts,
-        selectedMovies: formData.selectedMovies,
+        // Dynamic service items (completely dynamic - no hardcoded fields!)
+        ...getDynamicServiceItemsFromFormData(formData),
         totalAmount: discountedTotal,
         advancePayment,
         venuePayment,
         appliedCouponCode: appliedCouponCode || undefined,
         couponDiscount: appliedDiscount || 0,
         paymentMode: 'online_payment',
-        // Store pricing data used at time of booking
         pricingData: {
           slotBookingFee: pricingData.slotBookingFee,
           extraGuestFee: pricingData.extraGuestFee,
           convenienceFee: pricingData.convenienceFee,
           decorationFees: pricingData.decorationFees,
-          theaterBasePrice: theaterBasePrice
+          theaterBasePrice: theaterBasePrice,
         },
-        // Store calculated guest charges for easy reference
+        // Store decoration fee explicitly same as slotBookingFee (from pricing snapshot)
+        decorationFee: (
+          (Array.isArray((formData as any).selectedDecorItems) && (formData as any).selectedDecorItems.length > 0) ||
+          (Array.isArray((formData as any).selectedExtraAddOns) && (formData as any).selectedExtraAddOns.length > 0)
+        ) ? (pricingData.decorationFees || 0) : 0,
+        // Helper for invoice logic
+        decorationAppliedFee: (
+          (Array.isArray((formData as any).selectedDecorItems) && (formData as any).selectedDecorItems.length > 0) ||
+          (Array.isArray((formData as any).selectedExtraAddOns) && (formData as any).selectedExtraAddOns.length > 0)
+        ) ? (pricingData.decorationFees || 0) : 0,
         extraGuestCharges: (() => {
           const capacity = getTheaterCapacity();
           const extraGuests = Math.max(0, formData.numberOfPeople - capacity.min);
           return extraGuests * pricingData.extraGuestFee;
         })(),
-        // Store extra guests count for easy reference
         extraGuestsCount: (() => {
           const capacity = getTheaterCapacity();
           return Math.max(0, formData.numberOfPeople - capacity.min);
-        })()
+        })(),
       };
 
-      // Save confirmed booking directly using new-booking API
-      const res = await fetch('/api/new-booking', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bookingData)
-      });
-      const json = await res.json();
+      const razorpayKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
 
-      if (json.success) {
-        setBookingResult({ success: true, message: 'Payment completed and booking confirmed successfully!', bookingId: json.bookingId });
-        setIsBookingSuccessful(true);
-        setShowPaymentConfirmation(false);
-        // Remove slow API calls - booking popup will close anyway
-      } else {
-        setValidationErrorName('Booking Confirmation Failed');
-        setValidationMessage(json.error || 'Unable to confirm booking after payment. Please contact support.');
+      if (!razorpayKey || typeof window === 'undefined' || !window.Razorpay) {
+        setValidationErrorName('Payment Initialization Error');
+        setValidationMessage('Unable to initialize payment gateway. Please refresh the page or try again later.');
         setShowValidationPopup(true);
         setShowPaymentConfirmation(false);
+        return;
       }
+
+      // Amount in paise for Razorpay (advancePayment is in INR)
+      const amountPaise = Math.round(advancePayment * 100);
+
+      const options: any = {
+        key: razorpayKey,
+        amount: amountPaise,
+        currency: 'INR',
+        name: 'FeelME Town',
+        description: 'Slot Booking Fee',
+        notes: {
+          theater: baseBookingData.theaterName,
+          date: baseBookingData.date,
+          time: baseBookingData.time,
+          occasion: baseBookingData.occasion,
+        },
+        prefill: {
+          name: baseBookingData.name,
+          email: baseBookingData.email,
+          contact: baseBookingData.phone,
+        },
+        theme: {
+          color: '#ff0005',
+        },
+        handler: async (response: any) => {
+          try {
+            // Merge Razorpay payment details into booking data
+            const bookingData = {
+              ...baseBookingData,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpayOrderId: response.razorpay_order_id,
+              razorpaySignature: response.razorpay_signature,
+            };
+
+            const res = await fetch('/api/new-booking', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(bookingData),
+            });
+
+            const json = await res.json();
+
+            if (json.success) {
+              setBookingResult({
+                success: true,
+                message: isEditingBooking 
+                  ? 'Booking updated successfully! Changes have been saved to our system.'
+                  : 'Payment completed and booking confirmed successfully!',
+                bookingId: json.bookingId,
+                wasEditing: isEditingBooking,
+              });
+              setIsBookingSuccessful(true);
+              setShowPaymentConfirmation(false);
+            } else {
+              setValidationErrorName('Booking Confirmation Failed');
+              setValidationMessage(
+                json.error ||
+                  'Payment was successful, but we could not confirm your booking. Please contact support with your payment details.',
+              );
+              setShowValidationPopup(true);
+              setShowPaymentConfirmation(false);
+            }
+          } catch (error) {
+            setValidationErrorName('Booking Confirmation Error');
+            setValidationMessage(
+              'Payment was successful, but something went wrong while confirming your booking. Please contact support.',
+            );
+            setShowValidationPopup(true);
+            setShowPaymentConfirmation(false);
+          } finally {
+            setIsProcessingPayment(false);
+          }
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+
+      rzp.on('payment.failed', (response: any) => {
+        setValidationErrorName('Payment Failed');
+        setValidationMessage(response.error?.description || 'Payment failed or was cancelled. Please try again.');
+        setShowValidationPopup(true);
+        setShowPaymentConfirmation(false);
+        setIsProcessingPayment(false);
+      });
+
+      rzp.open();
     } catch (error) {
-      setValidationErrorName('Booking Confirmation Error');
-      setValidationMessage('Something went wrong while confirming your booking after payment.');
+      setValidationErrorName('Payment Initialization Error');
+      setValidationMessage('Something went wrong while starting the payment. Please try again.');
       setShowValidationPopup(true);
       setShowPaymentConfirmation(false);
-    } finally {
       setIsProcessingPayment(false);
     }
   };
@@ -538,24 +818,33 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   };
 
 
+  // Helper function to get dynamic numberOfPeople for reset
+  const getDynamicNumberOfPeople = () => {
+    if (selectedTheater && realTheaterData.length > 0) {
+      const capacity = getTheaterCapacity();
+      console.log('🎭 [Reset People] Using theater minimum capacity:', capacity.min);
+      return capacity.min;
+    }
+    console.log('⚠️ [Reset People] No theater selected, using fallback: 1');
+    return 1; // Fallback when no theater is selected
+  };
+
   // Reset form to initial state
   const resetForm = () => {
     setFormData({
       bookingName: '',
-      numberOfPeople: 2,
+      numberOfPeople: getDynamicNumberOfPeople(), // Completely dynamic
       whatsappNumber: '',
       emailAddress: '',
       occasion: '',
-      selectedCakes: [],
-      selectedDecorItems: [],
-      selectedGifts: [],
-      selectedMovies: [],
+      selectedMovies: [], // Keep movies hardcoded as it's static
       wantCakes: 'No',
       wantDecorItems: 'No',
       wantGifts: 'No',
       wantMovies: 'No',
       promoCode: '',
-      agreeToTerms: false
+      agreeToTerms: false,
+      occasionData: {}
     });
     setActiveTab('Overview');
     setIsLoaded(false);
@@ -586,12 +875,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       if (editingBooking) {
         try {
           const bookingData = JSON.parse(editingBooking);
-          console.log('📝 Loading booking data for editing:', bookingData);
 
           // Set as editing mode
           setIsEditingBooking(true);
           setEditingBookingId(bookingData.bookingId || bookingData.id);
-          console.log('✅ Edit mode enabled. BookingID:', bookingData.bookingId || bookingData.id);
 
           // Build occasionData from booking data (include all possible occasion fields)
           const occasionDataFromBooking: { [key: string]: string } = {};
@@ -684,20 +971,16 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           console.log('📝 Populated occasion data for editing:', occasionDataFromBooking);
 
           // Pre-fill form with existing booking data
-          setFormData({
+          const dynamicFormData: any = {
             bookingName: bookingData.customerName || bookingData.bookingName || '',
             numberOfPeople: bookingData.numberOfPeople || 2,
             whatsappNumber: bookingData.phone || bookingData.whatsappNumber || '',
             emailAddress: bookingData.email || bookingData.emailAddress || '',
             occasion: bookingData.occasion || '',
-            selectedCakes: bookingData.selectedCakes || [],
-            selectedDecorItems: bookingData.selectedDecorItems || [],
-            selectedGifts: bookingData.selectedGifts || [],
-            selectedMovies: bookingData.selectedMovies || [],
-            wantCakes: (bookingData.selectedCakes && bookingData.selectedCakes.length > 0) ? 'Yes' : 'No',
-            wantDecorItems: (bookingData.selectedDecorItems && bookingData.selectedDecorItems.length > 0) ? 'Yes' : 'No',
-            wantGifts: (bookingData.selectedGifts && bookingData.selectedGifts.length > 0) ? 'Yes' : 'No',
-            wantMovies: (bookingData.selectedMovies && bookingData.selectedMovies.length > 0) ? 'Yes' : 'No',
+            wantCakes: 'No',
+            wantDecorItems: 'No',
+            wantGifts: 'No',
+            wantMovies: 'No',
             promoCode: bookingData.promoCode || '',
             agreeToTerms: true, // Auto-agree for editing
             occasionData: occasionDataFromBooking,
@@ -713,7 +996,24 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             proposalPartnerName: bookingData.proposalPartnerName,
             valentineName: bookingData.valentineName,
             customCelebration: bookingData.customCelebration,
+          };
+
+          // Add dynamic service items from booking data
+          Object.keys(bookingData).forEach(key => {
+            if (key.startsWith('selected') && Array.isArray(bookingData[key])) {
+              dynamicFormData[key] = bookingData[key];
+              // Set want flags based on whether items exist
+              if (bookingData[key].length > 0) {
+                const serviceName = key.replace('selected', '');
+                if (serviceName === 'Cakes') dynamicFormData.wantCakes = 'Yes';
+                if (serviceName === 'DecorItems') dynamicFormData.wantDecorItems = 'Yes';
+                if (serviceName === 'Gifts') dynamicFormData.wantGifts = 'Yes';
+                if (serviceName === 'Movies') dynamicFormData.wantMovies = 'Yes';
+              }
+            }
           });
+
+          setFormData(dynamicFormData);
 
           // Set context data
           if (bookingData.date) setSelectedDate(bookingData.date);
@@ -950,6 +1250,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [allServices, setAllServices] = useState<any[]>([]);
   const [selectedServices, setSelectedServices] = useState<{ [serviceName: string]: 'Yes' | 'No' }>({});
   const [selectedServiceItems, setSelectedServiceItems] = useState<{ [serviceName: string]: string[] }>({});
+  // Track services where user explicitly clicked Skip (so we don't force selection later)
+  const [skippedServices, setSkippedServices] = useState<Set<string>>(new Set());
 
   // Dynamic tabs based on selections
   const getAvailableTabs = () => {
@@ -958,7 +1260,6 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     // Add dynamic service tabs based on user selection
     allServices.forEach(service => {
       if (selectedServices[service.name] === 'Yes') {
-        console.log(`📑 Adding tab: ${service.name}`);
         availableTabs.push(service.name);
       }
     });
@@ -966,57 +1267,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     // Always add Terms & Conditions as the last tab
     availableTabs.push('Terms & Conditions');
 
-    console.log('📑 Available tabs:', availableTabs);
     return availableTabs;
   };
 
   const tabs = getAvailableTabs();
 
-  // Fetch occasions from database
-  useEffect(() => {
-    const fetchOccasions = async () => {
-      try {
-        setIsLoadingOccasions(true);
-        const response = await fetch('/api/occasions');
-        const data = await response.json();
-
-        if (data.success && data.occasions) {
-
-          setOccasionOptions(data.occasions);
-
-          // If editing, set selectedOccasionData after occasions are loaded
-          const editingBooking = sessionStorage.getItem('editingBooking');
-          if (editingBooking) {
-            try {
-              const bookingData = JSON.parse(editingBooking);
-              console.log('🔍 Checking occasion for editing:', bookingData.occasion);
-              console.log('🔍 Available occasions:', data.occasions.map((o: any) => o.name));
-              if (bookingData.occasion) {
-                const selectedOccasion = data.occasions.find((occ: any) => occ.name === bookingData.occasion);
-                console.log('🔍 Found matching occasion:', selectedOccasion);
-                if (selectedOccasion) {
-                  setSelectedOccasionData(selectedOccasion);
-                  console.log('✅ selectedOccasionData set:', selectedOccasion);
-                } else {
-                  console.warn('⚠️ No matching occasion found for:', bookingData.occasion);
-                }
-              }
-            } catch (e) {
-              console.error('Error setting occasion data:', e);
-            }
-          }
-        } else {
-
-        }
-      } catch (error) {
-
-      } finally {
-        setIsLoadingOccasions(false);
-      }
-    };
-
-    fetchOccasions();
-  }, []);
+  // Removed - now handled in combined fetchAllData
 
   // Handle occasion selection and set required fields
   const handleOccasionSelect = (occasionName: string) => {
@@ -1050,120 +1306,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [isLoadingServices, setIsLoadingServices] = useState<boolean>(true);
   const [servicesError, setServicesError] = useState<string | null>(null);
 
-  // Fetch services (cakes, decor, gifts) dynamically
-  useEffect(() => {
-    const fetchServices = async () => {
-      try {
-        setIsLoadingServices(true);
-        setServicesError(null);
-        const res = await fetch('/api/admin/services');
-        const data = await res.json();
-        if (data?.success && Array.isArray(data.services)) {
-          const services = data.services;
-
-          const cleanUrl = (u: any) => {
-            if (typeof u !== 'string') return '';
-            return u.trim().replace(/^`+|`+$/g, '').replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '');
-          };
-
-          const normalizeItem = (item: any, prefix: string) => ({
-            id: item.id || item.itemId || `${prefix}-${String(item.name || item.title || 'item').toLowerCase().replace(/\s+/g, '-')}`,
-            name: item.name || item.title || 'Item',
-            price: Number(item.price ?? item.cost ?? 0),
-            rating: Number(item.rating ?? 4.5),
-            image: cleanUrl(item.image || item.imageUrl) || item.emoji || '🛍️',
-            category: item.category || item.type || prefix,
-            bestseller: Boolean(item.bestseller ?? false)
-          });
-
-          const detectCategory = (serviceName: string) => {
-            const n = String(serviceName).toLowerCase();
-            if (n.includes('gift')) return 'gift';
-            if (n.includes('decor')) return 'decor';
-            if (n.includes('party') || n.includes('places') || n.includes('patry')) return 'decor';
-            if (n.includes('cake') || n.includes('food') || n.includes('beverages')) return 'cake';
-            return null;
-          };
-
-          // Store all services for dynamic tabs (only active services)
-          const activeServices = services.filter((s: any) => s.isActive === true);
-          console.log('📦 Fetched services from database:', activeServices);
-          console.log('📦 Active service names:', activeServices.map((s: any) => s.name));
-          console.log('📦 Service items count:', activeServices.map((s: any) => ({
-            name: s.name,
-            itemsCount: s.items?.length || 0,
-            includeInDecoration: s.includeInDecoration || false
-          })));
-
-          setAllServices(activeServices);
-
-          // Initialize selectedServices state
-          const initialSelectedServices: { [key: string]: 'Yes' | 'No' } = {};
-          activeServices.forEach((s: any) => {
-            // Auto-set compulsory services to 'Yes'
-            if (s.compulsory) {
-              initialSelectedServices[s.name] = 'Yes';
-              console.log(`🔒 Initialized COMPULSORY service: ${s.name} = Yes`);
-            } else {
-              initialSelectedServices[s.name] = 'No';
-              console.log(`📦 Initialized service: ${s.name} (includeInDecoration: ${s.includeInDecoration || false})`);
-            }
-          });
-          setSelectedServices(initialSelectedServices);
-
-          const categorized: Record<'cake' | 'decor' | 'gift', any[]> = { cake: [], decor: [], gift: [] };
-          services.forEach((s: any) => {
-            const cat = detectCategory(s.name);
-            if (!cat || !Array.isArray(s.items)) return;
-            categorized[cat] = s.items.map((it: any) => normalizeItem(it, cat));
-          });
-
-          const allFetched = [...categorized.cake, ...categorized.decor, ...categorized.gift];
-          const pricesPresent = allFetched.some(it => Number(it.price) > 0);
-
-          if (allFetched.length === 0 || !pricesPresent) {
-            // Fallback: fetch mock items if services are missing or lack prices
-            try {
-              const [cakesRes, decorRes, giftsRes] = await Promise.all([
-                fetch('/api/items?category=cakes'),
-                fetch('/api/items?category=decor'),
-                fetch('/api/items?category=gifts')
-              ]);
-              const [cakesData, decorData, giftsData] = await Promise.all([
-                cakesRes.json(), decorRes.json(), giftsRes.json()
-              ]);
-              const cakes = Array.isArray(cakesData.items) ? cakesData.items.map((it: any) => normalizeItem(it, 'cake')) : [];
-              const decor = Array.isArray(decorData.items) ? decorData.items.map((it: any) => normalizeItem(it, 'decor')) : [];
-              const gifts = Array.isArray(giftsData.items) ? giftsData.items.map((it: any) => normalizeItem(it, 'gift')) : [];
-
-              setCakeOptions(cakes);
-              setDecorOptions(decor);
-              setGiftOptions(gifts);
-
-            } catch (fallbackError) {
-
-              setCakeOptions(categorized.cake);
-              setDecorOptions(categorized.decor);
-              setGiftOptions(categorized.gift);
-            }
-          } else {
-            setCakeOptions(categorized.cake);
-            setDecorOptions(categorized.decor);
-            setGiftOptions(categorized.gift);
-          }
-        } else {
-          setServicesError('Services API returned no data');
-        }
-      } catch (error) {
-
-        setServicesError('Failed to fetch services');
-      } finally {
-        setIsLoadingServices(false);
-      }
-    };
-
-    fetchServices();
-  }, []);
+  // Removed - now handled in combined fetchAllData
 
   // Helper: render image or emoji depending on value
   const renderItemImage = (img: string, alt: string) => {
@@ -1239,50 +1382,41 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       const currentTotal = getFinalTotal();
       const newTotal = isSelected ? currentTotal - itemPrice : currentTotal + itemPrice;
 
-      // 🔥 UPDATE FORMDATA - Map service names to formData fields
-      const formDataFieldMap: Record<string, 'selectedCakes' | 'selectedDecorItems' | 'selectedGifts' | 'selectedMovies'> = {
-        'Cakes': 'selectedCakes',
-        'Gifts': 'selectedGifts',
-        'Decoration': 'selectedDecorItems',
-        'Decoration Items': 'selectedDecorItems',
-        'Food': 'selectedCakes', // Food items go to cakes for now
-        'Extra Add Ons': 'selectedDecorItems' // Extra add-ons go to decor items
-      };
-
-      const formDataField = formDataFieldMap[serviceName];
-      if (formDataField) {
-        setFormData(prevFormData => {
-          const currentFormDataItems = prevFormData[formDataField] || [];
-          const itemObject = {
-            id: itemId,
-            name: itemName,
-            price: itemPrice,
-            quantity: 1
-          };
-          
-          let newFormDataItems;
-          if (isSelected) {
-            // Remove item
-            newFormDataItems = currentFormDataItems.filter(i => i.name !== itemName);
+      // 🔥 UPDATE FORMDATA - Store items with dynamic service names
+      const dynamicServiceFieldName = `selected${serviceName.replace(/\s+/g, '')}`;
+      
+      setFormData(prevFormData => {
+        // Get current items for this service (dynamic field)
+        const currentFormDataItems = (prevFormData as any)[dynamicServiceFieldName] || [];
+        const itemObject = {
+          id: itemId,
+          name: itemName,
+          price: itemPrice,
+          quantity: 1
+        };
+        
+        let newFormDataItems;
+        if (isSelected) {
+          // Remove item
+          newFormDataItems = currentFormDataItems.filter((i: any) => i.name !== itemName);
+        } else {
+          // Add item only if it doesn't already exist (prevent duplicates)
+          const itemExists = currentFormDataItems.some((i: any) => i.name === itemName);
+          if (itemExists) {
+            console.log(`⚠️ [Item Selection] "${itemName}" already exists in ${dynamicServiceFieldName}, skipping duplicate`);
+            newFormDataItems = currentFormDataItems;
           } else {
-            // Add item only if it doesn't already exist (prevent duplicates)
-            const itemExists = currentFormDataItems.some(i => i.name === itemName);
-            if (itemExists) {
-              console.log(`⚠️ [Item Selection] "${itemName}" already exists in ${formDataField}, skipping duplicate`);
-              newFormDataItems = currentFormDataItems;
-            } else {
-              newFormDataItems = [...currentFormDataItems, itemObject];
-            }
+            newFormDataItems = [...currentFormDataItems, itemObject];
           }
-          
-          console.log(`🎯 [Item Selection] ${isSelected ? 'Removed' : 'Added'} "${itemName}" (₹${itemPrice}) ${isSelected ? 'from' : 'to'} ${formDataField}:`, newFormDataItems);
-          
-          return {
-            ...prevFormData,
-            [formDataField]: newFormDataItems
-          };
-        });
-      }
+        }
+        
+        console.log(`🎯 [Item Selection] ${isSelected ? 'Removed' : 'Added'} "${itemName}" (₹${itemPrice}) ${isSelected ? 'from' : 'to'} ${dynamicServiceFieldName}:`, newFormDataItems);
+        
+        return {
+          ...prevFormData,
+          [dynamicServiceFieldName]: newFormDataItems
+        };
+      });
 
       // Show single toast notification with total (only once per click)
       if (!toastShownRef.current) {
@@ -1319,7 +1453,22 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   // Check if service item is selected
   const isServiceItemSelected = (serviceName: string, itemName: string) => {
     return (selectedServiceItems[serviceName] || []).includes(itemName);
+  };
 
+  // Helper function to extract dynamic service items from formData
+  const getDynamicServiceItemsFromFormData = (formData: any): Record<string, any> => {
+    const dynamicServiceItems: Record<string, any> = {};
+    
+    // Look for all fields that start with "selected" and contain service items
+    Object.keys(formData).forEach(key => {
+      if (key.startsWith('selected') && Array.isArray(formData[key])) {
+        // Store ALL dynamic service items (completely dynamic!)
+        dynamicServiceItems[key] = formData[key];
+        console.log(`📦 Dynamic service items from formData: ${key}:`, formData[key]);
+      }
+    });
+    
+    return dynamicServiceItems;
   };
 
   // Fetch booked slots when popup opens
@@ -1401,18 +1550,21 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
   // Auto-adjust numberOfPeople when theater changes (set to theater's minimum capacity)
   useEffect(() => {
-    if (selectedTheater && isOpen) {
+    if (selectedTheater && isOpen && realTheaterData.length > 0) {
       const capacity = getTheaterCapacity();
+      
+      console.log('🎭 [Auto-adjust People] Theater:', selectedTheater.name, 'Capacity:', capacity, 'Current:', formData.numberOfPeople);
 
-      // Only update if current numberOfPeople is less than minimum or if it's the default value (2)
-      if (formData.numberOfPeople < capacity.min || formData.numberOfPeople === 2) {
+      // Only update if current numberOfPeople is less than minimum
+      if (formData.numberOfPeople < capacity.min) {
+        console.log('✅ [Auto-adjust People] Updating numberOfPeople from', formData.numberOfPeople, 'to', capacity.min);
         setFormData(prev => ({
           ...prev,
           numberOfPeople: capacity.min
         }));
       }
     }
-  }, [selectedTheater, isOpen]);
+  }, [selectedTheater, isOpen, realTheaterData, formData.numberOfPeople]);
 
   // Auto-update occasionPersonName only for the specific occasion field
   useEffect(() => {
@@ -1471,7 +1623,15 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         (selectedTheater.name && theater.name.includes(selectedTheater.name.split(' ')[0])) // Match by first word (EROS, PHILIA, etc.)
       );
 
+      console.log('🎭 [Theater Capacity Debug]', {
+        selectedTheater: selectedTheater.name,
+        realTheater: realTheater ? realTheater.name : 'Not found',
+        capacity: realTheater?.capacity,
+        allTheaters: realTheaterData.map(t => ({ name: t.name, capacity: t.capacity }))
+      });
+
       if (realTheater && realTheater.capacity && realTheater.capacity.min && realTheater.capacity.max) {
+        console.log('✅ [Theater Capacity] Using database capacity:', realTheater.capacity);
         return {
           min: realTheater.capacity.min,
           max: realTheater.capacity.max
@@ -1481,6 +1641,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
     // Priority 2: Check if theater object has capacity properties (from context)
     if (typeof selectedTheater.capacity === 'object' && selectedTheater.capacity.min && selectedTheater.capacity.max) {
+      console.log('✅ [Theater Capacity] Using context capacity:', selectedTheater.capacity);
       return {
         min: selectedTheater.capacity.min,
         max: selectedTheater.capacity.max
@@ -1488,6 +1649,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     }
 
     // Emergency fallback - should rarely be used
+    console.log('⚠️ [Theater Capacity] Using emergency fallback capacity (1-10)');
     return { min: 1, max: 10 };
   };
 
@@ -1495,17 +1657,31 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     setFormData(prev => {
       // Get dynamic theater capacity
       const capacity = getTheaterCapacity();
-
-      // Calculate new value with proper min/max limits
       const currentValue = prev[field];
       let newValue;
 
+      console.log('🎭 [Number Change]', { 
+        action, 
+        currentValue, 
+        capacity, 
+        theater: selectedTheater?.name 
+      });
+
+      // Special case: If min = max, don't allow any changes
+      if (capacity.min === capacity.max) {
+        console.log('🔒 [Fixed Capacity] Theater has fixed capacity, no changes allowed');
+        return prev; // No change allowed
+      }
+
       if (action === 'increment') {
+        // Can increase up to theater maximum
         newValue = Math.min(currentValue + 1, capacity.max);
       } else {
-        // Allow decrease to minimum 1, regardless of theater's default minimum
-        newValue = Math.max(currentValue - 1, 1);
+        // Can decrease but not below theater minimum
+        newValue = Math.max(currentValue - 1, capacity.min);
       }
+
+      console.log('✅ [Number Change] Updated from', currentValue, 'to', newValue);
 
       return {
         ...prev,
@@ -1681,14 +1857,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       // Add decoration fees from pricing.json
       const pricingDecorationFee = pricingData.decorationFees || 0;
 
-      // Add individual decoration items prices
-      let itemsDecorationFee = 0;
-      formData.selectedDecorItems.forEach(decorName => {
-        const decor = decorOptions.find(d => d.name === decorName);
-        if (decor) itemsDecorationFee += decor.price;
-      });
+     
 
-      return pricingDecorationFee + itemsDecorationFee;
+      return pricingDecorationFee ;
     }
     return 0;
   };
@@ -1840,6 +2011,21 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   };
 
   const handleSkip = () => {
+    // If current tab is a dynamic service tab, mark that service as skipped
+    const currentService = allServices.find((s: any) => s.name === activeTab);
+
+    if (currentService) {
+      // Clear any selected items for this service so they are not saved in booking
+      setSelectedServiceItems(prev => ({
+        ...prev,
+        [currentService.name]: [],
+      }));
+
+      // Track that the user explicitly skipped this service for this booking flow
+      setSkippedServices(prev => new Set([...prev, currentService.name]));
+    }
+
+    // Move to the next tab as before
     const currentIndex = tabs.indexOf(activeTab);
     if (currentIndex < tabs.length - 1) {
       setActiveTab(tabs[currentIndex + 1]);
@@ -1969,6 +2155,15 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           setShowValidationPopup(true);
           return;
         }
+
+        // Validate movies selection on Overview tab: if Movies = Yes, at least one movie must be selected
+        if (formData.wantMovies === 'Yes' && (!formData.selectedMovies || formData.selectedMovies.length === 0)) {
+          setValidationErrorName('Movie Selection Required');
+          setValidationMessage('You selected "Yes" for movies, but did not choose any movie. Please select at least one movie or select "No" for movies in the Overview tab.');
+          setShowValidationPopup(true);
+          return;
+        }
+
       }
 
       if (activeTab === 'Occasion') {
@@ -1984,6 +2179,21 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           setValidationMessage('Please choose whether you want decoration (Yes or No) to continue.');
           setShowValidationPopup(true);
           return;
+        }
+
+        // Validate dynamic occasion required fields on Occasion tab
+        if (selectedOccasionData && selectedOccasionData.requiredFields) {
+          for (const fieldKey of selectedOccasionData.requiredFields) {
+            const fieldValue = formData.occasionData?.[fieldKey];
+            const fieldLabel = selectedOccasionData.fieldLabels[fieldKey] || fieldKey;
+
+            if (!fieldValue || fieldValue.trim() === '') {
+              setValidationErrorName(`Missing ${fieldLabel}`);
+              setValidationMessage(`Please enter ${fieldLabel.toLowerCase()} to continue.`);
+              setShowValidationPopup(true);
+              return;
+            }
+          }
         }
       }
 
@@ -2045,26 +2255,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           ...(formData.customCelebration && { customCelebration: formData.customCelebration }),
           numberOfPeople: formData.numberOfPeople,
           
-          // 🔍 DEBUG: Log what items are being sent
-          ...(() => {
-            console.log('📦 [Booking] Items Before Sending:', {
-              wantCakes: formData.wantCakes,
-              wantDecorItems: formData.wantDecorItems,
-              wantGifts: formData.wantGifts,
-              wantMovies: formData.wantMovies,
-              selectedCakes: formData.selectedCakes,
-              selectedDecorItems: formData.selectedDecorItems,
-              selectedGifts: formData.selectedGifts,
-              selectedMovies: formData.selectedMovies
-            });
-            return {};
-          })(),
-
-          // Items already have prices from handleServiceItemToggle
-          selectedCakes: formData.selectedCakes,
-          selectedDecorItems: formData.selectedDecorItems,
-          selectedGifts: formData.selectedGifts,
+          
           selectedMovies: formData.selectedMovies,
+          // Dynamic service items (completely dynamic!)
+          ...getDynamicServiceItemsFromFormData(formData),
+          
           // Payment breakdown
           totalAmount: discountedTotal,
           advancePayment: advancePayment, // Amount paid now (₹600)
@@ -2109,14 +2304,6 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           ? { bookingId: editingBookingId, data: bookingData }
           : bookingData;
 
-        console.log('🔄 Saving booking:', {
-          isEditing: isEditingBooking,
-          bookingId: editingBookingId,
-          url,
-          method,
-          payload
-        });
-
         const response = await fetch(url, {
           method: method,
           headers: {
@@ -2126,11 +2313,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         });
 
         const result = await response.json();
-        console.log('📥 API Response:', result);
 
         if (!response.ok) {
-          console.error('❌ HTTP Error:', response.status, response.statusText);
-          console.error('❌ Error Details:', result);
+          throw new Error(`HTTP ${response.status}: ${result.error || 'Unknown error'}`);
         }
 
         if (result.success) {
@@ -2524,7 +2709,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                         <div className="booking-popup-number">
                           <button
                             onClick={() => handleNumberChange('numberOfPeople', 'decrement')}
-                            disabled={formData.numberOfPeople <= 1}
+                            disabled={(() => {
+                              const capacity = getTheaterCapacity();
+                              // Disable if: fixed capacity (min=max) OR already at minimum
+                              return capacity.min === capacity.max || formData.numberOfPeople <= capacity.min;
+                            })()}
                           >
                             <Minus className="w-4 h-4" />
                           </button>
@@ -2533,7 +2722,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                             onClick={() => handleNumberChange('numberOfPeople', 'increment')}
                             disabled={(() => {
                               const capacity = getTheaterCapacity();
-                              return formData.numberOfPeople >= capacity.max;
+                              // Disable if: fixed capacity (min=max) OR already at maximum
+                              return capacity.min === capacity.max || formData.numberOfPeople >= capacity.max;
                             })()}
                           >
                             <Plus className="w-4 h-4" />
@@ -2542,7 +2732,16 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                         {(() => {
                           const capacity = getTheaterCapacity();
 
-                          // Show capacity info and warnings
+                          // Special case: Fixed capacity theater (min = max)
+                          if (capacity.min === capacity.max) {
+                            return (
+                              <div className="booking-popup-capacity-info">
+                                <span>Fixed capacity theater: {capacity.min} people only</span>
+                              </div>
+                            );
+                          }
+
+                          // Variable capacity theater (min ≠ max)
                           if (formData.numberOfPeople >= capacity.max) {
                             return (
                               <div className="booking-popup-capacity-warning">
@@ -2552,7 +2751,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                           } else if (formData.numberOfPeople === capacity.min) {
                             return (
                               <div className="booking-popup-capacity-info">
-                                <span>Base capacity: {capacity.min} people (extra guests: ₹{pricingData.extraGuestFee || 0} each)</span>
+                                <span>Base capacity: {capacity.min} people (can increase up to {capacity.max})</span>
                               </div>
                             );
                           } else if (formData.numberOfPeople > capacity.min) {
@@ -2673,15 +2872,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                   const value = e.target.value as 'Yes' | 'No' | '';
                                   if (!value) return; // Don't process empty selection
 
-                                  console.log(`🎨 Decoration selection changed: ${value}`);
-
                                   // If decoration is selected, automatically enable services with includeInDecoration
                                   if (value === 'Yes') {
                                     const updatedServices: { [key: string]: 'Yes' | 'No' } = { '__decoration__': value };
                                     allServices.forEach(service => {
                                       if (service.includeInDecoration) {
                                         updatedServices[service.name] = 'Yes';
-                                        console.log(`  ✅ Auto-enabled service: ${service.name}`);
                                       } else {
                                         updatedServices[service.name] = selectedServices[service.name] || 'No';
                                       }
@@ -2693,7 +2889,6 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                     allServices.forEach(service => {
                                       if (service.includeInDecoration) {
                                         updatedServices[service.name] = 'No';
-                                        console.log(`  ❌ Disabled service: ${service.name}`);
                                       } else {
                                         updatedServices[service.name] = selectedServices[service.name] || 'No';
                                       }
@@ -2923,7 +3118,6 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                               const fieldLabel = selectedOccasionData.fieldLabels?.[fieldKey] || fieldKey;
                               const currentValue = formData.occasionData?.[fieldKey] || '';
 
-                              console.log('📋 Rendering field:', { fieldKey, fieldLabel, currentValue, selectedOccasionData });
 
                               // Special handling for gender fields
                               if (fieldKey.toLowerCase().includes('gender')) {
@@ -2988,9 +3182,6 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                 {/* Dynamic Service Tabs */}
                 {allServices.map((service) => {
                   if (activeTab === service.name && selectedServices[service.name] === 'Yes') {
-                    console.log(`🎨 Rendering service tab: ${service.name}`);
-                    console.log(`🎨 Service has ${service.items?.length || 0} items`);
-                    console.log(`🎨 Service items:`, service.items);
 
                     return (
                       <div key={service.serviceId || service.name} className="booking-popup-section">
@@ -3000,7 +3191,14 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                         </h3>
                         <div className="booking-popup-items">
                           {Array.isArray(service.items) && service.items.length > 0 ? (
-                            service.items.map((item: any) => {
+                            // Sort items so that those with showTag true appear first
+                            [...service.items]
+                              .sort((a: any, b: any) => {
+                                const aTag = a.showTag ? 1 : 0;
+                                const bTag = b.showTag ? 1 : 0;
+                                return bTag - aTag;
+                              })
+                              .map((item: any) => {
                               const itemName = item.name || item.title || 'Item';
                               const itemPrice = Number(item.price ?? item.cost ?? 0);
                               const itemRating = Number(item.rating ?? 4.5);
@@ -3016,6 +3214,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                   className={`booking-popup-item ${isSelected ? 'selected' : ''}`}
                                 >
                                   {item.bestseller && <div className="booking-popup-badge">Bestseller</div>}
+                                  {service.itemTagEnabled && service.itemTagName && item.showTag && (
+                                    <div className="booking-popup-service-tag">{service.itemTagName}</div>
+                                  )}
                                   <div className="booking-popup-item-image" style={{ width: '100%', height: 180, borderRadius: 12, overflow: 'hidden', background: '#0f0f10' }}>
                                     {renderItemImage(String(itemImage), itemName)}
                                   </div>
@@ -3140,7 +3341,18 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                             onChange={(e) => handleInputChange('agreeToTerms', e.target.checked)}
                             className="booking-popup-checkbox"
                           />
-                          <span className="booking-popup-checkbox-text">
+                          <span
+                            className="booking-popup-checkbox-text"
+                            onClick={() => {
+                              // Smooth scroll to the Confirm Booking buttons section
+                              setTimeout(() => {
+                                const actionSection = document.querySelector('.booking-popup-action');
+                                if (actionSection) {
+                                  actionSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                }
+                              }, 50);
+                            }}
+                          >
                             Click here to Agree to the above terms & conditions.
                           </span>
                         </label>
@@ -3186,12 +3398,39 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
                   return (
                     <button
-                      onClick={activeTab === tabs[tabs.length - 1] ? handleConfirmWithoutPayment : handleNextStep}
+                      onClick={() => {
+                        if (activeTab === tabs[tabs.length - 1]) {
+                          // Final step: validate full form
+                          if (!validateForm()) {
+                            return;
+                          }
+
+                          // Edit mode: Direct update without payment
+                          // New booking: Payment flow
+                          if (isEditingBooking) {
+                            handleConfirmWithoutPayment(); // Direct update for editing
+                          } else {
+                            handlePaymentDone(); // Payment flow for new booking
+                          }
+                        } else {
+                          handleNextStep();
+                        }
+                      }}
                       className="booking-popup-btn"
-                      disabled={activeTab === tabs[tabs.length - 1] && isSubmittingBooking}
+                      disabled={activeTab === tabs[tabs.length - 1] && (isProcessingPayment || isSubmittingBooking)}
                     >
-                      <span>{activeTab === tabs[tabs.length - 1] ? (isSubmittingBooking ? 'Processing...' : 'Confirm Booking') : 'Continue'}</span>
-                      {activeTab === tabs[tabs.length - 1] && isSubmittingBooking ? (
+                      <span>
+                        {activeTab === tabs[tabs.length - 1]
+                          ? (isProcessingPayment || isSubmittingBooking)
+                            ? isEditingBooking
+                              ? 'Updating Booking...'
+                              : 'Processing Payment...'
+                            : isEditingBooking
+                              ? 'Update Booking'
+                              : 'Confirm Booking'
+                          : 'Continue'}
+                      </span>
+                      {activeTab === tabs[tabs.length - 1] && (isProcessingPayment || isSubmittingBooking) ? (
                         <Clock className="w-5 h-5 animate-spin" />
                       ) : (
                         <ArrowRight className="w-5 h-5" />
@@ -3261,7 +3500,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                   }}
                   className="booking-popup-success-btn primary"
                 >
-                  New Booking
+                  {(bookingResult as { wasEditing?: boolean })?.wasEditing ? 'Edit Another Booking' : 'New Booking'}
                 </button>
                 <button
                   onClick={() => {
@@ -4322,6 +4561,38 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
             text-transform: uppercase;
             z-index: 3;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+          }
+
+          .booking-popup-service-tag {
+            position: absolute;
+            top: 0.5rem;
+            left: 0.5rem;
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: #ffffff;
+            font-size: 0.5rem;
+            font-weight: 600;
+            padding: 0.2rem 0.4rem;
+            border-radius: 1rem;
+            text-transform: uppercase;
+            z-index: 3;
+            box-shadow: 0 2px 4px rgba(238, 90, 36, 0.3);
+            animation: serviceTagPulse 2s infinite;
+          }
+
+          @keyframes serviceTagPulse {
+            0%, 100% {
+              transform: scale(1);
+              box-shadow: 0 2px 4px rgba(238, 90, 36, 0.3);
+            }
+            50% {
+              transform: scale(1.05);
+              box-shadow: 0 4px 8px rgba(238, 90, 36, 0.5);
+            }
+          }
+
+          .booking-popup-service-tag:hover {
+            animation-play-state: paused;
+            transform: scale(1.1);
           }
 
           .booking-popup-occasion-overlay {
@@ -6459,19 +6730,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                         <span>₹{pricingData.decorationFees}</span>
                       </div>
                     )}
-                    {(() => {
-                      let itemsFee = 0;
-                      formData.selectedDecorItems.forEach(decorName => {
-                        const decor = decorOptions.find(d => d.name === decorName);
-                        if (decor) itemsFee += decor.price;
-                      });
-                      return itemsFee > 0 ? (
-                        <div className="flex justify-between items-center text-green-600">
-                          <span>Decoration Items:</span>
-                          <span>₹{itemsFee}</span>
-                        </div>
-                      ) : null;
-                    })()}
+                    
                   </>
                 )}
                 <div className="flex justify-between items-center text-green-600 font-bold">
@@ -6524,7 +6783,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           setIsMoviesModalOpen(false);
         }}
         onMovieSelect={handleMovieSelect}
-        selectedMovies={formData.selectedMovies.map(m => typeof m === 'string' ? m : m.name)}
+        selectedMovies={(formData.selectedMovies || []).map((m: any) => typeof m === 'string' ? m : m.name)}
       />
 
       {/* Toast Notifications */}

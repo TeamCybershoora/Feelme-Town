@@ -8,6 +8,27 @@ import { promisify } from 'util';
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 
+// Helper function to extract dynamic service items for database storage
+function getDynamicServiceItemsForDB(bookingData: any): Record<string, any> {
+  const dynamicServiceItems: Record<string, any> = {};
+  
+  // Look for all fields that start with "selected" and contain service items
+  Object.keys(bookingData).forEach(key => {
+    if (key.startsWith('selected') && Array.isArray(bookingData[key])) {
+      // Skip movies as it's handled separately
+      if (key === 'selectedMovies') {
+        return;
+      }
+      
+      // Store dynamic service items
+      dynamicServiceItems[key] = bookingData[key];
+      console.log(`📦 DB: Dynamic service items: ${key}:`, bookingData[key]);
+    }
+  });
+  
+  return dynamicServiceItems;
+}
+
 interface BookingData {
   name: string;
   email: string;
@@ -17,10 +38,10 @@ interface BookingData {
   time: string;
   occasion: string;
   numberOfPeople: number;
-  selectedCakes?: Array<{ id: string; name: string; price: number; quantity: number }>;
-  selectedDecorItems?: Array<{ id: string; name: string; price: number; quantity: number }>;
-  selectedGifts?: Array<{ id: string; name: string; price: number; quantity: number }>;
+  // Movies kept static
   selectedMovies?: Array<{ id: string; name: string; price: number; quantity: number }>;
+  // Dynamic service items (can be any service name)
+  [key: string]: any;
   totalAmount?: number;
   advancePayment?: number;
   venuePayment?: number;
@@ -518,11 +539,10 @@ const saveBooking = async (bookingData: BookingData) => {
       occasionPersonName: await getOccasionPersonName(bookingData),
       // Dynamic occasion-specific fields based on database configuration
       ...(await getDynamicOccasionFields(bookingData)),
-      // Keep some key items for easy querying
+      // Keep movies static for easy querying
       selectedMovies: bookingData.selectedMovies || [],
-      selectedCakes: bookingData.selectedCakes || [],
-      selectedDecorItems: bookingData.selectedDecorItems || [],
-      selectedGifts: bookingData.selectedGifts || [],
+      // Dynamic service items (completely dynamic!)
+      ...getDynamicServiceItemsForDB(bookingData),
       // Manual booking specific fields
       isManualBooking: bookingData.isManualBooking || false,
       bookingType: bookingData.bookingType || 'Online',
@@ -530,7 +550,8 @@ const saveBooking = async (bookingData: BookingData) => {
       staffId: bookingData.staffId || null,
       staffName: bookingData.staffName || null,
       notes: bookingData.notes || '',
-      slotBookingFee: (bookingData as any)?.slotBookingFee ?? bookingData.pricingData?.slotBookingFee ?? bookingData.advancePayment ?? 0
+      slotBookingFee: Number((bookingData as any)?.slotBookingFee ?? bookingData.pricingData?.slotBookingFee ?? bookingData.advancePayment ?? 0),
+      decorationFee: Number((bookingData as any)?.decorationFee ?? (bookingData as any)?.decorationAppliedFee ?? 0)
     };
     
     // Get collection
@@ -666,18 +687,19 @@ const saveManualBooking = async (bookingData: BookingData) => {
       occasionPersonName: await getOccasionPersonName(booking),
       // Dynamic occasion-specific fields based on database configuration
       ...(await getDynamicOccasionFields(booking)),
-      // Keep selected items for quick queries
+      // Keep movies static for quick queries
       selectedMovies: booking.selectedMovies || [],
-      selectedCakes: booking.selectedCakes || [],
-      selectedDecorItems: booking.selectedDecorItems || [],
-      selectedGifts: booking.selectedGifts || [],
+      // Dynamic service items (completely dynamic!)
+      ...getDynamicServiceItemsForDB(booking),
       // Manual booking specific fields
       isManualBooking: true,
       bookingType: 'Manual',
       createdBy: 'Admin',
       staffId: booking.staffId || null,
       staffName: booking.staffName || null,
-      notes: booking.notes || ''
+      notes: booking.notes || '',
+      slotBookingFee: Number((booking as any)?.slotBookingFee ?? booking.pricingData?.slotBookingFee ?? booking.advancePayment ?? 0),
+      decorationFee: Number((booking as any)?.decorationFee ?? (booking as any)?.decorationAppliedFee ?? 0)
     };
     
     // Save to both manual_booking collection AND main booking collection
@@ -3608,15 +3630,29 @@ const getAllServices = async () => {
             console.error('❌ Error decompressing service data:', error);
           }
         }
+
+        // Prefer items from main document (they contain latest showTag etc.),
+        // but fall back to decompressed items if needed.
+        const rawItems = (service.items || decompressedData.items || []) as any[];
+        const normalizedItems = rawItems.map((item) => ({
+          ...item,
+          showTag: item.showTag ?? false,
+        }));
         
         return {
+          // Start from decompressed data so it provides defaults,
+          // then override with authoritative DB fields.
+          ...decompressedData,
           _id: service._id,
           serviceId: service.serviceId,
           name: service.name,
-          items: service.items || [],
+          items: normalizedItems,
           isActive: service.isActive,
+          includeInDecoration: service.includeInDecoration,
+          compulsory: service.compulsory,
+          itemTagEnabled: service.itemTagEnabled,
+          itemTagName: service.itemTagName,
           createdAt: service.createdAt,
-          ...decompressedData
         };
       })
     );
@@ -3655,25 +3691,36 @@ const getAllServicesIncludingInactive = async () => {
             console.error('❌ Error decompressing service data:', error);
           }
         }
+
+        // Prefer items from main document (with showTag) and fall back to decompressed items.
+        const rawItems = (service.items || decompressedData.items || []) as any[];
+        const normalizedItems = rawItems.map((item) => ({
+          ...item,
+          showTag: item.showTag ?? false,
+        }));
         
         // Merge database fields with decompressed data
         // Direct fields take priority over decompressed data
         const mergedService = {
+          ...decompressedData,
           _id: service._id,
           serviceId: service.serviceId,
           name: service.name,
-          items: service.items || [],
+          items: normalizedItems,
           isActive: service.isActive,
           includeInDecoration: service.includeInDecoration, // Direct field from database
           compulsory: service.compulsory, // Direct field from database
+          itemTagEnabled: service.itemTagEnabled, // Direct field from database
+          itemTagName: service.itemTagName, // Direct field from database
           createdAt: service.createdAt,
           updatedAt: service.updatedAt,
-          // Include other decompressed data
-          ...decompressedData
         };
         
         console.log(`🔍 Service "${service.name}":`, {
           includeInDecoration: mergedService.includeInDecoration,
+          compulsory: mergedService.compulsory,
+          itemTagEnabled: mergedService.itemTagEnabled,
+          itemTagName: mergedService.itemTagName,
           isActive: mergedService.isActive
         });
         
@@ -3719,6 +3766,14 @@ const updateService = async (id: string, serviceData: Record<string, unknown>) =
     if (serviceData.compulsory !== undefined) {
       updateData.compulsory = serviceData.compulsory;
       console.log('✅ Setting compulsory to:', serviceData.compulsory);
+    }
+    if (serviceData.itemTagEnabled !== undefined) {
+      updateData.itemTagEnabled = serviceData.itemTagEnabled;
+      console.log('✅ Setting itemTagEnabled to:', serviceData.itemTagEnabled);
+    }
+    if (serviceData.itemTagName !== undefined) {
+      updateData.itemTagName = serviceData.itemTagName;
+      console.log('✅ Setting itemTagName to:', serviceData.itemTagName);
     }
     
     console.log('📦 Final updateData:', updateData);

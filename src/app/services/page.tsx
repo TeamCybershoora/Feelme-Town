@@ -46,9 +46,8 @@ export default function Services() {
         fetchServices();
     }, []);
 
-    const foodService = services.find(s => /food|beverage|cake|snack/i.test(s.name));
-    const giftService = services.find(s => /gift/i.test(s.name));
-const decorService = services.find(s => /(decor|decoration|party|patry|place)/i.test(s.name));
+    // All services fetched from database will be rendered dynamically below
+    const allServices = services;
     return (
         <div className="services-page">
             <style jsx>{`
@@ -415,97 +414,39 @@ const decorService = services.find(s => /(decor|decoration|party|patry|place)/i.
                 </div>
             </section>
 
-            {/* Food & Beverages Section (dynamic from services collection) */}
-            <section className="services-section">
+            {/* Dynamically render all services from the database (above Premium section) */}
+            {allServices.map(service => (
+              <section className="services-section" key={service._id}>
                 <div className="container">
-                    <h2 className="section-title">Food & Beverages</h2>
-                    <p className="section-description">
-                        Savor our delectable food offerings and carefully chosen drink options, which are designed to entice your palate and enhance your eating experience.
-                    </p>
-                    <div className="items-grid">
-                      {loading ? (
-                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#d1d5db' }}>Loading...</div>
-                      ) : !foodService || foodService.items.length === 0 ? (
-                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#9ca3af' }}>No items available.</div>
-                      ) : (
-                        foodService.items.map((item, idx) => (
-                          <div className="item-card" key={`food-${idx}`}>
-                            <div className="item-image">
-                              {item.imageUrl ? (
-                                <img src={item.imageUrl as string} alt={item.name} />
-                              ) : item.image ? (
-                                <img src={item.image} alt={item.name} />
-                              ) : null}
-                            </div>
-                            <div className="item-label">{item.name}</div>
+                  <h2 className="section-title">{service.name}</h2>
+                  <p className="section-description">
+                    Explore our {service.name} options curated specially for your private theater experience.
+                  </p>
+                  <div className="items-grid">
+                    {loading ? (
+                      <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#d1d5db' }}>Loading...</div>
+                    ) : !service.items || service.items.length === 0 ? (
+                      <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#9ca3af' }}>No items available.</div>
+                    ) : (
+                      service.items.map((item, idx) => (
+                        <div className="item-card" key={`${service._id}-${idx}`}>
+                          <div className="item-image">
+                            {item.imageUrl ? (
+                              <img src={item.imageUrl as string} alt={item.name} />
+                            ) : item.image ? (
+                              <img src={item.image as string} alt={item.name} />
+                            ) : null}
                           </div>
-                        ))
-                      )}
-                    </div>
+                          <div className="item-label">{item.name}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-            </section>
+              </section>
+            ))}
 
-            {/* Gifts Section (dynamic) */}
-            <section className="services-section">
-                <div className="container">
-                    <h2 className="section-title">Gifts</h2>
-                    <p className="section-description">
-                        Explore our carefully chosen assortment of presents, appropriate for any celebration. Choose the ideal gift from our selection of opulent candies to personalized priceless items.
-                    </p>
-                    <div className="items-grid">
-                      {loading ? (
-                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#d1d5db' }}>Loading...</div>
-                      ) : !giftService || giftService.items.length === 0 ? (
-                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#9ca3af' }}>No items available.</div>
-                      ) : (
-                        giftService.items.map((item, idx) => (
-                          <div className="item-card" key={`gift-${idx}`}>
-                            <div className="item-image">
-                              {item.imageUrl ? (
-                                <img src={item.imageUrl as string} alt={item.name} />
-                              ) : item.image ? (
-                                <img src={item.image} alt={item.name} />
-                              ) : null}
-                            </div>
-                            <div className="item-label">{item.name}</div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                </div>
-            </section>
-
-            {/* Decoration / Party Place Section (dynamic) */}
-            <section className="services-section">
-                <div className="container">
-                    <h2 className="section-title">Party Place</h2>
-                    <p className="section-description">
-                        Elevate your festivities with our versatile party room. Featuring modern facilities and configurable layouts, create unforgettable parties according to your needs.
-                    </p>
-                    <div className="items-grid">
-                      {loading ? (
-                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#d1d5db' }}>Loading...</div>
-                      ) : !decorService || decorService.items.length === 0 ? (
-                        <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#9ca3af' }}>No items available.</div>
-                      ) : (
-                        decorService.items.map((item, idx) => (
-                          <div className="item-card" key={`decor-${idx}`}>
-                            <div className="item-image">
-                              {item.imageUrl ? (
-                                <img src={item.imageUrl as string} alt={item.name} />
-                              ) : item.image ? (
-                                <img src={item.image} alt={item.name} />
-                              ) : null}
-                            </div>
-                            <div className="item-label">{item.name}</div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                </div>
-            </section>
-
-            {/* Main Services Section */}
+            {/* Main Services Section (Premium static content at the bottom) */}
             <section className="services-section">
                 <div className="container">
                     <h2 className="section-title">Our Premium Services</h2>
@@ -589,7 +530,9 @@ const decorService = services.find(s => /(decor|decoration|party|patry|place)/i.
                     <p className="cta-description">
                         Contact us today to customize your perfect private theater experience. Our team is ready to make your special moments unforgettable.
                     </p>
+                    <a href='/theater'>
                     <button className="cta-button">Book Now</button>
+                    </a>
                 </div>
             </section>
 

@@ -12,6 +12,7 @@ export default function InvoicePage() {
   const [isPending, setIsPending] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [customerName, setCustomerName] = useState<string>('');
+  const [cloudInvoiceUrl, setCloudInvoiceUrl] = useState<string | null>(null);
   const { toasts, removeToast, showSuccess, showError } = useToast();
 
   useEffect(() => {
@@ -22,44 +23,53 @@ export default function InvoicePage() {
 
   const fetchInvoice = async () => {
     try {
-      // Remove setIsLoading(true) - no loading state needed
       console.log('📄 Fetching invoice for booking:', bookingId);
-      
-      // First, try to get booking data directly to extract customer name
+      let bookingName = '';
+
       try {
         const bookingResponse = await fetch(`/api/booking/${encodeURIComponent(bookingId)}`);
         if (bookingResponse.ok) {
           const bookingData = await bookingResponse.json();
-          if (bookingData.success && bookingData.booking && bookingData.booking.name) {
-            setCustomerName(bookingData.booking.name);
-            console.log('✅ Customer name fetched from booking API:', bookingData.booking.name);
+          if (bookingData.success && bookingData.booking) {
+            const booking = bookingData.booking;
+            if (booking.name) {
+              bookingName = booking.name;
+              setCustomerName(booking.name);
+              console.log('✅ Customer name fetched from booking API:', booking.name);
+            }
+            if (booking.invoiceDriveUrl) {
+              setCloudInvoiceUrl(booking.invoiceDriveUrl);
+              console.log('✅ Found Cloudinary invoice URL:', booking.invoiceDriveUrl);
+            }
+            if (booking.paymentStatus && booking.paymentStatus !== 'paid') {
+              setIsPending(true);
+            }
           }
         }
       } catch (bookingErr) {
         console.log('⚠️ Could not fetch booking data, will try to extract from HTML');
       }
-      
-      // Fetch invoice HTML
+
+      if (!cloudInvoiceUrl) {
+        console.log('⚠️ No Cloudinary invoice URL yet, falling back to HTML invoice.');
+      }
+
       const response = await fetch(`/api/generate-invoice?bookingId=${encodeURIComponent(bookingId)}&format=html`);
-      
+
       if (!response.ok) {
         throw new Error('Failed to fetch invoice');
       }
-      
+
       const html = await response.text();
       setInvoiceHtml(html);
-      // Detect pending state from API HTML marker
+
       if (html.includes('INVOICE_PENDING')) {
         setIsPending(true);
       } else {
         setIsPending(false);
       }
-      
-      // Debug: Log part of HTML to see structure
-      console.log('📄 Invoice HTML preview:', html.substring(0, 1000) + '...');
-      
-      // If customer name not found from booking API, try to extract from HTML
-      if (!customerName || customerName === 'Valued Customer') {
+
+      if ((!bookingName || bookingName === 'Valued Customer') && !cloudInvoiceUrl) {
         let extractedName = 'Valued Customer';
         
         // For pending invoices, try to extract from the booking data first
@@ -167,47 +177,37 @@ export default function InvoicePage() {
   const downloadPDF = async () => {
     try {
       console.log('📥 Downloading PDF for booking:', bookingId);
-      
-      // Create custom filename with customer name
       const cleanCustomerName = (customerName || 'Customer').replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '-');
       const filename = `Invoice-FMT-${cleanCustomerName}.pdf`;
-      
-      // Fetch PDF as blob for custom filename download
+
+      if (cloudInvoiceUrl) {
+        const link = document.createElement('a');
+        link.href = cloudInvoiceUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showSuccess('✅ Invoice opened from Cloudinary!');
+        return;
+      }
+
       const response = await fetch(`/api/generate-invoice?bookingId=${encodeURIComponent(bookingId)}&format=pdf`);
       if (!response.ok) {
         throw new Error('Failed to generate PDF');
       }
-      
+
       const blob = await response.blob();
-      
-      // Create download link with custom filename
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       link.download = filename;
-      
-      // Trigger download
       document.body.appendChild(link);
       link.click();
-      
-      // Cleanup
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      
-      console.log('✅ PDF downloaded with filename:', filename);
-      
-      // Show success toast
-      showSuccess('✅ Invoice Downloaded Successfully!', 3000);
-      
-      // Close the invoice page after successful download
-      setTimeout(() => {
-        window.close();
-        // Fallback: redirect to previous page if window.close() doesn't work
-        if (!window.closed) {
-          window.history.back();
-        }
-      }, 2000); // Wait 2 seconds to show message and ensure download started
-      
+      showSuccess('✅ Invoice downloaded from generator!');
     } catch (err) {
       console.error('❌ Error downloading PDF:', err);
       showError('❌ Failed to download PDF. Please try again.');
@@ -261,11 +261,15 @@ export default function InvoicePage() {
       <div className="flex flex-col items-center justify-center text-center py-16">
         <div className="w-full max-w-4xl px-4 text-center">
           <h1 className="modern-heading text-4xl md:text-6xl mb-8 text-center" style={{ textShadow: '0 4px 20px rgba(0,0,0,0.5)', textAlign: 'center' }}>
+            Welcome Back  {customerName || 'Valued Customer'}
+          </h1>
+          <br></br>
+          <h1 className="modern-heading text-4xl md:text-6xl mb-8 text-center" style={{ textShadow: '0 4px 20px rgba(0,0,0,0.5)', textAlign: 'center' }}>
             Invoice of {customerName || 'Valued Customer'}
           </h1>
          
-          {!isPending ? (
-            <div className="flex justify-center mb-12">
+          {!isPending && (
+            <div className="flex flex-col md:flex-row items-center justify-center gap-4 mb-12">
               <div className="wrapper">
                 <a href="#" onClick={(e) => { e.preventDefault(); downloadPDF(); }} className="c-btn">
                   <span className="c-btn__label">Download Your Invoice 
@@ -275,23 +279,33 @@ export default function InvoicePage() {
                   </span>
                 </a>
               </div>
+             
             </div>
-          ) : null}
+          )}
         </div>
       </div>
 
-      {/* Invoice Preview - Centered */}
+      {/* Invoice Preview - prioritize Cloudinary PDF if available */}
       <div className="flex justify-center pb-16 px-4">
-        <div 
-          className="modern-invoice-container"
-          dangerouslySetInnerHTML={{ __html: invoiceHtml }}
-          style={{
-            maxWidth: '800px',
-            width: '100%',
-            minHeight: 'auto',
-            height: 'auto'
-          }}
-        />
+        {!isPending && cloudInvoiceUrl ? (
+          <div className="invoice-preview-shell">
+            <iframe
+              src={`${cloudInvoiceUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+              title="Invoice PDF"
+              className="invoice-preview-frame"
+              loading="lazy"
+            />
+          </div>
+        ) : (
+          <div
+            className="invoice-preview-shell"
+          >
+            <div
+              className="invoice-html-fallback"
+              dangerouslySetInnerHTML={{ __html: invoiceHtml }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Mobile Download Button - Animated */}
@@ -485,20 +499,28 @@ export default function InvoicePage() {
           transform: translateY(-1px) scale(1.02);
         }
         
-        /* Modern invoice container */
-        .modern-invoice-container {
-          background: white;
-          border-radius: 24px;
-          box-shadow: 
-            0 25px 50px rgba(0, 0, 0, 0.15),
-            0 0 0 1px rgba(255, 255, 255, 0.1);
-          border: 2px solid rgba(255, 255, 255, 0.2);
-          backdrop-filter: blur(20px);
-          overflow: visible;
-          transition: all 0.3s ease;
-          margin: 2rem auto;
-          display: block;
-          position: relative;
+        /* Simplified invoice preview container */
+        .invoice-preview-shell {
+          width: 100%;
+          max-width: 900px;
+          margin: 0 auto;
+        }
+
+        .invoice-preview-frame {
+          width: 100%;
+          min-height: 80vh;
+          border: none;
+          border-radius: 12px;
+          background: #111827;
+        }
+
+        .invoice-html-fallback {
+          width: 100%;
+          background: #ffffff;
+          border-radius: 12px;
+          padding: 1.5rem;
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+          overflow: hidden;
         }
         
         /* Ensure background image is properly applied */
@@ -689,13 +711,14 @@ export default function InvoicePage() {
             padding: 1rem !important;
             padding-bottom: 2rem !important;
           }
-          
-          .modern-invoice-container {
-            display: block !important;
+
+          .invoice-preview-shell {
             max-width: 100% !important;
-            margin: 0 !important;
-            border-radius: 12px !important;
-            overflow: hidden !important;
+          }
+
+          .invoice-preview-frame {
+            min-height: 70vh !important;
+            border-radius: 8px !important;
           }
           
           /* Proper mobile layout with background */
@@ -750,14 +773,6 @@ export default function InvoicePage() {
           .modern-thank-you,
           .back-button {
             display: none !important;
-          }
-          
-          .modern-invoice-container {
-            box-shadow: none !important;
-            border-radius: 0 !important;
-            margin: 0 !important;
-            max-width: none !important;
-            transform: none !important;
           }
           
           body {

@@ -1555,12 +1555,19 @@ const emailService = {
     // Use custom template to send to team Cybershoora
     return await sendEmail('teamcybershoora@gmail.com', customTemplate.subject, customTemplate.html);
   },
-  // Send invoice ready email (no attachment, link to invoice page)
-  sendBookingInvoiceReady: async (bookingData: BookingData) => {
+  // Send invoice ready email
+  // If bookingData.invoiceDriveUrl is provided, use that as primary download link.
+  // Otherwise, fall back to /invoice/{bookingId} page.
+  sendBookingInvoiceReady: async (bookingData: BookingData & { invoiceDriveUrl?: string }) => {
     if (!bookingData.email) {
       return { success: false, error: 'No email provided' };
     }
     const siteUrl = getSiteUrl();
+    const bookingId = bookingData.id || (bookingData as any).bookingId || '';
+    const invoicePageUrl = `${siteUrl}/invoice/${encodeURIComponent(bookingId)}`;
+    const fallbackPdfUrl = `${siteUrl}/api/generate-invoice?bookingId=${encodeURIComponent(bookingId)}&format=pdf`;
+    const cloudDownloadUrl = bookingData.invoiceDriveUrl || fallbackPdfUrl;
+    const invoiceUrl = invoicePageUrl;
     const template = {
       subject: 'Your Invoice Is Ready - FeelME Town 🧾',
       html: `
@@ -1594,7 +1601,10 @@ const emailService = {
                 <div class="label">Booking Reference</div>
                 <div class="value">${bookingData.id}</div>
               </div>
-              <a class="cta" href="${siteUrl}/invoice/${encodeURIComponent(bookingData.id || (bookingData as any).bookingId || '')}" target="_blank">View & Download Invoice</a>
+              <a class="cta" href="${invoiceUrl}" target="_blank" rel="noopener noreferrer">View & Download Invoice</a>
+              <div style="margin-top:12px; font-size:12px; color:#9ca3af;">
+                Trouble with the button? <a href="${cloudDownloadUrl}" target="_blank" rel="noopener noreferrer" style="color:#fef08a;">Download directly</a>
+              </div>
             </div>
             <div class="footer">© ${CURRENT_YEAR} FeelME Town • Delhi, India • feelmetown@gmail.com</div>
           </div>

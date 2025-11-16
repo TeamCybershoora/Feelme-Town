@@ -3,6 +3,23 @@ import database from '@/lib/db-connect';
 import { ExportsStorage } from '@/lib/exports-storage';
 
 import emailService from '@/lib/email-service';
+
+// Helper function to extract dynamic service items from request body
+function getDynamicServiceItems(body: any): Record<string, any> {
+  const dynamicServiceItems: Record<string, any> = {};
+  
+  // Look for all fields that start with "selected" and contain service items
+  Object.keys(body).forEach(key => {
+    if (key.startsWith('selected') && Array.isArray(body[key])) {
+      // Store ALL dynamic service items (including movies, cakes, etc.)
+      dynamicServiceItems[key] = body[key];
+      console.log(`📦 Dynamic service items found: ${key}:`, body[key]);
+    }
+  });
+  
+  return dynamicServiceItems;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -133,9 +150,65 @@ export async function POST(request: NextRequest) {
 
     
 
-    // Step 5: Create complete booking data
+    // Step 5: Get theater capacity from database
+    let theaterCapacity = { min: 2, max: 10 }; // Default fallback
     
+    try {
+      // Fetch theater data to get actual capacity
+      const theaterResult = await database.getAllTheaters();
+      if (theaterResult.success && theaterResult.theaters) {
+        const selectedTheater = theaterResult.theaters.find((theater: any) => 
+          theater.name === body.theaterName ||
+          theater.name.includes(body.theaterName.split(' ')[0]) // Match by first word
+        );
+        
+        if (selectedTheater && selectedTheater.capacity && selectedTheater.capacity.min && selectedTheater.capacity.max) {
+          theaterCapacity = {
+            min: selectedTheater.capacity.min,
+            max: selectedTheater.capacity.max
+          };
+          console.log('✅ [Booking API] Using theater capacity from database:', theaterCapacity, 'for theater:', body.theaterName);
+        } else {
+          console.log('⚠️ [Booking API] Theater capacity not found, using fallback for:', body.theaterName);
+        }
+      }
+    } catch (error) {
+      console.log('❌ [Booking API] Error fetching theater capacity:', error);
+    }
     
+    // Calculate extra guests based on actual theater capacity
+    const actualExtraGuests = Math.max(0, (body.numberOfPeople || theaterCapacity.min) - theaterCapacity.min);
+    
+    // Build pricing snapshot: prefer frontend, else fetch from DB (Standard Pricing)
+    let pricingSnapshot: any = body.pricingData || null;
+    if (!pricingSnapshot) {
+      try {
+        const pricingResult = await (database as any).getAllPricing?.();
+        if (pricingResult?.success && Array.isArray(pricingResult.pricing) && pricingResult.pricing.length > 0) {
+          const first = pricingResult.pricing[0];
+          pricingSnapshot = {
+            id: first._id || first.id || undefined,
+            name: first.name || 'Pricing',
+            slotBookingFee: Number(first.slotBookingFee ?? 0),
+            extraGuestFee: Number(first.extraGuestFee ?? 0),
+            convenienceFee: Number(first.convenienceFee ?? 0),
+            decorationFees: Number(first.decorationFees ?? 0)
+          };
+        }
+      } catch {}
+    }
+
+    // Compute decoration fee explicitly like slotBookingFee (from snapshot)
+    // Store decoration fee if decoration is enabled OR any related items are present
+    const hasAnyDecoration =
+      (String(body.wantDecorItems || '').toLowerCase() === 'yes') ||
+      (Array.isArray(body.selectedDecorItems) && body.selectedDecorItems.length > 0) ||
+      (Array.isArray((body as any).selectedExtraAddOns) && (body as any).selectedExtraAddOns.length > 0);
+
+    const dropdownDecorationFee = Number((pricingSnapshot && pricingSnapshot.decorationFees) ?? body?.pricingData?.decorationFees ?? 0);
+    const decorationAppliedFee = dropdownDecorationFee; // persist the dropdown fee value unconditionally
+
+    // Step 6: Create complete booking data
     const completeBookingData = {
       // Basic booking info
       bookingId: bookingId,
@@ -147,24 +220,30 @@ export async function POST(request: NextRequest) {
       time: body.time,
       occasion: body.occasion.trim(),
       
-      // Guest information
-      numberOfPeople: body.numberOfPeople || 2,
-      extraGuestsCount: body.extraGuestsCount || 0,
+      // Guest information (dynamic based on theater capacity)
+      numberOfPeople: body.numberOfPeople || theaterCapacity.min,
+      extraGuestsCount: actualExtraGuests,
       extraGuestCharges: body.extraGuestCharges || 0,
+      
+      // Store theater capacity for reference
+      theaterCapacity: theaterCapacity,
+      baseCapacity: theaterCapacity.min,
       
       // Pricing
       totalAmount: totalAmount,
       advancePayment: advancePayment,
       venuePayment: venuePayment,
+      // Store slot booking fee explicitly (prefer snapshot, fallback to advancePayment)
+      slotBookingFee: Number((pricingSnapshot && pricingSnapshot.slotBookingFee) ?? body?.pricingData?.slotBookingFee ?? advancePayment),
+      // Store the Decoration dropdown fee explicitly on every booking
+      decorationFee: dropdownDecorationFee,
       appliedCouponCode: body.appliedCouponCode,
       couponDiscount: body.couponDiscount || 0,
       
-      // Store pricing data used at time of booking
-      pricingData: body.pricingData || {
-        slotBookingFee: 1000,
-        extraGuestFee: 400,
-        convenienceFee: 50
-      },
+      // Store pricing data used at time of booking (snapshot)
+      pricingData: pricingSnapshot || body.pricingData || { },
+      // Keep helper for invoice math/compat
+      decorationAppliedFee: decorationAppliedFee,
       
       // Status and metadata
       status: body.status || 'confirmed',
@@ -175,18 +254,16 @@ export async function POST(request: NextRequest) {
       isManualBooking: body.isManualBooking || false,
       createdAt: new Date(),
       
-      // Selected items
-      selectedMovies: body.selectedMovies || [],
-      selectedCakes: body.selectedCakes || [],
-      selectedDecorItems: body.selectedDecorItems || [],
-      selectedGifts: body.selectedGifts || [],
-      
       // Dynamic occasion fields (this is the key part!)
-      ...dynamicOccasionFields
+      ...dynamicOccasionFields,
+      
+      // Dynamic service items (completely dynamic - no hardcoded fields!)
+      ...getDynamicServiceItems(body)
     };
 
     console.log('Final booking data to save:', JSON.stringify(completeBookingData, null, 2));
     console.log('Dynamic occasion fields:', dynamicOccasionFields);
+    console.log('Dynamic service items:', getDynamicServiceItems(body));
 
     // Step 6: Save to database
     
