@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    const { name, imageUrl, requiredFields } = body;
+    const { name, imageUrl, requiredFields, includeInDecoration } = body;
     
     if (!name || !imageUrl) {
       return NextResponse.json(
@@ -35,7 +35,8 @@ export async function POST(request: NextRequest) {
       name,
       imageUrl,
       requiredFields: requiredFields || [],
-      isActive: true
+      isActive: true,
+      includeInDecoration: includeInDecoration === true
     };
 
     
@@ -77,13 +78,14 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, imageUrl, requiredFields, isActive } = body;
+    const { name, imageUrl, requiredFields, isActive, includeInDecoration } = body;
 
     const updateData = {
       name,
       imageUrl,
       requiredFields: requiredFields || [],
-      isActive: isActive !== undefined ? isActive : true
+      isActive: isActive !== undefined ? isActive : true,
+      includeInDecoration: includeInDecoration === true
     };
 
     const result = await database.updateOccasion(id, updateData);

@@ -91,7 +91,8 @@ export async function GET(request: NextRequest) {
         popular: occasion.popular || false,
         requiredFields: requiredFieldKeys, // Use processed camelCase keys
         fieldLabels: fieldLabels,
-        isActive: occasion.isActive !== undefined ? occasion.isActive : true
+        isActive: occasion.isActive !== undefined ? occasion.isActive : true,
+        includeInDecoration: occasion.includeInDecoration === true
       };
       
       

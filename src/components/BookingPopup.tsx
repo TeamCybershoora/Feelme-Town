@@ -28,6 +28,7 @@ interface OccasionOption {
   requiredFields: string[];
   fieldLabels: { [key: string]: string };
   isActive: boolean;
+  includeInDecoration?: boolean;
 }
 
 interface BookingForm {
@@ -68,10 +69,17 @@ interface BookingPopupProps {
   onClose: () => void;
   isManualMode?: boolean; // Manual booking mode for admin
   onSuccess?: () => void; // Callback after successful booking
+  userInfo?: {
+    type: 'admin' | 'staff' | null;
+    staffId?: string;
+    staffName?: string;
+    adminName?: string;
+    profilePhoto?: string;
+  };
 }
 
 
-export default function BookingPopup({ isOpen, onClose, isManualMode = false, onSuccess }: BookingPopupProps) {
+export default function BookingPopup({ isOpen, onClose, isManualMode = false, onSuccess, userInfo }: BookingPopupProps) {
   const { selectedTheater, selectedDate, selectedTimeSlot, setSelectedTimeSlot, setSelectedTheater, setSelectedDate, openBookingPopup, closeBookingPopup, refreshBookedSlots } = useBooking();
   const { isDatePickerOpen, openDatePicker, closeDatePicker } = useDatePicker();
 
@@ -210,9 +218,6 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           }
           initialSelectedServiceItems[s.name] = [];
         });
-
-        // Initialize decoration dropdown (always start with 'No' unless editing)
-        initialSelectedServices['__decoration__'] = 'No';
 
         // Check if we're editing a booking and override with existing service selections
         const editingBooking = sessionStorage.getItem('editingBooking');
@@ -412,7 +417,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       return false;
     }
 
-    if (!formData.occasion) {
+    // If decoration is enabled, occasion becomes mandatory
+    const decorationModeForValidation = selectedServices['__decoration__'];
+    if (decorationModeForValidation === 'Yes' && !formData.occasion) {
       setValidationErrorName('Missing Occasion');
       setValidationMessage('Please select an occasion to continue.');
       setShowValidationPopup(true);
@@ -422,9 +429,33 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     // Validate decoration selection
     if (!selectedServices['__decoration__']) {
       setValidationErrorName('Decoration Selection Required');
-      setValidationMessage('Please choose whether you want decoration (Yes or No) to continue.');
+      setValidationMessage(
+        'Please choose whether you want decoration (Yes or No) to continue. If you choose "Yes", you can select occasion-wise decoration, gifts and decor items. If you choose "No", you will continue only with food and basic booking.'
+      );
       setShowValidationPopup(true);
       return false;
+    }
+
+    // Ensure selected occasion matches decoration mode
+    const decorationMode = selectedServices['__decoration__'];
+    const selectedOccasion = occasionOptions.find(occ => occ.name === formData.occasion);
+
+    if (decorationMode === 'Yes') {
+      // In decoration mode, only decoration-specific occasions are allowed
+      if (!selectedOccasion || selectedOccasion.includeInDecoration !== true) {
+        setValidationErrorName('Invalid Occasion for Decoration');
+        setValidationMessage('You chose decoration = Yes, so please select an occasion that is marked for decoration.');
+        setShowValidationPopup(true);
+        return false;
+      }
+    } else if (decorationMode === 'No') {
+      // In normal mode, only non-decoration occasions are allowed
+      if (selectedOccasion && selectedOccasion.includeInDecoration === true) {
+        setValidationErrorName('Invalid Occasion for Normal Booking');
+        setValidationMessage('You chose decoration = No, so please select a normal occasion (not marked for decoration).');
+        setShowValidationPopup(true);
+        return false;
+      }
     }
 
     // If decoration is selected, ensure at least ONE decoration-included service has items
@@ -545,7 +576,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         ? parseFloat(String(selectedTheater.price).replace(/[₹,\s]/g, ''))
         : 1399.00;
 
-      const bookingData = {
+      const bookingData: any = {
         name: formData.bookingName,
         email: formData.emailAddress,
         phone: formData.whatsappNumber,
@@ -566,7 +597,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         venuePayment,
         appliedCouponCode: appliedCouponCode || undefined,
         couponDiscount: appliedDiscount || 0,
-        status: 'confirmed',
+        status: isManualMode ? 'Confirmed(M)' : 'confirmed',
+        bookingType: isManualMode ? 'manual' : 'online',
+        isManualBooking: !!isManualMode,
         paymentMode: 'pay_at_venue',
         // Store pricing data used at time of booking
         pricingData: {
@@ -590,6 +623,17 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           return Math.max(0, formData.numberOfPeople - capacity.min);
         })()
       };
+
+      // Attach creator info for manual mode
+      if (isManualMode) {
+        // Set explicit top-level creator info for DB convenience
+        bookingData.createdBy = (userInfo?.type === 'staff')
+          ? (userInfo?.staffName || userInfo?.staffId || 'Staff')
+          : (userInfo?.adminName || 'Admin');
+        if (userInfo?.staffId) bookingData.staffId = userInfo.staffId;
+        if (userInfo?.staffName) bookingData.staffName = userInfo.staffName;
+        if (userInfo?.adminName) bookingData.adminName = userInfo.adminName;
+      }
 
       // Save as confirmed booking with pay at venue option or update existing booking
       const isEdit = isEditingBooking && !!editingBookingId;
@@ -657,7 +701,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         : 1399.0;
 
       // Prepare base booking data (will be sent AFTER successful Razorpay payment)
-      const baseBookingData = {
+      const baseBookingData: any = {
         name: formData.bookingName,
         email: formData.emailAddress,
         phone: formData.whatsappNumber,
@@ -676,7 +720,10 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         venuePayment,
         appliedCouponCode: appliedCouponCode || undefined,
         couponDiscount: appliedDiscount || 0,
-        paymentMode: 'online_payment',
+        status: isManualMode ? 'Confirmed(M)' : undefined,
+        bookingType: isManualMode ? 'manual' : undefined,
+        isManualBooking: !!isManualMode,
+        paymentMode: isManualMode ? 'pay_at_venue' : 'online_payment',
         pricingData: {
           slotBookingFee: pricingData.slotBookingFee,
           extraGuestFee: pricingData.extraGuestFee,
@@ -788,6 +835,16 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           }
         },
       };
+
+      // Attach creator info for manual mode
+      if (isManualMode) {
+        baseBookingData.createdBy = (userInfo?.type === 'staff')
+          ? (userInfo?.staffName || userInfo?.staffId || 'Staff')
+          : (userInfo?.adminName || 'Admin');
+        if (userInfo?.staffId) baseBookingData.staffId = userInfo.staffId;
+        if (userInfo?.staffName) baseBookingData.staffName = userInfo.staffName;
+        if (userInfo?.adminName) baseBookingData.adminName = userInfo.adminName;
+      }
 
       const rzp = new window.Razorpay(options);
 
@@ -1252,10 +1309,28 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [selectedServiceItems, setSelectedServiceItems] = useState<{ [serviceName: string]: string[] }>({});
   // Track services where user explicitly clicked Skip (so we don't force selection later)
   const [skippedServices, setSkippedServices] = useState<Set<string>>(new Set());
+  // One-time confirmation when user keeps Decoration = No
+  const [showDecorationNoConfirm, setShowDecorationNoConfirm] = useState(false);
+  const [hasConfirmedDecorationNo, setHasConfirmedDecorationNo] = useState(false);
 
   // Dynamic tabs based on selections
   const getAvailableTabs = () => {
-    const availableTabs: string[] = ['Overview', 'Occasion'];
+    const availableTabs: string[] = ['Overview'];
+
+    // Check if all occasions are marked as decoration-only (global toggle ON in admin)
+    const allDecorationOccasions =
+      occasionOptions.length > 0 && occasionOptions.every(occ => occ.includeInDecoration === true);
+
+    const decorationMode = selectedServices['__decoration__'];
+
+    // Occasion tab visibility rules:
+    // - If all occasions are decoration-only: show Occasion tab ONLY when decoration = Yes in Overview
+    // - Otherwise (normal mode): always show Occasion tab
+    if (!allDecorationOccasions) {
+      availableTabs.push('Occasion');
+    } else if (decorationMode === 'Yes') {
+      availableTabs.push('Occasion');
+    }
 
     // Add dynamic service tabs based on user selection
     allServices.forEach(service => {
@@ -1548,23 +1623,20 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     }
   }, [selectedTheater, isOpen, realTheaterData, selectedServices, allServices]);
 
-  // Auto-adjust numberOfPeople when theater changes (set to theater's minimum capacity)
+  // Auto-adjust numberOfPeople when theater changes (reset to that theater's minimum capacity)
   useEffect(() => {
     if (selectedTheater && isOpen && realTheaterData.length > 0) {
       const capacity = getTheaterCapacity();
-      
-      console.log('🎭 [Auto-adjust People] Theater:', selectedTheater.name, 'Capacity:', capacity, 'Current:', formData.numberOfPeople);
 
-      // Only update if current numberOfPeople is less than minimum
-      if (formData.numberOfPeople < capacity.min) {
-        console.log('✅ [Auto-adjust People] Updating numberOfPeople from', formData.numberOfPeople, 'to', capacity.min);
-        setFormData(prev => ({
-          ...prev,
-          numberOfPeople: capacity.min
-        }));
-      }
+      console.log('🎭 [Auto-adjust People] Theater changed:', selectedTheater.name, 'Using min capacity:', capacity.min);
+
+      // Har baar theater change hone par us theater ke min capacity pe reset karo
+      setFormData(prev => ({
+        ...prev,
+        numberOfPeople: capacity.min,
+      }));
     }
-  }, [selectedTheater, isOpen, realTheaterData, formData.numberOfPeople]);
+  }, [selectedTheater, isOpen, realTheaterData]);
 
   // Auto-update occasionPersonName only for the specific occasion field
   useEffect(() => {
@@ -2043,6 +2115,17 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     // Check if this is the last tab (Complete Booking)
     const isLastTab = activeTab === tabs[tabs.length - 1];
 
+    // On Overview tab, gently confirm once if user keeps Decoration = No
+    if (!isLastTab && activeTab === 'Overview') {
+      const decorationMode = selectedServices['__decoration__'];
+      if (decorationMode === 'No' && !hasConfirmedDecorationNo) {
+        // Mark as confirmed so next call (after popup choice) will not reopen the popup
+        setHasConfirmedDecorationNo(true);
+        setShowDecorationNoConfirm(true);
+        return;
+      }
+    }
+
     if (isLastTab) {
       // Check if booking time is within 1 hour
       const isBookingTimeNear = () => {
@@ -2167,7 +2250,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
       }
 
       if (activeTab === 'Occasion') {
-        if (!formData.occasion.trim()) {
+        const decorationModeOnOccasionTab = selectedServices['__decoration__'];
+        // Occasion is only mandatory when decoration is Yes
+        if (decorationModeOnOccasionTab === 'Yes' && !formData.occasion.trim()) {
           setValidationMessage('Please select an occasion to continue.');
           setShowValidationPopup(true);
           return;
@@ -2660,10 +2745,22 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
               </div>
               <div className="booking-popup-meta-item">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" className="booking-popup-meta-icon">
-                  <path fill="currentColor" d="M6.153 7.008A1.5 1.5 0 0 1 7.5 8.5c0 .771-.47 1.409-1.102 1.83c-.635.424-1.485.67-2.398.67s-1.763-.246-2.398-.67C.969 9.91.5 9.271.5 8.5A1.5 1.5 0 0 1 2 7h4zM10.003 7a1.5 1.5 0 0 1 1.5 1.5c0 .695-.432 1.211-.983 1.528c-.548.315-1.265.472-2.017.472q-.38-.001-.741-.056c.433-.512.739-1.166.739-1.944A2.5 2.5 0 0 0 7.997 7zM4.002 1.496A2.253 2.253 0 1 1 4 6.001a2.253 2.253 0 0 1 0-4.505m4.75 1.001a1.75 1.75 0 1 1 0 3.5a1.75 1.75 0 0 1 0-3.5" />
+                  <path fill="currentColor" d="M6.153 7.008A1.5 1.5 0 0 1 7.5 8.5c0 .771-.47 1.409-1.102 1.83c-.635.424-1.485.67-2.398.67s-1.763-.246-2.398-.67C.969 9.91.5 9.271.5 8.5A1.5 1.5 0 0 1 2 7h4zM10.003 7a1.5 1.5 0 0 1 1.5 1.5c0 .695-.432.dance1.528c-.548.315-1.265.472-2.017.472q-.48-.001-.741-.056c.433-.512.739-1.166.739-1.944A2.5 2.5 0 0 0 7.997 7zM4.002 1.496A2.253 2.253 0 1 1 4 6.001a2.253 2.253 0 0 1 0-4.505m4.75 1.001a1.75 1.75 0 1 1 0 3.5a1.75 1.75 0 0 1 0-3.5" />
                 </svg>
                 <span>{formData.numberOfPeople} People</span>
               </div>
+              {isManualMode && (
+                <div className="booking-popup-meta-item">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" className="booking-popup-meta-icon">
+                    <path fill="currentColor" d="M6.153 7.008A1.5 1.5 0 0 1 7.5 8.5c0 .771-.47 1.409-1.102 1.83c-.635.424-1.485.67-2.398.67s-1.763-.246-2.398-.67C.969 9.91.5 9.271.5 8.5A1.5 1.5 0 0 1 2 7h4zM10.003 7a1.5 1.5 0 0 1 1.5 1.5c0 .695-.432 1.211-.983 1.528c-.548.315-1.265.472-2.017.472q-.38-.001-.741-.056c.433-.512.739-1.166.739-1.944A2.5 2.5 0 0 0 7.997 7zM4.002 1.496A2.253 2.253 0 1 1 4 6.001a2.253 2.253 0 0 1 0-4.505m4.75 1.001a1.75 1.75 0 1 1 0 3.5a1.75 1.75 0 0 1 0-3.5" />
+                  </svg>
+                  <span>
+                    Opened by: {userInfo?.type === 'staff'
+                      ? (userInfo?.staffName || userInfo?.staffId || 'Staff')
+                      : `Admin${userInfo?.adminName ? `: ${userInfo.adminName}` : ''}`}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2729,6 +2826,16 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                             <Plus className="w-4 h-4" />
                           </button>
                         </div>
+                        {isManualMode && (
+                          <div className="booking-popup-capacity-info" style={{ marginTop: 6 }}>
+                            <span>
+                              Opened by:{' '}
+                              {userInfo?.type === 'staff'
+                                ? `${userInfo?.staffName || userInfo?.staffId || 'Staff'}`
+                                : `Admin${userInfo?.adminName ? `: ${userInfo?.adminName}` : ''}`}
+                            </span>
+                          </div>
+                        )}
                         {(() => {
                           const capacity = getTheaterCapacity();
 
@@ -2862,9 +2969,25 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
                           return (
                             <div className="booking-popup-field">
-                              <label>
+                              <label
+                                style={{
+                                  display: 'block',
+                                  marginBottom: '0rem',
+                                }}
+                              >
                                 Want Decoration?
-                                {isDecorationCompulsory && <span style={{ color: '#10b981', marginLeft: '0.5rem', fontSize: '0.85rem', fontWeight: '600' }}>(Compulsory)</span>}
+                                {isDecorationCompulsory && (
+                                  <span
+                                    style={{
+                                      color: '#10b981',
+                                      marginLeft: '0.5rem',
+                                      fontSize: '0.85rem',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    (Compulsory)
+                                  </span>
+                                )}
                               </label>
                               <select
                                 value={selectedServices['__decoration__'] || ''}
@@ -2899,7 +3022,9 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                 className="booking-popup-select"
                                 disabled={isDecorationCompulsory}
                               >
-                                <option value="" disabled>Choose</option>
+                                <option value="" disabled>
+                                  Choose
+                                </option>
                                 <option value="No">No</option>
                                 <option value="Yes">Yes (₹{pricingData.decorationFees} Decoration)</option>
                               </select>
@@ -3072,107 +3197,117 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                       <Calendar className="w-5 h-5" />
                       Choose Your Occasion
                     </h3>
+                    {(() => {
+                      const decorationMode = selectedServices['__decoration__'];
+                      const visibleOccasions = decorationMode === 'Yes'
+                        // Decoration booking: only decoration-specific occasions
+                        ? occasionOptions.filter((occasion) => occasion.includeInDecoration === true)
+                        // Normal booking: only non-decoration occasions (includeInDecoration false/undefined)
+                        : occasionOptions.filter((occasion) => occasion.includeInDecoration !== true);
 
+                      if (!formData.occasion) {
+                        return (
+                          <div className="booking-popup-occasions">
+                            {visibleOccasions.map((occasion) => (
+                              <div
+                                key={occasion.name}
+                                onClick={() => handleOccasionSelect(occasion.name)}
+                                className="booking-popup-occasion"
+                                style={{
+                                  backgroundImage: `url(${occasion.icon})`,
+                                  backgroundSize: 'cover',
+                                  backgroundPosition: 'center',
+                                  backgroundRepeat: 'no-repeat'
+                                }}
+                              >
+                                {occasion.popular && <div className="booking-popup-badge">Popular</div>}
+                                <div className="booking-popup-occasion-overlay">
+                                  <h4>{occasion.name}</h4>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
 
-                    {!formData.occasion ? (
-                      <div className="booking-popup-occasions">
-                        {occasionOptions.map((occasion) => (
-                          <div
-                            key={occasion.name}
-                            onClick={() => handleOccasionSelect(occasion.name)}
-                            className="booking-popup-occasion"
-                            style={{
-                              backgroundImage: `url(${occasion.icon})`,
-                              backgroundSize: 'cover',
-                              backgroundPosition: 'center',
-                              backgroundRepeat: 'no-repeat'
-                            }}
-                          >
-                            {occasion.popular && <div className="booking-popup-badge">Popular</div>}
-                            <div className="booking-popup-occasion-overlay">
-                              <h4>{occasion.name}</h4>
+                      return (
+                        <div className="booking-popup-selected-occasion">
+                          <div className="booking-popup-occasion-header">
+                            <div className="booking-popup-occasion-selected">
+                              <h4>{formData.occasion}</h4>
                             </div>
+                            <button
+                              onClick={() => {
+                                setFormData(prev => ({ ...prev, occasion: '', occasionData: {} }));
+                                setSelectedOccasionData(null);
+                              }}
+                              className="booking-popup-change-occasion-btn"
+                            >
+                              Change
+                            </button>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="booking-popup-selected-occasion">
-                        <div className="booking-popup-occasion-header">
-                          <div className="booking-popup-occasion-selected">
-                            <h4>{formData.occasion}</h4>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setFormData(prev => ({ ...prev, occasion: '', occasionData: {} }));
-                              setSelectedOccasionData(null);
-                            }}
-                            className="booking-popup-change-occasion-btn"
-                          >
-                            Change
-                          </button>
-                        </div>
 
-                        <div className="booking-popup-occasion-details">
-                          {selectedOccasionData && selectedOccasionData.requiredFields && selectedOccasionData.requiredFields.length > 0 ? (
-                            selectedOccasionData.requiredFields.map((fieldKey: string) => {
-                              const fieldLabel = selectedOccasionData.fieldLabels?.[fieldKey] || fieldKey;
-                              const currentValue = formData.occasionData?.[fieldKey] || '';
+                          <div className="booking-popup-occasion-details">
+                            {selectedOccasionData && selectedOccasionData.requiredFields && selectedOccasionData.requiredFields.length > 0 ? (
+                              selectedOccasionData.requiredFields.map((fieldKey: string) => {
+                                const fieldLabel = selectedOccasionData.fieldLabels?.[fieldKey] || fieldKey;
+                                const currentValue = formData.occasionData?.[fieldKey] || '';
 
+                                // Special handling for gender fields
+                                if (fieldKey.toLowerCase().includes('gender')) {
+                                  return (
+                                    <div key={fieldKey} className="booking-popup-field">
+                                      <label>{fieldLabel}</label>
+                                      <select
+                                        value={currentValue}
+                                        onChange={(e) => updateOccasionData(fieldKey, e.target.value)}
+                                      >
+                                        <option value="">Select Gender</option>
+                                        <option value="Male">Male</option>
+                                        <option value="Female">Female</option>
+                                        <option value="Other">Other</option>
+                                      </select>
+                                    </div>
+                                  );
+                                }
 
-                              // Special handling for gender fields
-                              if (fieldKey.toLowerCase().includes('gender')) {
+                                // Special handling for celebration details (textarea)
+                                if (fieldKey.toLowerCase().includes('celebration') || fieldKey.toLowerCase().includes('details')) {
+                                  return (
+                                    <div key={fieldKey} className="booking-popup-field">
+                                      <label>{fieldLabel}</label>
+                                      <textarea
+                                        value={currentValue}
+                                        onChange={(e) => updateOccasionData(fieldKey, e.target.value)}
+                                        placeholder={`Enter ${fieldLabel.toLowerCase()}...`}
+                                        rows={3}
+                                      />
+                                    </div>
+                                  );
+                                }
+
+                                // Default text input for all other fields
                                 return (
                                   <div key={fieldKey} className="booking-popup-field">
                                     <label>{fieldLabel}</label>
-                                    <select
+                                    <input
+                                      type="text"
                                       value={currentValue}
                                       onChange={(e) => updateOccasionData(fieldKey, e.target.value)}
-                                    >
-                                      <option value="">Select Gender</option>
-                                      <option value="Male">Male</option>
-                                      <option value="Female">Female</option>
-                                      <option value="Other">Other</option>
-                                    </select>
-                                  </div>
-                                );
-                              }
-
-                              // Special handling for celebration details (textarea)
-                              if (fieldKey.toLowerCase().includes('celebration') || fieldKey.toLowerCase().includes('details')) {
-                                return (
-                                  <div key={fieldKey} className="booking-popup-field">
-                                    <label>{fieldLabel}</label>
-                                    <textarea
-                                      value={currentValue}
-                                      onChange={(e) => updateOccasionData(fieldKey, e.target.value)}
-                                      placeholder={`Enter ${fieldLabel.toLowerCase()}...`}
-                                      rows={3}
+                                      placeholder={`Enter ${fieldLabel.toLowerCase()}`}
                                     />
                                   </div>
                                 );
-                              }
-
-                              // Default text input for all other fields
-                              return (
-                                <div key={fieldKey} className="booking-popup-field">
-                                  <label>{fieldLabel}</label>
-                                  <input
-                                    type="text"
-                                    value={currentValue}
-                                    onChange={(e) => updateOccasionData(fieldKey, e.target.value)}
-                                    placeholder={`Enter ${fieldLabel.toLowerCase()}`}
-                                  />
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div className="booking-popup-no-fields">
-                              <p>No additional details required for this occasion.</p>
-                            </div>
-                          )}
+                              })
+                            ) : (
+                              <div className="booking-popup-no-fields">
+                                <p>No additional details required for this occasion.</p>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Booking Summary on Occasion Tab */}
                     {renderBookingSummary()}
@@ -3443,6 +3578,59 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
           </div>
         </div>
+
+        {/* Decoration = No confirmation popup (styled like validation popup) */}
+        {showDecorationNoConfirm && (
+          <div className="booking-popup-validation">
+            <div className="booking-popup-validation-content">
+              
+
+              <h3 className="booking-popup-validation-title">
+                Skip decoration for this show?
+              </h3>
+
+              <p className="booking-popup-validation-message">
+                With <strong>Decoration = Yes</strong>, you can enjoy full occasion-wise celebration – beautiful decor,
+                surprise moments, curated gifts and many special add-ons. Keeping it on <strong>No</strong> means a
+                simple, cozy private theatre experience without extra decoration.
+              </p>
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => {
+                    setHasConfirmedDecorationNo(true);
+                    setShowDecorationNoConfirm(false);
+                    void handleNextStep();
+                  }}
+                  className="booking-popup-validation-btn"
+                  style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.4)' }}
+                >
+                  Ignore &amp; Continue
+                </button>
+                <button
+                  onClick={() => {
+                    const updatedServices: { [key: string]: 'Yes' | 'No' } = { '__decoration__': 'Yes' };
+                    allServices.forEach(service => {
+                      if (service.includeInDecoration) {
+                        updatedServices[service.name] = 'Yes';
+                      } else {
+                        updatedServices[service.name] = selectedServices[service.name] || 'No';
+                      }
+                    });
+                    setSelectedServices(updatedServices);
+
+                    setHasConfirmedDecorationNo(true);
+                    setShowDecorationNoConfirm(false);
+                    void handleNextStep();
+                  }}
+                  className="booking-popup-validation-btn"
+                >
+                  Change No to Yes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Success Animation */}
         {isBookingSuccessful && bookingResult && (

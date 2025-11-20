@@ -547,8 +547,9 @@ const saveBooking = async (bookingData: BookingData) => {
       isManualBooking: bookingData.isManualBooking || false,
       bookingType: bookingData.bookingType || 'Online',
       createdBy: bookingData.createdBy || 'Customer',
-      staffId: bookingData.staffId || null,
-      staffName: bookingData.staffName || null,
+      staffId: (bookingData as any).staffId || null,
+      staffName: (bookingData as any).staffName || null,
+      adminName: (bookingData as any).adminName || null,
       notes: bookingData.notes || '',
       slotBookingFee: Number((bookingData as any)?.slotBookingFee ?? bookingData.pricingData?.slotBookingFee ?? bookingData.advancePayment ?? 0),
       decorationFee: Number((bookingData as any)?.decorationFee ?? (bookingData as any)?.decorationAppliedFee ?? 0)
@@ -694,9 +695,10 @@ const saveManualBooking = async (bookingData: BookingData) => {
       // Manual booking specific fields
       isManualBooking: true,
       bookingType: 'Manual',
-      createdBy: 'Admin',
-      staffId: booking.staffId || null,
-      staffName: booking.staffName || null,
+      createdBy: (booking as any).createdBy || 'Admin',
+      staffId: (booking as any).staffId || null,
+      staffName: (booking as any).staffName || null,
+      adminName: (booking as any).adminName || null,
       notes: booking.notes || '',
       slotBookingFee: Number((booking as any)?.slotBookingFee ?? booking.pricingData?.slotBookingFee ?? booking.advancePayment ?? 0),
       decorationFee: Number((booking as any)?.decorationFee ?? (booking as any)?.decorationAppliedFee ?? 0)
@@ -3376,6 +3378,7 @@ const saveOccasion = async (occasionData: Record<string, unknown>) => {
       imageUrl: occasionData.imageUrl,
       requiredFields: occasionData.requiredFields || [],
       isActive: occasionData.isActive !== undefined ? occasionData.isActive : true,
+      includeInDecoration: occasionData.includeInDecoration === true,
       createdAt: new Date()
     };
     
@@ -3391,6 +3394,7 @@ const saveOccasion = async (occasionData: Record<string, unknown>) => {
         imageUrl: occasion.imageUrl,
         requiredFields: occasion.requiredFields,
         isActive: occasion.isActive,
+        includeInDecoration: occasion.includeInDecoration === true,
         createdAt: occasion.createdAt
       }
     };
@@ -3433,6 +3437,7 @@ const getAllOccasions = async () => {
           requiredFields: occasion.requiredFields || [],
           isActive: occasion.isActive,
           createdAt: occasion.createdAt,
+          includeInDecoration: occasion.includeInDecoration === true || decompressedData.includeInDecoration === true,
           ...decompressedData
         };
       })
@@ -3465,6 +3470,7 @@ const updateOccasion = async (id: string, occasionData: Record<string, unknown>)
       imageUrl: occasionData.imageUrl,
       requiredFields: occasionData.requiredFields || [],
       isActive: occasionData.isActive !== undefined ? occasionData.isActive : true,
+      includeInDecoration: occasionData.includeInDecoration === true,
       updatedAt: new Date()
     };
     
@@ -3489,7 +3495,8 @@ const updateOccasion = async (id: string, occasionData: Record<string, unknown>)
         imageUrl: updatedOccasion?.imageUrl,
         requiredFields: updatedOccasion?.requiredFields,
         isActive: updatedOccasion?.isActive,
-        createdAt: updatedOccasion?.createdAt
+        includeInDecoration: updatedOccasion?.compressedData.includeInDecoration === true,
+        updatedAt: updatedOccasion?.updatedAt
       }
     };
   } catch (error) {

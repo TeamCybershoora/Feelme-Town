@@ -45,13 +45,15 @@ interface ManualBookingForm {
 }
 
 interface OccasionOption {
+  _id: string;
+  occasionId: string;
   name: string;
-  requiredFields: string[];
-  displayName?: string;
-  description?: string;
-  fieldLabels?: { [key: string]: string };
-  icon?: string;
+  icon: string;
   popular?: boolean;
+  requiredFields: string[];
+  fieldLabels: { [key: string]: string };
+  isActive: boolean;
+  includeInDecoration?: boolean;
 }
 
 interface TrustedCustomerPrefill {
@@ -2552,28 +2554,38 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                     </h3>
 
 
-                    {!formData.occasion ? (
-                      <div className="booking-popup-occasions">
-                        {occasionOptions.map((occasion) => (
-                          <div
-                            key={occasion.name}
-                            onClick={() => handleOccasionSelect(occasion.name)}
-                            className="booking-popup-occasion"
-                            style={{
-                              backgroundImage: `url(${occasion.icon})`,
-                              backgroundSize: 'cover',
-                              backgroundPosition: 'center',
-                              backgroundRepeat: 'no-repeat'
-                            }}
-                          >
-                            {occasion.popular && <div className="booking-popup-badge">Popular</div>}
-                            <div className="booking-popup-occasion-overlay">
-                              <h4>{occasion.name}</h4>
-                            </div>
+                    {(() => {
+                      const isDecorationSelected = formData.wantDecorItems === 'Yes';
+                      const visibleOccasions = isDecorationSelected
+                        ? occasionOptions.filter((occasion) => occasion.includeInDecoration)
+                        : occasionOptions;
+
+                      if (!formData.occasion) {
+                        return (
+                          <div className="booking-popup-occasions">
+                            {visibleOccasions.map((occasion) => (
+                              <div
+                                key={occasion.name}
+                                onClick={() => handleOccasionSelect(occasion.name)}
+                                className="booking-popup-occasion"
+                                style={{
+                                  backgroundImage: `url(${occasion.icon})`,
+                                  backgroundSize: 'cover',
+                                  backgroundPosition: 'center',
+                                  backgroundRepeat: 'no-repeat'
+                                }}
+                              >
+                                {occasion.popular && <div className="booking-popup-badge">Popular</div>}
+                                <div className="booking-popup-occasion-overlay">
+                                  <h4>{occasion.name}</h4>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                    ) : (
+                        );
+                      }
+
+                      return (
                       <div className="booking-popup-selected-occasion">
                         <div className="booking-popup-occasion-header">
                             <div className="booking-popup-occasion-selected">
@@ -2651,7 +2663,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                           )}
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
 

@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { DatePickerProvider } from '@/contexts/DatePickerContext';
 import { BookingProvider, useBooking } from '@/contexts/BookingContext';
 import { useDatePicker } from '@/contexts/DatePickerContext';
-import ManualBookingPopup from '@/components/ManualBookingPopup';
+import BookingPopup from '@/components/BookingPopup';
 import CancelBookingPopup from '@/components/CancelBookingPopup';
 import GlobalDatePicker from '@/components/GlobalDatePicker';
 // Removed getDefaultTimeSlots import - no hardcoded time slots
@@ -4864,7 +4864,7 @@ function ManualBookingContent() {
             `}</style>
 
             {/* Manual Booking Popups */}
-            <ManualBookingPopup isOpen={isBookingPopupOpen} onClose={closeBookingPopup} isManualMode={true} userInfo={userInfo} prefillCustomer={trustedCustomerPrefill} />
+            <BookingPopup isOpen={isBookingPopupOpen} onClose={closeBookingPopup} isManualMode={true} userInfo={userInfo} />
             <CancelBookingPopup isOpen={isCancelBookingPopupOpen} onClose={closeCancelBookingPopup} bookingData={cancelBookingData} />
             
             {/* Global Date Picker */}

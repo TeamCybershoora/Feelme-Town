@@ -12,6 +12,7 @@ interface Occasion {
   imageUrl: string;
   requiredFields: string[];
   isActive: boolean;
+  includeInDecoration?: boolean;
   createdAt?: Date;
 }
 
@@ -30,7 +31,8 @@ export default function OccasionsPage() {
     name: '',
     imageUrl: '',
     requiredFields: [],
-    isActive: true
+    isActive: true,
+    includeInDecoration: false
   });
 
   const [currentFieldInput, setCurrentFieldInput] = useState('');
@@ -38,6 +40,7 @@ export default function OccasionsPage() {
   const [imagePreview, setImagePreview] = useState<string>('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [allDecorationIncluded, setAllDecorationIncluded] = useState(false);
 
   useEffect(() => {
     fetchOccasions();
@@ -50,6 +53,13 @@ export default function OccasionsPage() {
       
       if (data.success) {
         setOccasions(data.occasions);
+        const list: Occasion[] = data.occasions || [];
+        if (list.length > 0) {
+          const everyIncluded = list.every(o => o.includeInDecoration === true);
+          setAllDecorationIncluded(everyIncluded);
+        } else {
+          setAllDecorationIncluded(false);
+        }
       }
     } catch (error) {
       
@@ -115,7 +125,8 @@ export default function OccasionsPage() {
       name: '',
       imageUrl: '',
       requiredFields: [],
-      isActive: true
+      isActive: true,
+      includeInDecoration: false
     });
     setCurrentFieldInput('');
     setImagePreview('');
@@ -151,12 +162,47 @@ export default function OccasionsPage() {
       name: occasion.name,
       imageUrl: occasion.imageUrl,
       requiredFields: occasion.requiredFields || [],
-      isActive: occasion.isActive
+      isActive: occasion.isActive,
+      includeInDecoration: occasion.includeInDecoration === true
     });
     setCurrentFieldInput('');
     setImagePreview(occasion.imageUrl);
     setSelectedImageFile(null);
     setShowAddPopup(true);
+  };
+
+  const handleGlobalDecorationToggle = async (value: boolean) => {
+    // Optimistic UI update
+    setAllDecorationIncluded(value);
+    setOccasions(prev => prev.map(o => ({ ...o, includeInDecoration: value })));
+
+    // Update all occasions via existing PUT API
+    const updates = occasions.map(async (occasion) => {
+      if (!occasion._id) return;
+      try {
+        await fetch(`/api/admin/occasions?id=${occasion._id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: occasion.name,
+            imageUrl: occasion.imageUrl,
+            requiredFields: occasion.requiredFields || [],
+            isActive: occasion.isActive,
+            includeInDecoration: value
+          })
+        });
+      } catch (e) {
+        // silent error; final state will be corrected on next fetch
+      }
+    });
+
+    try {
+      await Promise.all(updates);
+      showSuccess(value ? 'All occasions will now appear with decoration.' : 'Decoration filter disabled for all occasions.');
+    } catch (e) {
+      showError('Failed to update decoration setting for some occasions.');
+      fetchOccasions();
+    }
   };
 
   const handleSaveOccasion = async () => {
@@ -255,6 +301,24 @@ export default function OccasionsPage() {
             <span className="count-number">{occasions.length}</span>
             <span className="count-label">Total Occasions</span>
           </div>
+          <div className="global-toggle-container">
+            <div className="global-toggle-labels">
+              <span className="global-toggle-title">Decoration Mode</span>
+              <span className="global-toggle-subtitle">
+                {allDecorationIncluded
+                  ? 'All occasions are included when decoration is selected'
+                  : 'Decoration filter is off (all occasions visible)'}
+              </span>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={allDecorationIncluded}
+                onChange={(e) => handleGlobalDecorationToggle(e.target.checked)}
+              />
+              <span className="slider round"></span>
+            </label>
+          </div>
           <button className="add-btn" onClick={handleAddOccasion}>
             <Plus size={20} />
             Add Occasion
@@ -270,6 +334,9 @@ export default function OccasionsPage() {
             </div>
             <div className="occasion-info">
               <h3>{occasion.name}</h3>
+              {occasion.includeInDecoration && (
+                <div className="occasion-badge-decoration">Decoration Occasion</div>
+              )}
               {occasion.requiredFields && occasion.requiredFields.length > 0 && (
                 <div className="required-fields">
                   <span className="fields-label">Required Fields:</span>
@@ -494,6 +561,99 @@ export default function OccasionsPage() {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
           gap: 2rem;
+        }
+
+        .global-toggle-container {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 0.5rem 1rem;
+          border-radius: 999px;
+          background: #f3f4f6;
+        }
+
+        .global-toggle-labels {
+          display: flex;
+          flex-direction: column;
+          margin-right: 0.5rem;
+        }
+
+        .global-toggle-title {
+          font-size: 0.9rem;
+          font-weight: 600;
+          color: #111827;
+        }
+
+        .global-toggle-subtitle {
+          font-size: 0.75rem;
+          color: #6b7280;
+        }
+
+        .occasion-badge-decoration {
+          display: inline-block;
+          margin-top: 0.5rem;
+          padding: 0.2rem 0.6rem;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #ec4899, #f97316);
+          color: #fff;
+          font-size: 0.75rem;
+          font-weight: 600;
+        }
+
+        .toggle-row {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .toggle-text {
+          font-size: 0.85rem;
+          color: #555;
+        }
+
+        .switch {
+          position: relative;
+          display: inline-block;
+          width: 46px;
+          height: 24px;
+        }
+
+        .switch input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+
+        .slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #ccc;
+          transition: 0.2s;
+          border-radius: 24px;
+        }
+
+        .slider:before {
+          position: absolute;
+          content: '';
+          height: 18px;
+          width: 18px;
+          left: 3px;
+          bottom: 3px;
+          background-color: white;
+          transition: 0.2s;
+          border-radius: 50%;
+        }
+
+        input:checked + .slider {
+          background-color: var(--accent-color);
+        }
+
+        input:checked + .slider:before {
+          transform: translateX(22px);
         }
 
         .occasion-card {
