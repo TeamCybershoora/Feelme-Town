@@ -48,6 +48,42 @@ const renderOccasionDetails = (bookingData: Record<string, any>) => {
   }
 };
 
+const buildOrderStatusEmail = (
+  bookingData: BookingData,
+  options: { title: string; message: string; ctaLabel: string; trackUrl: string; badge: string },
+) => `
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <style>
+        body { background:#0b0b0b; color:#fff; font-family: 'Inter', Arial, sans-serif; margin:0; padding:0; }
+        .wrapper { max-width:640px; margin:0 auto; padding:32px 20px; }
+        .card { background:#111; border-radius:20px; padding:28px; border:1px solid #1f1f1f; box-shadow:0 20px 50px rgba(0,0,0,0.4); }
+        .title { font-size:24px; font-weight:700; margin-bottom:8px; }
+        .badge { display:inline-block; margin-bottom:14px; padding:6px 14px; border-radius:999px; font-size:12px; letter-spacing:0.1em; background:#f87171; color:#0b0b0b; font-weight:700; }
+        .sub { color:#bbb; font-size:14px; line-height:1.7; }
+        .ticket { margin:22px 0; padding:18px; border-radius:18px; background:linear-gradient(135deg,#e50914,#b20710); text-align:center; font-size:20px; letter-spacing:0.32em; font-weight:800; }
+        .cta { display:inline-block; margin-top:22px; padding:14px 28px; border-radius:999px; background:#f2b365; color:#000; text-decoration:none; font-weight:700; }
+        .footer { text-align:center; margin-top:26px; color:#888; font-size:12px; }
+      </style>
+    </head>
+    <body>
+      <div class="wrapper">
+        <div class="card">
+          <div class="badge">${options.badge}</div>
+          <div class="title">${options.title}</div>
+          <div class="sub">${options.message}</div>
+          ${bookingData.ticketNumber ? `<div class="ticket">${bookingData.ticketNumber.toUpperCase()}</div>` : ''}
+          <a class="cta" href="${options.trackUrl}" target="_blank" rel="noreferrer">${options.ctaLabel}</a>
+        </div>
+        <div class="footer">FeelME Town · Private Theatre & Cafe · We will keep you posted.</div>
+      </div>
+    </body>
+  </html>
+`;
+
 interface BookingData {
   id: string;
   name: string;
@@ -59,6 +95,7 @@ interface BookingData {
   occasion: string;
   numberOfPeople: number;
   totalAmount?: number;
+  ticketNumber?: string;
 }
 
 // Helper: Get settings for SMTP and notification gating
@@ -400,6 +437,12 @@ const emailTemplates = {
                     <div class="detail-label">Cancelled At</div>
                     <div class="detail-value">${bookingData.cancelledAt.toLocaleDateString()}</div>
                   </div>
+                  ${(bookingData as any).ticketNumber ? `
+                  <div class="detail-item">
+                    <div class="detail-label">Ticket Number</div>
+                    <div class="detail-value">${(bookingData as any).ticketNumber}</div>
+                  </div>
+                  ` : ''}
                   <div class="detail-item">
                     <div class="detail-label">Refund Status</div>
                     <div class="detail-value">${bookingData.refundStatus === 'refundable' ? 'Eligible for Refund' : 'Non-Refundable'}</div>
@@ -934,6 +977,21 @@ const emailTemplates = {
                 <p>Your booking has been successfully confirmed. We're excited to make your special occasion absolutely memorable!</p>
               </div>
               
+              ${bookingData.ticketNumber ? `
+              <!-- Ticket Number Section -->
+              <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 20px; text-align: center; margin: 30px 0; box-shadow: 0 15px 40px rgba(102,126,234,0.3);">
+                <div style="color: rgba(255,255,255,0.9); font-size: 14px; font-family: 'Paralucent-Medium', sans-serif; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px;">🎟️ Your Ticket Number</div>
+                <div style="background: white; padding: 20px; border-radius: 15px; margin: 15px 0; box-shadow: 0 8px 24px rgba(0,0,0,0.15);">
+                  <div style="font-size: 48px; font-weight: 800; font-family: 'Paralucent-DemiBold', monospace; background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: 4px;">${bookingData.ticketNumber}</div>
+                </div>
+                <div style="color: white; font-size: 16px; font-family: 'Paralucent-Medium', sans-serif; line-height: 1.6; opacity: 0.95;">
+                  <strong>📱 Use this ticket number to:</strong><br>
+                  • Order food and beverages in the theater<br>
+                  • Access premium services during your visit<br>
+                  • Quick identification at the venue
+                </div>
+              </div>
+              ` : ''}
               
               <div class="booking-card">
                 <div class="booking-header">
@@ -1500,14 +1558,14 @@ const emailTemplates = {
 const sendEmail = async (to: string, subject: string, html: string, attachments?: any[]) => {
   try {
     const settings = await getSettingsOrDefault();
-    
+
     if (!settings.enableEmailNotifications) {
       console.log('📧 Email notifications are disabled in settings');
       return { success: false, error: 'Email notifications disabled' };
     }
 
     const transporter = await createTransporter();
-    
+
     const result = await transporter.sendMail({
       from: settings.emailUser || 'noreply@feelme-town.com',
       to,
@@ -1554,6 +1612,38 @@ const emailService = {
 
     // Use custom template to send to team Cybershoora
     return await sendEmail('teamcybershoora@gmail.com', customTemplate.subject, customTemplate.html);
+  },
+  sendOrderReceivedNotification: async (bookingData: BookingData & { trackUrl?: string }) => {
+    if (!bookingData?.email) {
+      return { success: false, error: 'No email provided' };
+    }
+    const siteUrl = getSiteUrl();
+    const trackUrl = bookingData.trackUrl || `${siteUrl}/order-items?ticket=${encodeURIComponent(bookingData.ticketNumber || '')}`;
+    const html = buildOrderStatusEmail(bookingData, {
+      title: 'Your order is received 🍿',
+      message:
+        'We just received your food order for your FeelME Town experience. Sit back and relax — once the order is ready, our team will notify you. You can track the status anytime using the button below.',
+      ctaLabel: 'Track your order',
+      trackUrl,
+      badge: 'ORDER RECEIVED',
+    });
+    return sendEmail(bookingData.email, 'We have received your food order – FeelME Town', html);
+  },
+  sendOrderReadyNotification: async (bookingData: BookingData & { trackUrl?: string }) => {
+    if (!bookingData?.email) {
+      return { success: false, error: 'No email provided' };
+    }
+    const siteUrl = getSiteUrl();
+    const trackUrl = bookingData.trackUrl || `${siteUrl}/order-items?ticket=${encodeURIComponent(bookingData.ticketNumber || '')}`;
+    const html = buildOrderStatusEmail(bookingData, {
+      title: 'Your order is ready 🍽️',
+      message:
+        'Your food order is now ready to be served. Our team will bring it to you shortly. If you need anything else, feel free to reach out. Enjoy your private theatre experience!',
+      ctaLabel: 'Track order status',
+      trackUrl,
+      badge: 'ORDER READY',
+    });
+    return sendEmail(bookingData.email, 'Your order is ready – FeelME Town', html);
   },
   // Send invoice ready email
   // If bookingData.invoiceDriveUrl is provided, use that as primary download link.
@@ -1609,17 +1699,16 @@ const emailService = {
             <div class="footer">© ${CURRENT_YEAR} FeelME Town • Delhi, India • feelmetown@gmail.com</div>
           </div>
         </body>
-        </html>
-      `
+      </html>
+    `
     };
-    return await sendEmail(bookingData.email, template.subject, template.html);
+    return sendEmail(bookingData.email, template.subject, template.html);
   },
-  // Send booking confirmed email (no invoice attachment)
-  sendBookingConfirmed: async (bookingData: BookingData) => {
+  sendBookingConfirmed: async (bookingData: BookingData & { ticketNumber?: string }) => {
     if (!bookingData.email) {
       return { success: false, error: 'No email provided' };
     }
-    const siteUrl = (process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000');
+    const siteUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
     const template = {
       subject: 'Booking Confirmed - FeelME Town 🎉',
       html: `
@@ -1661,6 +1750,17 @@ const emailService = {
                 <div class="label">Booking Reference</div>
                 <div class="value">${bookingData.id}</div>
               </div>
+              ${(bookingData as any).ticketNumber ? `
+              <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; text-align: center; padding: 30px;">
+                <div style="color: rgba(255,255,255,0.9); font-size: 12px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px;">🎟️ YOUR TICKET NUMBER</div>
+                <div style="background: white; padding: 20px; border-radius: 12px; margin: 15px 0;">
+                  <div style="font-size: 36px; font-weight: 800; font-family: 'Paralucent-DemiBold', monospace; background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: 3px;">${(bookingData as any).ticketNumber}</div>
+                </div>
+                <div style="color: white; font-size: 14px; line-height: 1.6; opacity: 0.95;">
+                  <strong>📱 Use this to order food & services in theater</strong>
+                </div>
+              </div>
+              ` : ''}
               <div class="card" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
                 <div>
                   <div class="label">Theater</div>
@@ -1725,32 +1825,32 @@ const emailService = {
                 </div>
                 ` : ''}
                 ${(() => {
-                  // Handle dynamic occasion-specific fields
-                  const dynamicFields: string[] = [];
-                  Object.keys(bookingData).forEach(key => {
-                    if (key.endsWith('_label') && !key.includes('_value')) {
-                      const baseKey = key.replace('_label', '');
-                      const label = (bookingData as any)[key];
-                      const value = (bookingData as any)[baseKey] || (bookingData as any)[`${baseKey}_value`];
-                      if (value && value.trim()) {
-                        dynamicFields.push(`
+          // Handle dynamic occasion-specific fields
+          const dynamicFields: string[] = [];
+          Object.keys(bookingData).forEach(key => {
+            if (key.endsWith('_label') && !key.includes('_value')) {
+              const baseKey = key.replace('_label', '');
+              const label = (bookingData as any)[key];
+              const value = (bookingData as any)[baseKey] || (bookingData as any)[`${baseKey}_value`];
+              if (value && value.trim()) {
+                dynamicFields.push(`
                         <div>
                           <div class="label">${label}</div>
                           <div class="value">${value}</div>
                         </div>
                         `);
-                      }
-                    }
-                  });
-                  return dynamicFields.join('');
-                })()}
+              }
+            }
+          });
+          return dynamicFields.join('');
+        })()}
               </div>
 
               <div class="note">
                 <strong>🧾 Invoice Notice:</strong> Your invoice will be generated after your booking is <strong>completed</strong>. You'll receive an email to download it once the show ends.
               </div>
               <div style="margin-top:16px; text-align:center;">
-                <a href="${siteUrl}/invoice/${encodeURIComponent(bookingData.id || (bookingData as any).bookingId || '')}" style="display:inline-block; background:#E50914; color:#fff; text-decoration:none; padding:12px 18px; border-radius:10px; font-weight:700; margin:5px;">📄 Open Invoice</a>
+                <a href="${siteUrl}/order-items" style="display:inline-block; background:#E50914; color:#fff; text-decoration:none; padding:12px 18px; border-radius:10px; font-weight:700; margin:5px;">Order Items</a>
                 <a href="${siteUrl}/cancel-booking?bookingId=${encodeURIComponent(bookingData.id || (bookingData as any).bookingId || '')}" style="display:inline-block; background:#dc2626; color:#fff; text-decoration:none; padding:12px 18px; border-radius:10px; font-weight:700; margin:5px;">❌ Cancel Booking</a>
               </div>
             </div>
@@ -1768,15 +1868,15 @@ const emailService = {
       console.log('❌ No email provided for booking completion');
       return { success: false, error: 'No email provided' };
     }
-    
+
     try {
       // Generate email template
       const template = emailTemplates.bookingComplete(bookingData);
-      
+
       // Generate PDF invoice
       console.log('📄 Generating PDF invoice for email attachment...');
       const fetch = (await import('node-fetch')).default;
-      
+
       const pdfResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/generate-invoice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1795,27 +1895,27 @@ const emailService = {
           ...(bookingData as any)
         })
       });
-      
+
       if (!pdfResponse.ok) {
         console.log('⚠️ Failed to generate PDF, sending email without attachment');
         return await sendEmail(bookingData.email, template.subject, template.html);
       }
-      
+
       const pdfBuffer = await pdfResponse.arrayBuffer();
-      
+
       // Create attachment with custom filename
       const cleanCustomerName = (bookingData.name || 'Customer').replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '-');
       const filename = `Invoice-FMT-${cleanCustomerName}.pdf`;
-      
+
       const attachments = [{
         filename: filename,
         content: Buffer.from(pdfBuffer),
         contentType: 'application/pdf'
       }];
-      
+
       console.log('📧 Sending booking confirmation email with PDF invoice attachment');
       return await sendEmail(bookingData.email, template.subject, template.html, attachments);
-      
+
     } catch (error) {
       console.error('❌ Error generating PDF attachment:', error);
       // Fallback: send email without attachment
@@ -1827,10 +1927,10 @@ const emailService = {
   // Send booking cancellation email
   sendBookingCancelled: async (bookingData: BookingData & { refundAmount: number; refundStatus: string; cancelledAt: Date }) => {
     if (!bookingData.email) {
-      
+
       return { success: false, error: 'No email provided' };
     }
-    
+
     const template = emailTemplates.bookingCancelled(bookingData);
     return await sendEmail(bookingData.email, template.subject, template.html);
   },
@@ -1838,7 +1938,7 @@ const emailService = {
   // Send booking incomplete email
   sendBookingIncomplete: async (bookingData: Partial<BookingData> & { email?: string; bookingId?: string; selectedCakes?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedDecorItems?: Array<{ id: string; name: string; price: number; quantity: number }>; selectedGifts?: Array<{ id: string; name: string; price: number; quantity: number }> }) => {
     if (!bookingData.email) {
-      
+
       return { success: false, error: 'No email provided' };
     }
 
@@ -1846,7 +1946,7 @@ const emailService = {
     try {
       // Import database directly to save incomplete booking
       const database = await import('@/lib/db-connect');
-      
+
       const result = await database.default.saveIncompleteBooking({
         name: bookingData.name,
         email: bookingData.email,
@@ -1861,26 +1961,26 @@ const emailService = {
         selectedGifts: bookingData.selectedGifts,
         totalAmount: bookingData.totalAmount
       });
-      
+
       if (result.success && result.booking) {
-        
-        
+
+
         // Update bookingData with the saved booking ID for email template
         bookingData.bookingId = result.booking.id;
-        
+
         // Also trigger cleanup of expired bookings
         const cleanupResult = await database.default.deleteExpiredIncompleteBookings();
         if (cleanupResult.deletedCount && cleanupResult.deletedCount > 0) {
-          
+
         }
       } else {
-        
+
       }
-      
+
     } catch (error) {
-      
+
     }
-    
+
     const template = emailTemplates.bookingIncomplete(bookingData);
     return await sendEmail(bookingData.email, template.subject, template.html);
   },
@@ -2062,10 +2162,10 @@ const emailService = {
     try {
       const transporter = await createTransporter();
       await transporter.verify();
-      
+
       return { success: true, message: 'Email service ready' };
     } catch (error) {
-      
+
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }

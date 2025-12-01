@@ -16,10 +16,11 @@ export default function AdminLayoutWrapper({ children }: AdminLayoutWrapperProps
   const isTestRoute = pathname.startsWith('/test-counters');
   const isManualBookingRoute = pathname.startsWith('/ManualBooking');
   const isEditBookingRoute = pathname.toLowerCase().startsWith('/editbooking');
+  const isOrderFoodRoute = pathname.startsWith('/order-items');
   
-  // If it's an admin route, management route, test route, or ManualBooking route, render children directly without navbar/footer
-  // (admin layout is handled in Administrator/layout.tsx, management layout is handled in management/layout.tsx)
-  if (isAdminRoute || isManagementRoute || isTestRoute || isManualBookingRoute || isEditBookingRoute) {
+  // If it's an admin route, management route, test route, ManualBooking route, edit booking, or order items page,
+  // render children directly without navbar/footer. Admin/management layouts are handled in their own layout files.
+  if (isAdminRoute || isManagementRoute || isTestRoute || isManualBookingRoute || isEditBookingRoute || isOrderFoodRoute) {
     return <>{children}</>;
   }
   

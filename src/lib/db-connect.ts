@@ -11,7 +11,7 @@ const gunzipAsync = promisify(gunzip);
 // Helper function to extract dynamic service items for database storage
 function getDynamicServiceItemsForDB(bookingData: any): Record<string, any> {
   const dynamicServiceItems: Record<string, any> = {};
-  
+
   // Look for all fields that start with "selected" and contain service items
   Object.keys(bookingData).forEach(key => {
     if (key.startsWith('selected') && Array.isArray(bookingData[key])) {
@@ -19,13 +19,13 @@ function getDynamicServiceItemsForDB(bookingData: any): Record<string, any> {
       if (key === 'selectedMovies') {
         return;
       }
-      
+
       // Store dynamic service items
       dynamicServiceItems[key] = bookingData[key];
       console.log(`📦 DB: Dynamic service items: ${key}:`, bookingData[key]);
     }
   });
-  
+
   return dynamicServiceItems;
 }
 
@@ -95,27 +95,170 @@ const FAQ_COLLECTION_NAME = 'faqs';
 const PRICING_COLLECTION_NAME = 'pricing';
 const CANCEL_REASONS_COLLECTION_NAME = 'cancel_reasons';
 const TRUSTED_CUSTOMERS_COLLECTION_NAME = 'trusted_customers';
+const ORDERS_COLLECTION_NAME = 'orders';
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
 
 // Database connection status
 let isConnected = false;
+let lastBookingSequence: number | null = null;
 
 // Compression utilities
 const compressData = async (data: unknown): Promise<Buffer> => {
   try {
     const jsonString = JSON.stringify(data);
     const inputBuffer = Buffer.from(jsonString, 'utf8');
-    
+
     // Use Zlib compression (gzip is a zlib format)
     const compressed = await gzipAsync(inputBuffer);
-    
+
     // Removed excessive logging for performance
     return compressed;
   } catch (error) {
     console.error('❌ Error compressing data:', error);
     throw error;
+  }
+};
+
+const getOrderCounts = async (filter: Record<string, any> = {}) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+    const totalPromise = collection.countDocuments(filter);
+    const byStatusPromise = collection
+      .aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+
+    const [total, byStatusRaw] = await Promise.all([totalPromise, byStatusPromise]);
+    const byStatus: Record<string, number> = {};
+    byStatusRaw.forEach((entry) => {
+      const key = typeof entry._id === 'string' ? entry._id : 'unknown';
+      byStatus[key] = entry.count || 0;
+    });
+
+    return {
+      success: true,
+      total,
+      byStatus,
+    };
+  } catch (error) {
+    console.error('❌ Error counting order records:', error);
+    return { success: false, error: 'Failed to count order records' };
+  }
+};
+
+const ORDER_AUTO_DELETE_MINUTES = 30;
+
+const updateOrderStatusByTicket = async (ticketNumber: string, status: string) => {
+  try {
+    if (!ticketNumber || !status) {
+      return { success: false, error: 'Ticket number and status are required' };
+    }
+
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+    const normalizedStatus = status.trim().toLowerCase();
+    const result = await collection.updateMany(
+      { ticketNumber },
+      {
+        $set: {
+          status: normalizedStatus,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    return { success: true, modifiedCount: result.modifiedCount };
+  } catch (error) {
+    console.error('❌ Error updating order status by ticket:', error);
+    return { success: false, error: 'Failed to update order status' };
+  }
+};
+
+const markOrderReadyForAutoDeletion = async (ticketNumber: string, minutesUntilDelete = ORDER_AUTO_DELETE_MINUTES) => {
+  try {
+    if (!ticketNumber) {
+      return { success: false, error: 'Ticket number is required for auto-delete scheduling' };
+    }
+
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+    const now = new Date();
+    const autoDeleteAt = new Date(now.getTime() + minutesUntilDelete * 60 * 1000);
+
+    const result = await collection.updateMany(
+      { ticketNumber },
+      {
+        $set: {
+          readyMarkedAt: now,
+          autoDeleteAt,
+          updatedAt: now,
+        },
+      },
+    );
+
+    return { success: true, modifiedCount: result.modifiedCount, autoDeleteAt };
+  } catch (error) {
+    console.error('❌ Error scheduling order auto-delete:', error);
+    return { success: false, error: 'Failed to schedule order auto-delete' };
+  }
+};
+
+const cleanupReadyOrdersPastAutoDelete = async () => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+    const now = new Date();
+    const result = await collection.deleteMany({
+      status: 'ready',
+      autoDeleteAt: { $lte: now },
+    });
+
+    if (result.deletedCount) {
+      console.log(`🧹 Auto-deleted ${result.deletedCount} ready orders past expiry`);
+    }
+
+    return { success: true, deletedCount: result.deletedCount || 0 };
+  } catch (error) {
+    console.error('❌ Error cleaning up ready orders:', error);
+    return { success: false, error: 'Failed to clean up ready orders' };
   }
 };
 
@@ -146,11 +289,272 @@ const deleteManualBooking = async (bookingId: string) => {
   }
 };
 
+const saveOrderRecord = async (orderData: Record<string, any>) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+    const timestamp = new Date();
+
+    const filter: Record<string, any> = {
+      bookingId: orderData.bookingId,
+      serviceField: orderData.serviceField || orderData.canonicalField,
+    };
+
+    if (!filter.bookingId || !filter.serviceField) {
+      throw new Error('Order record requires bookingId and serviceField for upsert');
+    }
+
+    const updateDoc: Record<string, any> = {
+      ...orderData,
+      items: Array.isArray(orderData.items) ? orderData.items : [],
+      updatedAt: timestamp,
+    };
+
+    const result = await collection.findOneAndUpdate(
+      filter,
+      {
+        $set: updateDoc,
+        $setOnInsert: {
+          createdAt: orderData.createdAt ? new Date(orderData.createdAt) : timestamp,
+        },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
+
+    const updatedRecord = result?.value || {
+      ...updateDoc,
+      _id: result?.lastErrorObject?.upserted,
+      createdAt: result?.value?.createdAt || new Date(),
+    };
+
+    console.log('🧾 Order record upserted:', {
+      bookingId: updatedRecord.bookingId,
+      serviceName: updatedRecord.serviceName,
+      serviceField: updatedRecord.serviceField,
+    });
+
+    return {
+      success: true,
+      orderId: updatedRecord?._id?.toString?.(),
+      order: updatedRecord,
+    };
+  } catch (error) {
+    console.error('❌ Error saving order record to MongoDB:', error);
+    return { success: false, error: 'Failed to save order record' };
+  }
+};
+
+const getOrders = async (filter: Record<string, any> = {}, limit = 200) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+    const orders = await collection
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .toArray();
+
+    return {
+      success: true,
+      orders,
+      total: orders.length,
+    };
+  } catch (error) {
+    console.error('❌ Error fetching order records from MongoDB:', error);
+    return { success: false, error: 'Failed to fetch order records' };
+  }
+};
+
+const deleteOrdersByBookingReference = async ({
+  bookingId,
+  mongoBookingId,
+  ticketNumber,
+}: {
+  bookingId?: string;
+  mongoBookingId?: string;
+  ticketNumber?: string;
+}) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const orFilters: Record<string, any>[] = [];
+    if (bookingId) {
+      orFilters.push({ bookingId });
+    }
+    if (mongoBookingId && ObjectId.isValid(mongoBookingId)) {
+      orFilters.push({ mongoBookingId });
+    }
+    if (ticketNumber) {
+      orFilters.push({ ticketNumber });
+    }
+
+    if (!orFilters.length) {
+      return { success: false, error: 'No booking reference provided for order cleanup' };
+    }
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+    const result = await collection.deleteMany({ $or: orFilters });
+
+    console.log('🧹 Orders deleted for booking:', {
+      bookingId,
+      mongoBookingId,
+      ticketNumber,
+      deleted: result.deletedCount,
+    });
+
+    return {
+      success: true,
+      deletedCount: result.deletedCount,
+    };
+  } catch (error) {
+    console.error('❌ Error deleting order records:', error);
+    return { success: false, error: 'Failed to delete order records' };
+  }
+};
+
+const deleteOrdersByBookingAndService = async ({
+  bookingId,
+  mongoBookingId,
+  ticketNumber,
+  serviceField,
+  serviceName,
+}: {
+  bookingId?: string;
+  mongoBookingId?: string;
+  ticketNumber?: string;
+  serviceField?: string;
+  serviceName?: string;
+}) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    const orFilters: Record<string, any>[] = [];
+    if (bookingId) orFilters.push({ bookingId });
+    if (mongoBookingId && ObjectId.isValid(mongoBookingId)) orFilters.push({ mongoBookingId });
+    if (ticketNumber) orFilters.push({ ticketNumber });
+
+    if (!orFilters.length) {
+      return { success: false, error: 'No booking reference provided for order cleanup' };
+    }
+
+    const serviceOr: Record<string, any>[] = [];
+    if (serviceField) serviceOr.push({ serviceField });
+    if (serviceName) serviceOr.push({ serviceName });
+
+    const query: any = serviceOr.length
+      ? { $or: orFilters, $and: [{ $or: serviceOr }] }
+      : { $or: orFilters };
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+    const result = await collection.deleteMany(query);
+
+    return { success: true, deletedCount: result.deletedCount };
+  } catch (error) {
+    console.error('❌ Error deleting order records by service:', error);
+    return { success: false, error: 'Failed to delete order records by service' };
+  }
+};
+
+const updateOrdersRemoveItems = async ({
+  bookingId,
+  mongoBookingId,
+  ticketNumber,
+  serviceField,
+  serviceName,
+  itemIds,
+}: {
+  bookingId?: string;
+  mongoBookingId?: string;
+  ticketNumber?: string;
+  serviceField?: string;
+  serviceName?: string;
+  itemIds: string[];
+}) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+
+    if (!Array.isArray(itemIds) || itemIds.length === 0) {
+      return { success: true, updated: 0, deletedEmpties: 0 };
+    }
+
+    const orFilters: Record<string, any>[] = [];
+    if (bookingId) orFilters.push({ bookingId });
+    if (mongoBookingId && ObjectId.isValid(mongoBookingId)) orFilters.push({ mongoBookingId });
+    if (ticketNumber) orFilters.push({ ticketNumber });
+
+    if (!orFilters.length) {
+      return { success: false, error: 'No booking reference provided for order item removal' };
+    }
+
+    const serviceOr: Record<string, any>[] = [];
+    if (serviceField) serviceOr.push({ serviceField });
+    if (serviceName) serviceOr.push({ serviceName });
+
+    const collection = db.collection(ORDERS_COLLECTION_NAME);
+
+    const baseQuery: any = serviceOr.length
+      ? { $or: orFilters, $and: [{ $or: serviceOr }] }
+      : { $or: orFilters };
+
+    // Only pull from append/update type records; keep remove/clear audit intact
+    const query = { ...baseQuery, actionType: { $in: ['append', 'update'] } } as any;
+
+    const pullResult = await collection.updateMany(query, {
+      $pull: { items: { id: { $in: itemIds } } },
+      $set: { updatedAt: new Date() },
+    } as any);
+
+    // Clean up any records that have no items left
+    const deleteEmpty = await collection.deleteMany({ ...baseQuery, items: { $size: 0 } });
+
+    return {
+      success: true,
+      updated: pullResult.modifiedCount || 0,
+      deletedEmpties: deleteEmpty.deletedCount || 0,
+    };
+  } catch (error) {
+    console.error('❌ Error updating order records (remove items):', error);
+    return { success: false, error: 'Failed to update order records (remove items)' };
+  }
+};
+
 const decompressData = async (compressedData: Buffer | unknown): Promise<unknown> => {
   try {
     // Handle MongoDB Binary objects by converting to Buffer
     let bufferData: Buffer;
-    
+
     // Check if it's a MongoDB Binary object with buffer property
     if (compressedData && typeof compressedData === 'object' && 'buffer' in compressedData) {
       // This is a MongoDB Binary object
@@ -172,12 +576,12 @@ const decompressData = async (compressedData: Buffer | unknown): Promise<unknown
         bufferData = Buffer.from(String(compressedData), 'utf8');
       }
     }
-    
+
     const decompressed = await gunzipAsync(bufferData);
     const jsonString = decompressed.toString('utf8');
-    
+
     console.log(`📦 Data decompressed: ${bufferData.length} bytes → ${decompressed.length} bytes`);
-    
+
     return JSON.parse(jsonString);
   } catch (error) {
     console.error('❌ Error decompressing data:', error);
@@ -198,7 +602,7 @@ const connectToDatabase = async () => {
     }
 
     console.log('🔄 Connecting to FeelME Town MongoDB database...');
-    
+
     // Create MongoDB client with optimized settings
     client = new MongoClient(MONGODB_URI, {
       maxPoolSize: 10,
@@ -208,24 +612,24 @@ const connectToDatabase = async () => {
       retryWrites: true,
       retryReads: true,
     });
-    
+
     // Connect to MongoDB
     await client.connect();
-    
+
     // Get database
     db = client.db(DB_NAME);
-    
+
     isConnected = true;
-    
+
     console.log('✅ Connected to FeelME Town MongoDB database successfully!');
-    
-      return {
-        success: true,
-        message: 'Connected to FeelME Town MongoDB database',
-        database: DB_NAME,
-        collections: [COLLECTION_NAME, INCOMPLETE_COLLECTION_NAME, CANCELLED_COLLECTION_NAME]
-      };
-    
+
+    return {
+      success: true,
+      message: 'Connected to FeelME Town MongoDB database',
+      database: DB_NAME,
+      collections: [COLLECTION_NAME, INCOMPLETE_COLLECTION_NAME, CANCELLED_COLLECTION_NAME]
+    };
+
   } catch (error) {
     console.error('❌ MongoDB connection failed:', error);
     isConnected = false;
@@ -257,7 +661,7 @@ const checkConnection = async () => {
         }
       };
     }
-    
+
     // Get collection count
     if (!db) {
       throw new Error('Database not connected');
@@ -265,11 +669,11 @@ const checkConnection = async () => {
     const collection = db.collection(COLLECTION_NAME);
     const incompleteCollection = db.collection(INCOMPLETE_COLLECTION_NAME);
     const cancelledCollection = db.collection(CANCELLED_COLLECTION_NAME);
-    
+
     const bookingCount = await collection.countDocuments();
     const incompleteBookingCount = await incompleteCollection.countDocuments();
     const cancelledBookingCount = await cancelledCollection.countDocuments();
-    
+
     return {
       connected: isConnected,
       database: DB_NAME,
@@ -288,7 +692,7 @@ const checkConnection = async () => {
   }
 };
 
-// Generate custom booking ID (FMT0001, FMT0002, etc.)
+// Generate custom booking ID (FMT-YYYY-001, FMT-YYYY-002, etc.)
 const generateBookingId = async () => {
   try {
     if (!isConnected || !db) {
@@ -297,43 +701,42 @@ const generateBookingId = async () => {
         throw new Error('Failed to connect to database');
       }
     }
-    
-    if (!db) {
-      throw new Error('Database not connected');
-    }
-    const collection = db.collection(COLLECTION_NAME);
-    
-    // Generate unique booking ID with multiple components to prevent duplication
+
     const currentYear = new Date().getFullYear();
-    const currentMonth = (new Date().getMonth() + 1).toString().padStart(2, '0');
-    const currentDate = new Date().getDate().toString().padStart(2, '0');
-    
-    // Get timestamp for uniqueness
-    const timestamp = Date.now().toString().slice(-6); // Last 6 digits of timestamp
-    
-    // Generate random 2-digit number for extra uniqueness
-    const randomNum = Math.floor(Math.random() * 100).toString().padStart(2, '0');
-    
-    // Get the count of existing bookings for sequential component
-    const count = await collection.countDocuments();
-    const sequentialNumber = (count + 1).toString().padStart(3, '0');
-    
-    // Format: FMT-YYYY-MMDD-SEQ-TS-RN
-    // Example: FMT-2025-1003-001-123456-42
-    const bookingId = `FMT-${currentYear}-${currentMonth}${currentDate}-${sequentialNumber}-${timestamp}-${randomNum}`;
-    
+    const prefix = `FMT-${currentYear}-`;
+
+    let sequentialNumber: number | null = null;
+
+    // Prefer using the persistent counter system (matches dashboard totals)
+    try {
+      const counterModule = await import('./counter-system');
+      const totals = await counterModule.getTotalCounters();
+      if (totals && typeof totals.confirmed === 'number') {
+        sequentialNumber = totals.confirmed + 1;
+      }
+    } catch (counterError) {
+      console.warn('⚠️ Failed to read total confirmed counter, falling back to collection count:', counterError);
+    }
+
+    if (sequentialNumber === null) {
+      if (!db) {
+        throw new Error('Database not connected');
+      }
+      const collection = db.collection(COLLECTION_NAME);
+      const yearCount = await collection.countDocuments({ bookingId: { $regex: `^${prefix}` } as any } as any);
+      sequentialNumber = yearCount + 1;
+    }
+
+    const bookingId = `${prefix}${sequentialNumber}`;
+    lastBookingSequence = sequentialNumber;
+
     console.log('🎫 Generated unique booking ID:', bookingId);
     return bookingId;
-    
   } catch (error) {
     console.error('❌ Error generating booking ID:', error);
-    // Fallback to timestamp-based ID with extra uniqueness
     const currentYear = new Date().getFullYear();
-    const currentMonth = (new Date().getMonth() + 1).toString().padStart(2, '0');
-    const currentDate = new Date().getDate().toString().padStart(2, '0');
     const timestamp = Date.now().toString().slice(-6);
-    const randomNum = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-    return `FMT-${currentYear}-${currentMonth}${currentDate}-FALLBACK-${timestamp}-${randomNum}`;
+    return `FMT-${currentYear}-FALLBACK-${timestamp}`;
   }
 };
 
@@ -346,22 +749,22 @@ const generateIncompleteBookingId = async () => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
-    
+
     // Get the count of existing incomplete bookings
     const count = await collection.countDocuments();
-    
+
     // Generate incomplete booking ID with INC prefix and 4-digit number
     const bookingNumber = (count + 1).toString().padStart(4, '0');
     const bookingId = `INC${bookingNumber}`;
-    
+
     console.log('🎫 Generated incomplete booking ID:', bookingId);
     return bookingId;
-    
+
   } catch (error) {
     console.error('❌ Error generating incomplete booking ID:', error);
     // Fallback to timestamp-based ID
@@ -370,33 +773,81 @@ const generateIncompleteBookingId = async () => {
   }
 };
 
+// Generate custom ticket number (FMT0001, FMT0002, etc.)
+const generateTicketNumber = async () => {
+  try {
+    if (!isConnected || !db) {
+      const connectionResult = await connectToDatabase();
+      if (!connectionResult.success) {
+        throw new Error('Failed to connect to database');
+      }
+    }
+
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    let ticketSequence: number | null = lastBookingSequence;
+
+    if (ticketSequence === null) {
+      // Fallback to using total confirmed counter to keep sequence close to booking IDs
+      try {
+        const counterModule = await import('./counter-system');
+        const totals = await counterModule.getTotalCounters();
+        if (totals && typeof totals.confirmed === 'number') {
+          ticketSequence = totals.confirmed + 1;
+        }
+      } catch (counterError) {
+        console.warn('⚠️ Failed to read total confirmed counter for ticket number:', counterError);
+      }
+    }
+
+    if (ticketSequence === null) {
+      const collection = db.collection(COLLECTION_NAME);
+      const count = await collection.countDocuments();
+      ticketSequence = count + 1;
+    }
+
+    const ticketNumber = `FMT${ticketSequence.toString().padStart(4, '0')}`;
+
+    console.log('🎟️ Generated unique ticket number:', ticketNumber);
+    return ticketNumber;
+
+  } catch (error) {
+    console.error('❌ Error generating ticket number:', error);
+    // Fallback to timestamp-based ticket number
+    const timestamp = Date.now().toString().slice(-6);
+    return `FMT${timestamp.padStart(4, '0')}`;
+  }
+};
+
+
 // Helper function to get occasion person name dynamically
 const getOccasionPersonName = async (bookingData: any) => {
   try {
     // Fetch occasions from database to get required fields
     const occasions = await getAllOccasions();
     const occasion = occasions.find((occ: any) => occ.name === bookingData.occasion);
-    
+
     if (!occasion || !occasion.requiredFields || occasion.requiredFields.length === 0) {
       return '';
     }
-    
+
     // Find the first name field from required fields
-    const nameField = occasion.requiredFields.find((field: string) => 
+    const nameField = occasion.requiredFields.find((field: string) =>
       field.toLowerCase().includes('name') && !field.toLowerCase().includes('partner2')
     );
-    
+
     if (nameField && bookingData[nameField]) {
       return bookingData[nameField];
     }
-    
+
     // Fallback: try to find any name field in booking data
     for (const field of occasion.requiredFields) {
       if (bookingData[field]) {
         return bookingData[field];
       }
     }
-    
+
     return '';
   } catch (error) {
     console.error('Error getting occasion person name:', error);
@@ -410,33 +861,33 @@ const getDynamicOccasionFields = async (bookingData: any) => {
     // Fetch occasions from database to get required fields
     const occasions = await getAllOccasions();
     const occasion = occasions.find((occ: any) => occ.name === bookingData.occasion);
-    
+
     if (!occasion) {
       console.log('⚠️ No occasion found for:', bookingData.occasion);
     }
-    
+
     console.log('🎯 Dynamic occasion fields for', bookingData.occasion, ':', occasion?.requiredFields);
     console.log('🎯 Available booking data keys:', Object.keys(bookingData));
-    
+
     const dynamicFields: any = {};
-    
+
     // Check for occasion data in multiple places
     if (occasion?.requiredFields && occasion.requiredFields.length > 0) {
       occasion.requiredFields.forEach((fieldName: string) => {
         let fieldValue = null;
-        
+
         // Method 1: Check direct field in booking data
         if (bookingData[fieldName]) {
           fieldValue = bookingData[fieldName];
           console.log(`  ✅ Method 1 - Direct field: ${fieldName} = "${fieldValue}"`);
         }
-        
+
         // Method 2: Check in occasionData object (new dynamic system)
         if (!fieldValue && bookingData.occasionData && bookingData.occasionData[fieldName]) {
           fieldValue = bookingData.occasionData[fieldName];
           console.log(`  ✅ Method 2 - OccasionData field: ${fieldName} = "${fieldValue}"`);
         }
-        
+
         // Method 3: Check for fields with _label suffix (from API processing)
         if (!fieldValue && bookingData[`${fieldName}_label`]) {
           // If we have a label, the value should be in the base field or _value field
@@ -445,16 +896,16 @@ const getDynamicOccasionFields = async (bookingData: any) => {
             console.log(`  ✅ Method 3 - Label field: ${fieldName} = "${fieldValue}"`);
           }
         }
-        
+
         if (fieldValue && fieldValue.toString().trim()) {
           const trimmedValue = fieldValue.toString().trim();
           const fieldLabel = occasion?.fieldLabels?.[fieldName] || fieldName;
-          
+
           // Save with exact database field name and label
           dynamicFields[fieldName] = trimmedValue;
           dynamicFields[`${fieldName}_label`] = fieldLabel;
           dynamicFields[`${fieldName}_value`] = trimmedValue;
-          
+
           console.log(`  📝 Saved dynamic field: ${fieldName} = "${trimmedValue}" (Label: "${fieldLabel}")`);
         } else {
           console.log(`  ❌ Missing field: ${fieldName}`);
@@ -478,7 +929,7 @@ const getDynamicOccasionFields = async (bookingData: any) => {
         }
       });
     }
-    
+
     console.log('🎉 Final dynamic fields to save:', Object.keys(dynamicFields));
     return dynamicFields;
   } catch (error) {
@@ -497,30 +948,35 @@ const saveBooking = async (bookingData: BookingData) => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     console.log('💾 Saving booking to FeelME Town MongoDB database...');
-    
+
     // Generate booking ID, but preserve provided one if present
     const customBookingId = (bookingData as any)?.bookingId && String((bookingData as any).bookingId).trim()
       ? String((bookingData as any).bookingId).trim()
       : await generateBookingId();
-    
-    // Add timestamp, status, and custom booking ID
+
+    // Generate ticket number
+    const ticketNumber = await generateTicketNumber();
+
+    // Add timestamp, status, custom booking ID, and ticket number
     const booking = {
       ...bookingData,
       bookingId: customBookingId,
+      ticketNumber: ticketNumber,
       createdAt: new Date(),
       status: bookingData.status || 'completed',
       paymentStatus: (bookingData as any).paymentStatus || 'unpaid'
     };
-    
+
     // Compress the booking data to save storage space
     const compressedData = await compressData(booking);
-    
+
     // Create compressed document
     const compressedBooking = {
       _id: new ObjectId(),
       bookingId: customBookingId,
+      ticketNumber: ticketNumber,
       compressedData: compressedData,
       createdAt: new Date(),
       status: bookingData.status || 'completed',
@@ -554,19 +1010,19 @@ const saveBooking = async (bookingData: BookingData) => {
       slotBookingFee: Number((bookingData as any)?.slotBookingFee ?? bookingData.pricingData?.slotBookingFee ?? bookingData.advancePayment ?? 0),
       decorationFee: Number((bookingData as any)?.decorationFee ?? (bookingData as any)?.decorationAppliedFee ?? 0)
     };
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Insert compressed booking into MongoDB
     const result = await collection.insertOne(compressedBooking);
-    
+
     // Log occasion fields that were saved
     const savedOccasionFields = await getDynamicOccasionFields(bookingData);
-    
+
     console.log('📝 New booking saved to FeelME Town MongoDB database:', {
       database: DB_NAME,
       collection: COLLECTION_NAME,
@@ -581,7 +1037,7 @@ const saveBooking = async (bookingData: BookingData) => {
       totalAmount: booking.totalAmount,
       occasionFieldsCount: Object.keys(savedOccasionFields).length
     });
-    
+
     // Log specific occasion fields that were saved
     if (Object.keys(savedOccasionFields).length > 0) {
       console.log('🎪 Occasion-specific fields saved to database:');
@@ -600,10 +1056,10 @@ const saveBooking = async (bookingData: BookingData) => {
     } else {
       console.log('⚠️ No occasion-specific fields were saved to database');
     }
-    
+
     // Import the new counter system
     const { incrementCounter: incrementNewCounter } = await import('./counter-system');
-    
+
     // Increment appropriate counter based on booking status
     if (booking.status === 'confirmed') {
       await incrementNewCounter('confirmed');
@@ -611,13 +1067,13 @@ const saveBooking = async (bookingData: BookingData) => {
       await incrementNewCounter('completed');
     } else if (booking.status === 'manual') {
       await incrementNewCounter('manual');
-      
+
       // Also increment staff-specific counter if staffId is provided
       if (bookingData.staffId) {
         await incrementStaffCounter(bookingData.staffId);
       }
     }
-    
+
     return {
       success: true,
       message: 'Booking saved to FeelME Town MongoDB database',
@@ -627,7 +1083,7 @@ const saveBooking = async (bookingData: BookingData) => {
         ...booking
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error saving booking to MongoDB:', error);
     return {
@@ -647,16 +1103,20 @@ const saveManualBooking = async (bookingData: BookingData) => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     console.log('💾 Saving manual booking to FeelME Town MongoDB database...');
-    
+
     // Generate custom booking ID
     const customBookingId = await generateBookingId();
-    
-    // Add timestamp, status, and custom booking ID
+
+    // Generate ticket number
+    const ticketNumber = await generateTicketNumber();
+
+    // Add timestamp, status, custom booking ID, and ticket number
     const booking = {
       ...bookingData,
       bookingId: customBookingId,
+      ticketNumber: ticketNumber,
       createdAt: new Date(),
       status: bookingData.status || 'manual', // Keep manual booking status as 'manual'
       isManualBooking: true,
@@ -664,14 +1124,15 @@ const saveManualBooking = async (bookingData: BookingData) => {
       createdBy: 'Admin',
       paymentStatus: (bookingData as any).paymentStatus || 'unpaid'
     };
-    
+
     // Compress the booking data to save storage space
     const compressedData = await compressData(booking);
-    
+
     // Create compressed document
     const compressedBooking = {
       _id: new ObjectId(),
       bookingId: customBookingId,
+      ticketNumber: ticketNumber,
       compressedData: compressedData,
       createdAt: booking.createdAt,
       status: booking.status,
@@ -703,16 +1164,16 @@ const saveManualBooking = async (bookingData: BookingData) => {
       slotBookingFee: Number((booking as any)?.slotBookingFee ?? booking.pricingData?.slotBookingFee ?? booking.advancePayment ?? 0),
       decorationFee: Number((booking as any)?.decorationFee ?? (booking as any)?.decorationAppliedFee ?? 0)
     };
-    
+
     // Save to both manual_booking collection AND main booking collection
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     // Save to manual_booking collection (for manual booking specific queries)
     const manualCollection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
     const manualResult = await manualCollection.insertOne(compressedBooking);
-    
+
     // Also save to main booking collection (for unified auto-cleanup processing)
     const mainCollection = db.collection(COLLECTION_NAME);
     const result = await mainCollection.insertOne({
@@ -720,7 +1181,7 @@ const saveManualBooking = async (bookingData: BookingData) => {
       _id: new ObjectId(), // Generate new ID for main collection
       sourceCollection: 'manual_booking' // Track that this came from manual booking
     });
-    
+
     console.log('✅ Manual booking saved to FeelME Town database:', {
       id: customBookingId,
       mongoId: result.insertedId,
@@ -730,7 +1191,7 @@ const saveManualBooking = async (bookingData: BookingData) => {
       time: booking.time,
       total: booking.totalAmount
     });
-    
+
     // Log occasion fields that were saved for manual bookings
     const savedOccasionFields = await getDynamicOccasionFields(booking);
     if (Object.keys(savedOccasionFields).length > 0) {
@@ -750,22 +1211,22 @@ const saveManualBooking = async (bookingData: BookingData) => {
     } else {
       console.log('⚠️ No occasion-specific fields were saved for manual booking');
     }
-    
+
     // Import the new counter system
     const { incrementCounter: incrementNewCounter } = await import('./counter-system');
-    
+
     // Increment manual booking counter
     await incrementNewCounter('manual');
-    
+
     // Also increment staff-specific counter if staffId is provided
     if (bookingData.staffId) {
       await incrementStaffCounter(bookingData.staffId);
     }
-    
+
     // Auto-save to Excel database
     try {
       const excelCollection = db.collection('excel_staff_bookings');
-      
+
       const excelEntry = {
         bookingId: customBookingId,
         staffId: bookingData.staffId || 'UNKNOWN',
@@ -787,14 +1248,14 @@ const saveManualBooking = async (bookingData: BookingData) => {
         isExported: true,
         autoSaved: true
       };
-      
+
       await excelCollection.insertOne(excelEntry);
       console.log(`📊 Auto-saved to Excel database: ${customBookingId}`);
     } catch (excelError) {
       console.error('⚠️ Failed to auto-save to Excel database:', excelError);
       // Don't fail the main booking if Excel save fails
     }
-    
+
     return {
       success: true,
       message: 'Manual booking saved to FeelME Town MongoDB database and Excel system',
@@ -804,7 +1265,7 @@ const saveManualBooking = async (bookingData: BookingData) => {
         ...booking
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error saving manual booking to MongoDB:', error);
     return {
@@ -824,27 +1285,27 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     console.log('💾 Saving incomplete booking to FeelME Town MongoDB database...');
- 
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
-    
+
     const now = new Date();
     const expiresAt = new Date(now.getTime() + (12 * 60 * 60 * 1000));
-    
+
     const matchFilter: Record<string, unknown> = { status: 'incomplete' };
- 
+
     if ('bookingId' in bookingData && bookingData.bookingId) {
       matchFilter.bookingId = bookingData.bookingId;
     }
- 
+
     if (bookingData.email) {
       matchFilter.email = bookingData.email;
     }
- 
+
     const potentialMatchKeys: Array<keyof typeof bookingData> = ['theaterName', 'date', 'time'];
     potentialMatchKeys.forEach((key) => {
       const value = bookingData[key];
@@ -852,9 +1313,9 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
         matchFilter[key as string] = value;
       }
     });
- 
+
     const existingBooking = await collection.findOne(matchFilter);
- 
+
     if (existingBooking) {
       const updatePayload: Record<string, unknown> = {
         expiresAt,
@@ -862,30 +1323,30 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
         updatedAt: now,
         paymentStatus: (bookingData as any)?.paymentStatus || existingBooking.paymentStatus || 'unpaid'
       };
- 
+
       Object.entries(bookingData).forEach(([key, value]) => {
         if (value !== undefined) {
           updatePayload[key] = value;
         }
       });
- 
+
       const incomingBookingId = ('bookingId' in bookingData && bookingData.bookingId) ? bookingData.bookingId : undefined;
       updatePayload.bookingId = existingBooking.bookingId || incomingBookingId || existingBooking.id;
- 
+
       await collection.updateOne({ _id: existingBooking._id }, { $set: updatePayload });
- 
+
       const mergedBooking = {
         ...existingBooking,
         ...updatePayload
       };
- 
+
       console.log('ℹ️ Incomplete booking already existed. Updated existing record instead of inserting a duplicate.', {
         bookingId: mergedBooking.bookingId,
         mongoId: existingBooking._id,
         customerEmail: mergedBooking.email,
         expiresAt: mergedBooking.expiresAt
       });
- 
+
       return {
         success: true,
         message: 'Incomplete booking already existed. Updated existing record.',
@@ -896,11 +1357,11 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
         }
       };
     }
- 
+
     // Generate custom incomplete booking ID
     const incomingBookingId = ('bookingId' in bookingData && bookingData.bookingId) ? bookingData.bookingId : undefined;
     const customBookingId = incomingBookingId || await generateIncompleteBookingId();
-    
+
     // Add timestamp, status, custom booking ID, and expiry
     const incompleteBooking = {
       ...bookingData,
@@ -910,10 +1371,10 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
       status: 'incomplete',
       paymentStatus: (bookingData as any)?.paymentStatus || 'unpaid'
     };
-    
+
     // Insert incomplete booking into MongoDB
     const result = await collection.insertOne(incompleteBooking);
-    
+
     console.log('📝 New incomplete booking saved to FeelME Town MongoDB database:', {
       database: DB_NAME,
       collection: INCOMPLETE_COLLECTION_NAME,
@@ -923,13 +1384,13 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
       expiresAt: incompleteBooking.expiresAt,
       status: incompleteBooking.status
     });
-    
+
     // Import the new counter system
     const { incrementCounter: incrementNewCounter } = await import('./counter-system');
-    
+
     // Increment incomplete booking counter
     await incrementNewCounter('incomplete');
-    
+
     return {
       success: true,
       message: 'Incomplete booking saved to FeelME Town MongoDB database',
@@ -939,7 +1400,7 @@ const saveIncompleteBooking = async (bookingData: Partial<BookingData> & { email
         ...incompleteBooking
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error saving incomplete booking to MongoDB:', error);
     return {
@@ -955,16 +1416,16 @@ const getAllIncompleteBookings = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
-    
+
     // Find all incomplete bookings
     const incompleteBookings = await collection.find({}).toArray();
-    
+
     return {
       success: true,
       incompleteBookings: incompleteBookings,
@@ -972,7 +1433,7 @@ const getAllIncompleteBookings = async () => {
       database: DB_NAME,
       collection: INCOMPLETE_COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting incomplete bookings from MongoDB:', error);
     return {
@@ -988,21 +1449,21 @@ const deleteIncompleteBooking = async (bookingId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
-    
+
     // Delete specific incomplete booking
     const result = await collection.deleteOne({
       bookingId: bookingId
     });
-    
+
     if (result.deletedCount > 0) {
       console.log(`🗑️ Deleted incomplete booking ${bookingId} from MongoDB`);
-      
+
       return {
         success: true,
         deletedCount: result.deletedCount,
@@ -1014,7 +1475,7 @@ const deleteIncompleteBooking = async (bookingId: string) => {
         message: `Incomplete booking ${bookingId} not found`
       };
     }
-    
+
   } catch (error) {
     console.error('❌ Error deleting incomplete booking:', error);
     return {
@@ -1030,27 +1491,27 @@ const deleteExpiredIncompleteBookings = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
-    
+
     // Find and delete expired bookings
     const now = new Date();
     const result = await collection.deleteMany({
       expiresAt: { $lt: now }
     });
-    
+
     console.log(`🗑️ Deleted ${result.deletedCount} expired incomplete bookings from MongoDB`);
-    
+
     return {
       success: true,
       deletedCount: result.deletedCount,
       message: `Deleted ${result.deletedCount} expired incomplete bookings`
     };
-    
+
   } catch (error) {
     console.error('❌ Error deleting expired incomplete bookings:', error);
     return {
@@ -1066,27 +1527,27 @@ const incrementStaffCounter = async (staffId: string) => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     const collection = db!.collection<any>(COUNTERS_COLLECTION_NAME);
     const staffCounterId = `staff_${staffId}`;
-    
+
     // Get current IST date for reset logic
     const now = new Date();
     const istNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
     const currentDay = istNow.getDate();
     const currentMonth = istNow.getMonth();
     const currentYear = istNow.getFullYear();
-    
+
     // Calculate week start
     const currentWeekStart = new Date(istNow);
     currentWeekStart.setDate(istNow.getDate() - istNow.getDay());
     const currentWeekStartDay = currentWeekStart.getDate();
     const currentWeekStartMonth = currentWeekStart.getMonth();
     const currentWeekStartYear = currentWeekStart.getFullYear();
-    
+
     // Check if staff counter exists
     const existingCounter = await collection.findOne({ _id: staffCounterId as any });
-    
+
     if (!existingCounter) {
       // Create new staff counter
       const newStaffCounter = {
@@ -1108,36 +1569,36 @@ const incrementStaffCounter = async (staffId: string) => {
         createdAt: new Date(),
         lastUpdated: new Date()
       };
-      
+
       await collection.insertOne(newStaffCounter);
       console.log(`✅ Created new staff counter for ${staffId}: 1 booking`);
       return { success: true, message: 'Staff counter created and incremented' };
     }
-    
+
     // Check if counters need reset (same logic as main counters)
     let resetDaily = false, resetWeekly = false, resetMonthly = false, resetYearly = false;
-    
-    if (existingCounter.lastResetDay !== currentDay || 
-        existingCounter.lastResetMonth !== currentMonth || 
-        existingCounter.lastResetYear !== currentYear) {
+
+    if (existingCounter.lastResetDay !== currentDay ||
+      existingCounter.lastResetMonth !== currentMonth ||
+      existingCounter.lastResetYear !== currentYear) {
       resetDaily = true;
     }
-    
+
     if (existingCounter.lastResetWeekDay !== currentWeekStartDay ||
-        existingCounter.lastResetWeekMonth !== currentWeekStartMonth ||
-        existingCounter.lastResetWeekYear !== currentWeekStartYear) {
+      existingCounter.lastResetWeekMonth !== currentWeekStartMonth ||
+      existingCounter.lastResetWeekYear !== currentWeekStartYear) {
       resetWeekly = true;
     }
-    
-    if (existingCounter.lastResetMonth !== currentMonth || 
-        existingCounter.lastResetYear !== currentYear) {
+
+    if (existingCounter.lastResetMonth !== currentMonth ||
+      existingCounter.lastResetYear !== currentYear) {
       resetMonthly = true;
     }
-    
+
     if (existingCounter.lastResetYear !== currentYear) {
       resetYearly = true;
     }
-    
+
     // Update counter with reset logic
     const updateDoc: any = {
       $inc: {
@@ -1148,14 +1609,14 @@ const incrementStaffCounter = async (staffId: string) => {
         lastUpdated: new Date()
       }
     };
-    
+
     if (resetDaily) {
       updateDoc.$set.dailyCount = 1;
       updateDoc.$set.lastResetDay = currentDay;
     } else {
       updateDoc.$inc.dailyCount = 1;
     }
-    
+
     if (resetWeekly) {
       updateDoc.$set.weeklyCount = 1;
       updateDoc.$set.lastResetWeekDay = currentWeekStartDay;
@@ -1164,26 +1625,26 @@ const incrementStaffCounter = async (staffId: string) => {
     } else {
       updateDoc.$inc.weeklyCount = 1;
     }
-    
+
     if (resetMonthly) {
       updateDoc.$set.monthlyCount = 1;
       updateDoc.$set.lastResetMonth = currentMonth;
     } else {
       updateDoc.$inc.monthlyCount = 1;
     }
-    
+
     if (resetYearly) {
       updateDoc.$set.yearlyCount = 1;
       updateDoc.$set.lastResetYear = currentYear;
     } else {
       updateDoc.$inc.yearlyCount = 1;
     }
-    
+
     await collection.updateOne({ _id: staffCounterId }, updateDoc);
-    
+
     console.log(`✅ Incremented staff counter for ${staffId}`);
     return { success: true, message: 'Staff counter incremented' };
-    
+
   } catch (error) {
     console.error(`❌ Error incrementing staff counter for ${staffId}:`, error);
     return { success: false, error: 'Failed to increment staff counter' };
@@ -1197,16 +1658,16 @@ const getAllBookings = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Find all bookings
     const bookings = await collection.find({}).toArray();
-    
+
     // Decompress all booking data
     const decompressedBookings = [];
     for (const booking of bookings) {
@@ -1248,7 +1709,7 @@ const getAllBookings = async () => {
         decompressedBookings.push(booking);
       }
     }
-    
+
     return {
       success: true,
       bookings: decompressedBookings,
@@ -1256,7 +1717,7 @@ const getAllBookings = async () => {
       database: DB_NAME,
       collection: COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting bookings from MongoDB:', error);
     return {
@@ -1272,16 +1733,16 @@ const getBookingById = async (bookingId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Try to find booking by ID (handle both ObjectId and custom ID formats)
     let booking;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       booking = await collection.findOne({ _id: new ObjectId(bookingId) });
@@ -1289,14 +1750,14 @@ const getBookingById = async (bookingId: string) => {
       // Try as custom ID field
       booking = await collection.findOne({ bookingId: bookingId });
     }
-    
+
     if (!booking) {
       return {
         success: false,
         error: 'Booking not found'
       };
     }
-    
+
     // Check if booking data is compressed
     let decompressedBooking = booking;
     if (booking.compressedData) {
@@ -1312,16 +1773,69 @@ const getBookingById = async (bookingId: string) => {
         decompressedBooking = booking;
       }
     }
-    
+
     return {
       success: true,
       booking: decompressedBooking,
       database: DB_NAME,
       collection: COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting booking by ID from MongoDB:', error);
+    return {
+      success: false,
+      error: 'Failed to get booking from MongoDB'
+    };
+  }
+};
+
+// Get booking by ticket number from MongoDB database
+const getBookingByTicketNumber = async (ticketNumber: string) => {
+  try {
+    if (!isConnected) {
+      await connectToDatabase();
+    }
+
+    // Get collection
+    if (!db) {
+      throw new Error('Database not connected');
+    }
+    const collection = db.collection(COLLECTION_NAME);
+
+    // Find booking by ticketNumber (unique per booking)
+    const booking = await collection.findOne({ ticketNumber: ticketNumber });
+
+    if (!booking) {
+      return {
+        success: false,
+        error: 'Booking not found'
+      };
+    }
+
+    // Check if booking data is compressed
+    let decompressedBooking = booking;
+    if (booking.compressedData) {
+      try {
+        const decompressedData = await decompressData(booking.compressedData) as Record<string, unknown>;
+        decompressedBooking = { ...decompressedData, ...booking } as typeof booking;
+        console.log('📦 Decompressed booking data for ticket number:', ticketNumber);
+      } catch (error) {
+        console.error('❌ Error decompressing booking data by ticket number:', error);
+        // Fall back to uncompressed data if decompression fails
+        decompressedBooking = booking;
+      }
+    }
+
+    return {
+      success: true,
+      booking: decompressedBooking,
+      database: DB_NAME,
+      collection: COLLECTION_NAME
+    };
+
+  } catch (error) {
+    console.error('❌ Error getting booking by ticket number from MongoDB:', error);
     return {
       success: false,
       error: 'Failed to get booking from MongoDB'
@@ -1335,63 +1849,63 @@ const updateBookingStatus = async (bookingId: string, status: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Update booking status (handle both ObjectId and custom ID formats)
     let result;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       result = await collection.updateOne(
         { _id: new ObjectId(bookingId) },
-        { 
-          $set: { 
+        {
+          $set: {
             status: status,
             updatedAt: new Date()
-          } 
+          }
         }
       );
     } else {
       // Try as custom ID field
       result = await collection.updateOne(
         { bookingId: bookingId },
-        { 
-          $set: { 
+        {
+          $set: {
             status: status,
             updatedAt: new Date()
-          } 
+          }
         }
       );
     }
-    
+
     if (result.matchedCount === 0) {
       return {
         success: false,
         error: 'Booking not found'
       };
     }
-    
+
     if (result.modifiedCount === 0) {
       return {
         success: false,
         error: 'Booking status not updated'
       };
     }
-    
+
     console.log(`✅ Booking status updated to ${status} in MongoDB:`, bookingId);
-    
+
     return {
       success: true,
       message: `Booking status updated to ${status}`,
       database: DB_NAME,
       collection: COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error updating booking status in MongoDB:', error);
     return {
@@ -1407,25 +1921,25 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Get the original booking data first to preserve existing fields
     console.log(`🔍 Getting original booking data for ID: ${bookingId}`);
     const originalBookingResult = await getBookingById(bookingId);
     const originalBooking = originalBookingResult.booking;
-    
+
     console.log(`🔍 Original booking result:`, {
       success: originalBookingResult.success,
       hasBooking: !!originalBooking,
       bookingId: originalBooking?.bookingId,
       mongoId: originalBooking?._id
     });
-    
+
     if (!originalBooking) {
       console.error(`❌ Original booking not found for ID: ${bookingId}`);
       return {
@@ -1433,7 +1947,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
         error: 'Original booking not found'
       };
     }
-    
+
     // Merge the new data with the original booking data
     const mergedBookingData = {
       ...originalBooking,
@@ -1442,7 +1956,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       bookingId: originalBooking.bookingId || originalBooking.id,
       createdAt: originalBooking.createdAt
     };
-    
+
     console.log('🔍 Merged booking data for compression:', {
       originalTime: (originalBooking as any).time,
       newTime: bookingData.time,
@@ -1454,10 +1968,10 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       mergedDate: (mergedBookingData as any).date,
       mergedTheater: (mergedBookingData as any).theaterName
     });
-    
+
     // Compress the merged booking data
     const compressedData = await compressData(mergedBookingData);
-    
+
     // Log the compressed data to verify time slot is included
     console.log('🔍 Compressed data verification:', {
       originalTime: (originalBooking as any).time,
@@ -1468,13 +1982,13 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       hasDateInMerged: !!(mergedBookingData as any).date,
       hasTheaterInMerged: !!(mergedBookingData as any).theaterName
     });
-    
+
     // Create update object with compressed data
     const updateData: any = {
       compressedData: compressedData,
       updatedAt: new Date()
     };
-    
+
     // Only update uncompressed fields if they are provided, otherwise preserve original values
     if (bookingData.customerName !== undefined || bookingData.name !== undefined) {
       updateData.name = bookingData.customerName || bookingData.name;
@@ -1540,7 +2054,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
         updateData.paymentMethod = (originalBooking as any).paymentMethod;
       }
     }
-    
+
     // Add payment tracking fields as uncompressed for easy querying
     if (bookingData.paidBy !== undefined) {
       updateData.paidBy = bookingData.paidBy;
@@ -1564,16 +2078,25 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
     } else if ((originalBooking as any).paidAt !== undefined) {
       updateData.paidAt = (originalBooking as any).paidAt;
     }
-    
+
+    // Persist dynamic service selections in top-level document for easier querying
+    const dynamicServiceItemsForUpdate = getDynamicServiceItemsForDB({
+      ...originalBooking,
+      ...bookingData,
+    });
+    Object.entries(dynamicServiceItemsForUpdate).forEach(([key, value]) => {
+      updateData[key] = value;
+    });
+
     // Try to update by ObjectId first, then by custom bookingId
     let updateResult;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       console.log(`🔍 Trying to update by ObjectId: ${bookingId}`);
       updateResult = await collection.updateOne(
         { _id: new ObjectId(bookingId) },
-        { 
+        {
           $set: updateData
         }
       );
@@ -1586,7 +2109,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       console.log(`🔍 Trying to update by bookingId: ${bookingId}`);
       updateResult = await collection.updateOne(
         { bookingId: bookingId },
-        { 
+        {
           $set: updateData
         }
       );
@@ -1595,7 +2118,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
         modifiedCount: updateResult.modifiedCount
       });
     }
-    
+
     // If no documents matched, the booking doesn't exist
     if (updateResult.matchedCount === 0) {
       console.error(`❌ No booking found with ID: ${bookingId}`);
@@ -1604,20 +2127,20 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
         error: 'Booking not found'
       };
     }
-    
+
     // Log the update result for debugging
     console.log(`📝 Update result for booking ${bookingId}:`, {
       matchedCount: updateResult.matchedCount,
       modifiedCount: updateResult.modifiedCount,
       acknowledged: updateResult.acknowledged
     });
-    
+
     // It's possible that no fields actually changed (modifiedCount === 0).
     // Treat this as success and return the current booking state.
-    
+
     // Get the updated booking
     let updatedBooking;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       updatedBooking = await collection.findOne({ _id: new ObjectId(bookingId) });
@@ -1625,14 +2148,14 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       // Try as custom ID field
       updatedBooking = await collection.findOne({ bookingId: bookingId });
     }
-    
+
     if (!updatedBooking) {
       return {
         success: false,
         error: 'Updated booking not found'
       };
     }
-    
+
     // Decompress the booking data to get the full booking information
     let fullBookingData: any;
     if (updatedBooking.compressedData) {
@@ -1640,7 +2163,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
         const decompressedData = await decompressData(updatedBooking.compressedData);
         // Prioritize uncompressed fields over compressed data (for updated fields)
         fullBookingData = { ...(decompressedData as any), ...updatedBooking };
-        
+
         // Verify that the time slot was correctly updated in compressed data
         console.log('🔍 Compressed data verification after update:', {
           bookingId: bookingId,
@@ -1661,13 +2184,13 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
     } else {
       fullBookingData = updatedBooking;
     }
-    
+
     console.log(`✅ Booking updated in MongoDB:`, bookingId);
-    
+
     // Import the new counter system
     const { incrementCounter: incrementNewCounter } = await import('./counter-system');
     const { decrementCounter: decrementNewCounter } = await import('./counter-system');
-    
+
     // Increment appropriate counter if status changed
     if (bookingData.status === 'completed') {
       await incrementNewCounter('completed');
@@ -1675,7 +2198,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
       await decrementNewCounter('incomplete');
       console.log('📉 Decremented incomplete counter after booking completion');
     }
-    
+
     return {
       success: true,
       booking: {
@@ -1695,7 +2218,7 @@ const updateBooking = async (bookingId: string, bookingData: Record<string, unkn
         ...fullBookingData
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error updating booking in MongoDB:', error);
     return {
@@ -1711,24 +2234,24 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
-    
+
     // Get the original manual booking data first to preserve existing fields
     const manualBookings = await getAllManualBookings();
     const originalBooking = manualBookings.manualBookings?.find((b: any) => b.bookingId === bookingId);
-    
+
     if (!originalBooking) {
       return {
         success: false,
         error: 'Original manual booking not found'
       };
     }
-    
+
     // Merge the new data with the original booking data
     const mergedBookingData = {
       ...originalBooking,
@@ -1737,10 +2260,10 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
       bookingId: originalBooking.bookingId,
       createdAt: originalBooking.createdAt
     };
-    
+
     // Compress the merged booking data
     const compressedData = await compressData(mergedBookingData);
-    
+
     // Log the compressed data to verify time slot is included (manual booking)
     console.log('🔍 Manual booking compressed data verification:', {
       originalTime: (originalBooking as any).time,
@@ -1751,7 +2274,7 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
       hasDateInMerged: !!(mergedBookingData as any).date,
       hasTheaterInMerged: !!(mergedBookingData as any).theaterName
     });
-    
+
     // Create update object with compressed data
     const updateData: any = {
       compressedData: compressedData,
@@ -1777,10 +2300,10 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
       staffId: bookingData.userId ?? (originalBooking as any).userId ?? null, // Also save as staffId for backward compatibility
       paidAt: bookingData.paidAt ?? (originalBooking as any).paidAt ?? null
     };
-    
+
     // Try to update by ObjectId first, then by custom bookingId
     let updateResult;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       updateResult = await collection.updateOne(
@@ -1794,24 +2317,24 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
         { $set: updateData }
       );
     }
-    
+
     if (updateResult.matchedCount === 0) {
       return {
         success: false,
         error: 'Manual booking not found'
       };
     }
-    
+
     if (updateResult.modifiedCount === 0) {
       return {
         success: false,
         error: 'Manual booking not found or no changes made'
       };
     }
-    
+
     // Get the updated booking
     let updatedBooking;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       updatedBooking = await collection.findOne({ _id: new ObjectId(bookingId) });
@@ -1819,14 +2342,14 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
       // Try as custom ID field
       updatedBooking = await collection.findOne({ bookingId: bookingId });
     }
-    
+
     if (!updatedBooking) {
       return {
         success: false,
         error: 'Updated manual booking not found'
       };
     }
-    
+
     // Decompress the booking data to get the full booking information
     let fullBookingData: any;
     if (updatedBooking.compressedData) {
@@ -1834,7 +2357,7 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
         const decompressedData = await decompressData(updatedBooking.compressedData);
         // Prioritize uncompressed fields over compressed data (for updated fields)
         fullBookingData = { ...(decompressedData as any), ...updatedBooking };
-        
+
         // Verify that the time slot was correctly updated in compressed data (manual booking)
         console.log('🔍 Manual booking compressed data verification after update:', {
           bookingId: bookingId,
@@ -1855,9 +2378,9 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
     } else {
       fullBookingData = updatedBooking;
     }
-    
+
     console.log(`✅ Manual booking updated in MongoDB:`, bookingId);
-    
+
     return {
       success: true,
       booking: {
@@ -1877,7 +2400,7 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
         ...fullBookingData
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error updating manual booking in MongoDB:', error);
     return {
@@ -1893,22 +2416,22 @@ const updateIncompleteBooking = async (bookingId: string, bookingData: Record<st
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
-    
+
     // Compress the updated booking data
     const compressedData = await compressData(bookingData);
-    
+
     // Create update object with compressed data
     const updateData: any = {
       compressedData: compressedData,
       updatedAt: new Date()
     };
-    
+
     // Only update uncompressed fields if they are provided
     if (bookingData.customerName !== undefined || bookingData.name !== undefined) {
       updateData.name = bookingData.customerName || bookingData.name;
@@ -1937,10 +2460,10 @@ const updateIncompleteBooking = async (bookingId: string, bookingData: Record<st
     if (bookingData.paymentStatus !== undefined) {
       updateData.paymentStatus = bookingData.paymentStatus;
     }
-    
+
     // Try to update by ObjectId first, then by custom bookingId
     let updateResult;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       updateResult = await collection.updateOne(
@@ -1954,14 +2477,14 @@ const updateIncompleteBooking = async (bookingId: string, bookingData: Record<st
         { $set: updateData }
       );
     }
-    
+
     if (updateResult.matchedCount === 0) {
       return {
         success: false,
         error: 'Incomplete booking not found'
       };
     }
-    
+
     // Get the updated booking
     let updatedBooking;
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
@@ -1970,16 +2493,16 @@ const updateIncompleteBooking = async (bookingId: string, bookingData: Record<st
       // Try as custom ID field
       updatedBooking = await collection.findOne({ bookingId: bookingId });
     }
-    
+
     if (!updatedBooking) {
       return {
         success: false,
         error: 'Updated incomplete booking not found'
       };
     }
-    
+
     console.log(`✅ Incomplete booking updated in MongoDB:`, bookingId);
-    
+
     return {
       success: true,
       booking: {
@@ -1997,7 +2520,7 @@ const updateIncompleteBooking = async (bookingId: string, bookingData: Record<st
         updatedAt: updatedBooking.updatedAt
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error updating incomplete booking in MongoDB:', error);
     return {
@@ -2013,17 +2536,17 @@ const moveBookingToCancelled = async (bookingId: string, cancellationData: { can
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collections
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
     const cancelledCollection = db.collection(CANCELLED_COLLECTION_NAME);
-    
+
     // First, get the booking to move
     let booking;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       booking = await collection.findOne({ _id: new ObjectId(bookingId) });
@@ -2031,14 +2554,14 @@ const moveBookingToCancelled = async (bookingId: string, cancellationData: { can
       // Try as custom ID field
       booking = await collection.findOne({ bookingId: bookingId });
     }
-    
+
     if (!booking) {
       return {
         success: false,
         error: 'Booking not found'
       };
     }
-    
+
     // Decompress booking data to extract important fields
     let decompressedData: any = {};
     if (booking.compressedData) {
@@ -2055,7 +2578,7 @@ const moveBookingToCancelled = async (bookingId: string, cancellationData: { can
         console.error(`⚠️ Could not decompress booking ${bookingId}`, err);
       }
     }
-    
+
     // Add cancellation data to the booking AND explicitly preserve key fields from decompressed data
     // This ensures phone, payment fields etc are available at database level for querying
     const cancelledBooking = {
@@ -2079,10 +2602,10 @@ const moveBookingToCancelled = async (bookingId: string, cancellationData: { can
       venuePayment: booking.venuePayment || decompressedData.venuePayment,
       totalAmount: booking.totalAmount || decompressedData.totalAmount || decompressedData.amount
     };
-    
+
     // Insert into cancelled collection
     const insertResult = await cancelledCollection.insertOne(cancelledBooking);
-    
+
     // Delete from original collection
     let deleteResult;
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
@@ -2090,22 +2613,22 @@ const moveBookingToCancelled = async (bookingId: string, cancellationData: { can
     } else {
       deleteResult = await collection.deleteOne({ bookingId: bookingId });
     }
-    
+
     if (deleteResult.deletedCount === 0) {
       return {
         success: false,
         error: 'Failed to remove booking from original collection'
       };
     }
-    
+
     console.log(`✅ Booking moved to cancelled collection:`, bookingId);
-    
+
     // Import the new counter system
     const { incrementCounter: incrementNewCounter } = await import('./counter-system');
-    
+
     // Increment cancelled counter
     await incrementNewCounter('cancelled');
-    
+
     return {
       success: true,
       message: 'Booking moved to cancelled collection successfully',
@@ -2118,7 +2641,7 @@ const moveBookingToCancelled = async (bookingId: string, cancellationData: { can
       originalCollection: COLLECTION_NAME,
       cancelledCollection: CANCELLED_COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error moving booking to cancelled collection:', error);
     return {
@@ -2132,32 +2655,35 @@ const moveBookingToCancelled = async (bookingId: string, cancellationData: { can
 const deleteBooking = async (bookingId: string) => {
   try {
     console.log(`🗑️ [DELETE] Attempting to delete booking with ID: ${bookingId}`);
-    
+
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Delete booking (handle both ObjectId and custom ID formats)
     let result;
-    
+    let bookingDocument: any = null;
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       console.log(`🔍 [DELETE] Trying to delete by ObjectId: ${bookingId}`);
+      bookingDocument = await collection.findOne({ _id: new ObjectId(bookingId) });
       result = await collection.deleteOne({ _id: new ObjectId(bookingId) });
     } else {
       // Try as custom ID field
       console.log(`🔍 [DELETE] Trying to delete by bookingId field: ${bookingId}`);
+      bookingDocument = await collection.findOne({ bookingId: bookingId });
       result = await collection.deleteOne({ bookingId: bookingId });
     }
-    
+
     console.log(`📊 [DELETE] Delete result:`, result);
-    
+
     if (result.deletedCount === 0) {
       console.log(`⚠️ [DELETE] No booking found with ID: ${bookingId}`);
       return {
@@ -2165,16 +2691,27 @@ const deleteBooking = async (bookingId: string) => {
         error: 'Booking not found or already deleted'
       };
     }
-    
+
     console.log(`✅ [DELETE] Booking deleted from MongoDB:`, bookingId);
-    
+
+    // Cascade delete orders linked to this booking
+    try {
+      await deleteOrdersByBookingReference({
+        bookingId: bookingDocument?.bookingId || bookingId,
+        mongoBookingId: bookingDocument?._id?.toString?.(),
+        ticketNumber: bookingDocument?.ticketNumber,
+      });
+    } catch (orderCleanupError) {
+      console.warn('⚠️ [DELETE] Failed to delete related orders:', orderCleanupError);
+    }
+
     return {
       success: true,
       message: 'Booking deleted successfully',
       database: DB_NAME,
       collection: COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ [DELETE] Error deleting booking from MongoDB:', error);
     return {
@@ -2190,44 +2727,44 @@ const deleteExpiredBookings = async (currentDateTime: Date) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     console.log('🔍 Finding expired bookings...');
-    
+
     // Get all bookings
     const allBookings = await collection.find({}).toArray();
     const expiredBookings = [];
-    
+
     // Check each booking to see if it's expired
     for (const booking of allBookings) {
       try {
         // Parse the booking date and time
         const bookingDate = new Date(booking.date);
         const timeSlot = booking.time;
-        
+
         // Extract end time from time slot (e.g., "04:00 PM - 07:00 PM" -> "07:00 PM")
         const timeMatch = timeSlot.match(/(\d{1,2}:\d{2}\s*(AM|PM))\s*-\s*(\d{1,2}:\d{2}\s*(AM|PM))/);
         if (timeMatch) {
           const endTimeStr = timeMatch[3] + ' ' + timeMatch[4];
-          
+
           // Create end datetime
           const endDateTime = new Date(bookingDate);
           const [time, period] = endTimeStr.split(' ');
           const [hours, minutes] = time.split(':');
           let hour24 = parseInt(hours);
-          
+
           if (period === 'PM' && hour24 !== 12) {
             hour24 += 12;
           } else if (period === 'AM' && hour24 === 12) {
             hour24 = 0;
           }
-          
+
           endDateTime.setHours(hour24, parseInt(minutes), 0, 0);
-          
+
           // Check if booking has expired (current time > end time)
           if (currentDateTime > endDateTime) {
             expiredBookings.push({
@@ -2245,7 +2782,7 @@ const deleteExpiredBookings = async (currentDateTime: Date) => {
         console.log('⚠️ Error parsing booking date/time:', booking.bookingId, error);
       }
     }
-    
+
     if (expiredBookings.length === 0) {
       console.log('✅ No expired bookings found');
       return {
@@ -2254,12 +2791,12 @@ const deleteExpiredBookings = async (currentDateTime: Date) => {
         message: 'No expired bookings found'
       };
     }
-    
+
     console.log(`🗑️ Found ${expiredBookings.length} expired bookings to process`);
-    
+
     let completedCount = 0;
     let deletedCount = 0;
-    
+
     // First, change status to completed for confirmed bookings, then delete
     for (const expiredBooking of expiredBookings) {
       try {
@@ -2267,42 +2804,42 @@ const deleteExpiredBookings = async (currentDateTime: Date) => {
         if (expiredBooking.status === 'confirmed') {
           await collection.updateOne(
             { _id: expiredBooking.mongoId },
-            { 
-              $set: { 
+            {
+              $set: {
                 status: 'completed',
                 autoCompleted: true,
                 autoCompletedAt: currentDateTime,
                 updatedAt: currentDateTime
-              } 
+              }
             }
           );
-          
+
           // Import the new counter system
           const { incrementCounter: incrementNewCounter } = await import('./counter-system');
-          
+
           // Increment completed counter
           await incrementNewCounter('completed');
           completedCount++;
-          
+
           console.log(`✅ Auto-completed expired booking: ${expiredBooking.bookingId}`);
-          
+
           // Wait a moment to let the completed status be visible
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        
+
         // Then delete the booking
         await collection.deleteOne({ _id: expiredBooking.mongoId });
         deletedCount++;
-        
+
         console.log(`🗑️ Deleted expired booking: ${expiredBooking.bookingId}`);
-        
+
       } catch (error) {
         console.error(`❌ Error processing expired booking ${expiredBooking.bookingId}:`, error);
       }
     }
-    
+
     console.log(`✅ Processed ${expiredBookings.length} expired bookings: ${completedCount} completed, ${deletedCount} deleted`);
-    
+
     return {
       success: true,
       deletedCount: deletedCount,
@@ -2310,7 +2847,7 @@ const deleteExpiredBookings = async (currentDateTime: Date) => {
       processedBookings: expiredBookings,
       message: `Successfully processed ${expiredBookings.length} expired bookings: ${completedCount} completed, ${deletedCount} deleted`
     };
-    
+
   } catch (error) {
     console.error('❌ Error deleting expired bookings:', error);
     return {
@@ -2326,42 +2863,42 @@ const getExpiredBookings = async (currentDateTime: Date) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Get all bookings
     const allBookings = await collection.find({}).toArray();
     const expiredBookings = [];
-    
+
     // Check each booking to see if it's expired
     for (const booking of allBookings) {
       try {
         // Parse the booking date and time
         const bookingDate = new Date(booking.date);
         const timeSlot = booking.time;
-        
+
         // Extract end time from time slot
         const timeMatch = timeSlot.match(/(\d{1,2}:\d{2}\s*(AM|PM))\s*-\s*(\d{1,2}:\d{2}\s*(AM|PM))/);
         if (timeMatch) {
           const endTimeStr = timeMatch[3] + ' ' + timeMatch[4];
-          
+
           // Create end datetime
           const endDateTime = new Date(bookingDate);
           const [time, period] = endTimeStr.split(' ');
           const [hours, minutes] = time.split(':');
           let hour24 = parseInt(hours);
-          
+
           if (period === 'PM' && hour24 !== 12) {
             hour24 += 12;
           } else if (period === 'AM' && hour24 === 12) {
             hour24 = 0;
           }
-          
+
           endDateTime.setHours(hour24, parseInt(minutes), 0, 0);
-          
+
           // Check if booking has expired
           if (currentDateTime > endDateTime) {
             expiredBookings.push({
@@ -2380,14 +2917,14 @@ const getExpiredBookings = async (currentDateTime: Date) => {
         console.log('⚠️ Error parsing booking date/time:', booking.bookingId, error);
       }
     }
-    
+
     return {
       success: true,
       expiredCount: expiredBookings.length,
       expiredBookings: expiredBookings,
       message: `Found ${expiredBookings.length} expired bookings`
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting expired bookings:', error);
     return {
@@ -2403,17 +2940,17 @@ const moveBookingToCompleted = async (bookingId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collections
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
     const completedCollection = db.collection('completed_booking');
-    
+
     // First, get the booking to move
     let booking;
-    
+
     // First try as ObjectId if it's a valid format
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
       booking = await collection.findOne({ _id: new ObjectId(bookingId) });
@@ -2421,14 +2958,14 @@ const moveBookingToCompleted = async (bookingId: string) => {
       // Try as custom ID field
       booking = await collection.findOne({ bookingId: bookingId });
     }
-    
+
     if (!booking) {
       return {
         success: false,
         error: 'Booking not found'
       };
     }
-    
+
     // Decompress booking data to extract important fields
     let decompressedData: any = {};
     if (booking.compressedData) {
@@ -2445,7 +2982,7 @@ const moveBookingToCompleted = async (bookingId: string) => {
         console.error(`⚠️ Could not decompress booking ${bookingId}`, err);
       }
     }
-    
+
     // Add completion data to the booking AND explicitly preserve key fields
     const completedBooking = {
       ...booking,
@@ -2465,10 +3002,10 @@ const moveBookingToCompleted = async (bookingId: string) => {
       venuePayment: booking.venuePayment || decompressedData.venuePayment,
       totalAmount: booking.totalAmount || decompressedData.totalAmount || decompressedData.amount
     };
-    
+
     // Insert into completed collection
     const insertResult = await completedCollection.insertOne(completedBooking);
-    
+
     // Delete from original collection
     let deleteResult;
     if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
@@ -2476,22 +3013,22 @@ const moveBookingToCompleted = async (bookingId: string) => {
     } else {
       deleteResult = await collection.deleteOne({ bookingId: bookingId });
     }
-    
+
     if (deleteResult.deletedCount === 0) {
       return {
         success: false,
         error: 'Failed to remove booking from original collection'
       };
     }
-    
+
     console.log(`✅ Booking moved to completed collection:`, bookingId);
-    
+
     // Import the new counter system
     const { incrementCounter: incrementNewCounter } = await import('./counter-system');
-    
+
     // Increment completed counter
     await incrementNewCounter('completed');
-    
+
     return {
       success: true,
       message: 'Booking moved to completed collection successfully',
@@ -2504,7 +3041,7 @@ const moveBookingToCompleted = async (bookingId: string) => {
       originalCollection: COLLECTION_NAME,
       completedCollection: 'completed_booking'
     };
-    
+
   } catch (error) {
     console.error('❌ Error moving booking to completed collection:', error);
     return {
@@ -2520,14 +3057,14 @@ const getAllCompletedBookings = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection('completed_booking');
-    
+
     const rawCompleted = await collection.find({}).toArray();
-    
+
     // Decompress and merge like getAllBookings
     const completedBookings = [] as any[];
     for (const booking of rawCompleted) {
@@ -2562,7 +3099,7 @@ const getAllCompletedBookings = async () => {
         completedBookings.push({ ...booking, status: 'completed' });
       }
     }
-    
+
     return {
       success: true,
       completedBookings,
@@ -2570,7 +3107,7 @@ const getAllCompletedBookings = async () => {
       database: DB_NAME,
       collection: 'completed_booking'
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting completed bookings from MongoDB:', error);
     return {
@@ -2586,16 +3123,16 @@ const getAllCancelledBookings = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(CANCELLED_COLLECTION_NAME);
-    
+
     // Find all cancelled bookings
     const rawCancelled = await collection.find({}).toArray();
-    
+
     // Decompress and merge like getAllBookings to expose important fields
     const cancelledBookings = [] as any[];
     for (const booking of rawCancelled) {
@@ -2645,7 +3182,7 @@ const getAllCancelledBookings = async () => {
         cancelledBookings.push({ ...booking, status: 'cancelled' });
       }
     }
-    
+
     return {
       success: true,
       cancelledBookings,
@@ -2653,7 +3190,7 @@ const getAllCancelledBookings = async () => {
       database: DB_NAME,
       collection: CANCELLED_COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting cancelled bookings from MongoDB:', error);
     return {
@@ -2669,33 +3206,33 @@ const deleteOldCancelledBookings = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(CANCELLED_COLLECTION_NAME);
-    
+
     // Calculate 12 hours ago from current time
     const twelveHoursAgo = new Date();
     twelveHoursAgo.setHours(twelveHoursAgo.getHours() - 12);
-    
+
     console.log(`🗑️ [CLEANUP] Deleting cancelled bookings older than: ${twelveHoursAgo.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
-    
+
     // Find and delete cancelled bookings older than 12 hours
     const result = await collection.deleteMany({
       cancelledAt: { $lt: twelveHoursAgo }
     });
-    
+
     console.log(`🗑️ [CLEANUP] Deleted ${result.deletedCount} old cancelled bookings from MongoDB`);
-    
+
     return {
       success: true,
       deletedCount: result.deletedCount,
       message: `Deleted ${result.deletedCount} cancelled bookings older than 12 hours`,
       cutoffTime: twelveHoursAgo.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
     };
-    
+
   } catch (error) {
     console.error('❌ Error deleting old cancelled bookings:', error);
     return {
@@ -2760,18 +3297,18 @@ const saveTheater = async (theaterData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(THEATER_COLLECTION_NAME);
     const compressedData = await compressData(theaterData);
 
     // Determine default display order (append to end)
     const activeCount = await collection.countDocuments({ isActive: { $ne: false } });
     const defaultOrder = (activeCount || 0) + 1;
-    
+
     const theater = {
       theaterId: `THEATER-${Date.now()}`,
       compressedData: compressedData,
@@ -2787,10 +3324,10 @@ const saveTheater = async (theaterData: any) => {
       youtubeLink: theaterData.youtubeLink || null
       // No expiredAt field - theaters are manually deleted only
     };
-    
+
     const result = await collection.insertOne(theater);
     console.log(`✅ Theater saved to MongoDB:`, theater.theaterId);
-    
+
     return {
       success: true,
       theaterId: theater.theaterId,
@@ -2807,14 +3344,14 @@ const getAllTheaters = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(THEATER_COLLECTION_NAME);
     const theaters = await collection.find({ isActive: true }).toArray();
-    
+
     const decompressedTheaters = [];
     for (const theater of theaters) {
       if (theater.compressedData) {
@@ -2861,20 +3398,20 @@ const updateTheater = async (theaterId: string, theaterData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(THEATER_COLLECTION_NAME);
-    
+
     // First, get the existing theater data to preserve existing images
     const existingTheater = await collection.findOne({ theaterId: theaterId });
-    
+
     if (!existingTheater) {
       return { success: false, error: 'Theater not found' };
     }
-    
+
     // Decompress existing data to get current images
     let existingData: any = {};
     if (existingTheater.compressedData) {
@@ -2886,34 +3423,34 @@ const updateTheater = async (theaterId: string, theaterData: any) => {
         existingData = {};
       }
     }
-    
+
     // Merge images: keep existing images and add new ones (avoid duplicates)
     const existingImages = existingData?.images || [];
     const newImages = theaterData.images || [];
-    
+
     // Create a Set to avoid duplicate images
     const allImagesSet = new Set([...existingImages, ...newImages]);
     const mergedImages = Array.from(allImagesSet);
-    
+
     console.log(`🖼️ Image merge for theater ${theaterId} (Max: 6):`);
     console.log(`   Existing images: ${existingImages.length}`, existingImages);
     console.log(`   New images: ${newImages.length}`, newImages);
     console.log(`   Merged images: ${mergedImages.length}`, mergedImages);
-    
+
     // Merge existing data with new data to preserve all fields
     const updatedTheaterData = {
       ...existingData,  // Start with existing data
       ...theaterData,   // Override with new data
       images: mergedImages  // Use merged images
     };
-    
+
     const compressedData = await compressData(updatedTheaterData);
-    
+
     const updateData: any = {
       compressedData: compressedData,
       updatedAt: new Date()
     };
-    
+
     // Only update fields that are provided
     if (theaterData.name !== undefined) updateData.name = theaterData.name;
     if (theaterData.price !== undefined) updateData.price = theaterData.price;
@@ -2928,16 +3465,16 @@ const updateTheater = async (theaterId: string, theaterData: any) => {
     if (theaterData.youtubeLink !== undefined) {
       updateData.youtubeLink = theaterData.youtubeLink;
     }
-    
+
     const result = await collection.updateOne(
       { theaterId: theaterId },
       { $set: updateData }
     );
-    
+
     if (result.matchedCount === 0) {
       return { success: false, error: 'Theater not found' };
     }
-    
+
     console.log(`✅ Theater updated in MongoDB with merged images:`, theaterId);
     return { success: true };
   } catch (error) {
@@ -2977,35 +3514,35 @@ const deleteTheater = async (theaterId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(THEATER_COLLECTION_NAME);
-    
+
     // First get the theater to extract all image URLs for Cloudinary deletion
     const theater = await collection.findOne({ theaterId: theaterId });
     if (!theater) {
       return { success: false, error: 'Theater not found' };
     }
-    
+
     // Collect all image URLs for deletion
     let imageUrls: string[] = [];
-    
+
     if (theater.compressedData) {
       try {
         const decompressed: any = await decompressData(theater.compressedData);
-        
+
         // Check single image field
         if (decompressed.image && decompressed.image.includes('cloudinary.com')) {
           imageUrls.push(decompressed.image);
         }
-        
+
         // Check images array field
         if (decompressed.images) {
           let imagesArray = [];
-          
+
           if (Array.isArray(decompressed.images)) {
             imagesArray = decompressed.images;
           } else if (typeof decompressed.images === 'string') {
@@ -3016,7 +3553,7 @@ const deleteTheater = async (theaterId: string) => {
               imagesArray = [decompressed.images];
             }
           }
-          
+
           // Add all Cloudinary images to deletion list
           imagesArray.forEach((img: string) => {
             if (img && typeof img === 'string' && img.includes('cloudinary.com')) {
@@ -3026,9 +3563,9 @@ const deleteTheater = async (theaterId: string) => {
             }
           });
         }
-        
+
         console.log(`🗑️ Found ${imageUrls.length} Cloudinary images to delete for theater ${theaterId}:`, imageUrls);
-        
+
       } catch (decompressError) {
         console.warn('⚠️ Could not decompress theater data for images:', decompressError);
       }
@@ -3037,10 +3574,10 @@ const deleteTheater = async (theaterId: string) => {
       if (theater.image && theater.image.includes('cloudinary.com')) {
         imageUrls.push(theater.image);
       }
-      
+
       if (theater.images) {
         let imagesArray = [];
-        
+
         if (Array.isArray(theater.images)) {
           imagesArray = theater.images;
         } else if (typeof theater.images === 'string') {
@@ -3051,7 +3588,7 @@ const deleteTheater = async (theaterId: string) => {
             imagesArray = [theater.images];
           }
         }
-        
+
         imagesArray.forEach((img: string) => {
           if (img && typeof img === 'string' && img.includes('cloudinary.com')) {
             if (!imageUrls.includes(img)) {
@@ -3061,14 +3598,14 @@ const deleteTheater = async (theaterId: string) => {
         });
       }
     }
-    
+
     // Hard delete - completely remove from database
     const result = await collection.deleteOne({ theaterId: theaterId });
-    
+
     if (result.deletedCount === 0) {
       return { success: false, error: 'Theater not found' };
     }
-    
+
     console.log(`✅ Theater completely deleted from MongoDB:`, theaterId);
     return { success: true, imageUrls };
   } catch (error) {
@@ -3083,29 +3620,29 @@ const getNextGalleryImageId = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(GALLERY_COLLECTION_NAME);
-    
+
     // Find the latest image ID
     const latestImage = await collection
       .find({ imageId: { $regex: /^IMG\d{4}$/ } })
       .sort({ imageId: -1 })
       .limit(1)
       .toArray();
-    
+
     if (latestImage.length === 0) {
       return 'IMG0001';
     }
-    
+
     // Extract number and increment
     const lastId = latestImage[0].imageId;
     const lastNumber = parseInt(lastId.replace('IMG', ''));
     const nextNumber = lastNumber + 1;
-    
+
     // Format as IMG0001, IMG0002, etc.
     return `IMG${nextNumber.toString().padStart(4, '0')}`;
   } catch (error) {
@@ -3119,25 +3656,25 @@ const saveGalleryImage = async (imageData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(GALLERY_COLLECTION_NAME);
-    
+
     // Get next sequential ID
     const imageId = await getNextGalleryImageId();
-    
+
     const galleryImage = {
       imageId: imageId,
       imageUrl: imageData.imageUrl,
       createdAt: new Date()
     };
-    
+
     const result = await collection.insertOne(galleryImage);
     console.log(`✅ Gallery image saved to MongoDB:`, galleryImage.imageId);
-    
+
     return {
       success: true,
       imageId: galleryImage.imageId,
@@ -3154,14 +3691,14 @@ const getAllGalleryImages = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(GALLERY_COLLECTION_NAME);
     const images = await collection.find({}).sort({ createdAt: -1 }).toArray();
-    
+
     return {
       success: true,
       images: images,
@@ -3178,20 +3715,20 @@ const deleteGalleryImage = async (imageId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(GALLERY_COLLECTION_NAME);
-    
+
     // Hard delete - completely remove from database
     const result = await collection.deleteOne({ imageId: imageId });
-    
+
     if (result.deletedCount === 0) {
       return { success: false, error: 'Gallery image not found' };
     }
-    
+
     console.log(`✅ Gallery image permanently deleted from MongoDB:`, imageId);
     return { success: true };
   } catch (error) {
@@ -3206,13 +3743,13 @@ const saveCoupon = async (couponData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(COUPON_COLLECTION_NAME);
-    
+
     const coupon = {
       couponCode: couponData.couponCode.toUpperCase(),
       discountType: couponData.discountType, // 'percentage' or 'fixed'
@@ -3223,10 +3760,10 @@ const saveCoupon = async (couponData: any) => {
       isActive: couponData.isActive !== false,
       createdAt: new Date()
     };
-    
+
     const result = await collection.insertOne(coupon);
     console.log(`✅ Coupon saved to MongoDB:`, coupon.couponCode);
-    
+
     return {
       success: true,
       couponCode: coupon.couponCode,
@@ -3243,14 +3780,14 @@ const getAllCoupons = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(COUPON_COLLECTION_NAME);
     const coupons = await collection.find({}).sort({ createdAt: -1 }).toArray();
-    
+
     return {
       success: true,
       coupons: coupons,
@@ -3267,22 +3804,22 @@ const updateCoupon = async (couponCode: string, couponData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(COUPON_COLLECTION_NAME);
-    
+
     const result = await collection.updateOne(
       { couponCode: couponCode },
       { $set: couponData }
     );
-    
+
     if (result.matchedCount === 0) {
       return { success: false, error: 'Coupon not found' };
     }
-    
+
     console.log(`✅ Coupon updated in MongoDB:`, couponCode);
     return { success: true };
   } catch (error) {
@@ -3296,23 +3833,23 @@ const deleteCoupon = async (couponCode: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(COUPON_COLLECTION_NAME);
-    
+
     // Soft delete - mark as inactive (coupons are not deleted from database)
     const result = await collection.updateOne(
       { couponCode: couponCode },
       { $set: { isActive: false, updatedAt: new Date() } }
     );
-    
+
     if (result.matchedCount === 0) {
       return { success: false, error: 'Coupon not found' };
     }
-    
+
     console.log(`✅ Coupon deactivated in MongoDB:`, couponCode);
     return { success: true };
   } catch (error) {
@@ -3330,11 +3867,11 @@ const getNextOccasionId = async (): Promise<string> => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(OCCASION_COLLECTION_NAME);
     const lastOccasion = await collection
       .find()
@@ -3361,16 +3898,16 @@ const saveOccasion = async (occasionData: Record<string, unknown>) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(OCCASION_COLLECTION_NAME);
-    
+
     const occasionId = await getNextOccasionId();
     const compressedData = await compressData(occasionData);
-    
+
     const occasion = {
       occasionId: occasionId,
       compressedData: compressedData,
@@ -3381,12 +3918,12 @@ const saveOccasion = async (occasionData: Record<string, unknown>) => {
       includeInDecoration: occasionData.includeInDecoration === true,
       createdAt: new Date()
     };
-    
+
     const result = await collection.insertOne(occasion);
-    
+
     console.log(`✅ Occasion saved to MongoDB with ID:`, occasionId);
-    return { 
-      success: true, 
+    return {
+      success: true,
       occasion: {
         _id: result.insertedId,
         occasionId: occasionId,
@@ -3409,18 +3946,18 @@ const getAllOccasions = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(OCCASION_COLLECTION_NAME);
     const occasions = await collection.find({ isActive: true }).toArray();
-    
+
     const decompressedOccasions = await Promise.all(
       occasions.map(async (occasion) => {
         let decompressedData: any = {};
-        
+
         if (occasion.compressedData) {
           try {
             decompressedData = await decompressData(occasion.compressedData);
@@ -3428,7 +3965,7 @@ const getAllOccasions = async () => {
             console.error('❌ Error decompressing occasion data:', error);
           }
         }
-        
+
         return {
           _id: occasion._id,
           occasionId: occasion.occasionId,
@@ -3442,7 +3979,7 @@ const getAllOccasions = async () => {
         };
       })
     );
-    
+
     console.log(`✅ Fetched ${decompressedOccasions.length} occasions from MongoDB`);
     return decompressedOccasions;
   } catch (error) {
@@ -3456,14 +3993,14 @@ const updateOccasion = async (id: string, occasionData: Record<string, unknown>)
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(OCCASION_COLLECTION_NAME);
     const compressedData = await compressData(occasionData);
-    
+
     const updateData = {
       compressedData: compressedData,
       name: occasionData.name,
@@ -3473,18 +4010,18 @@ const updateOccasion = async (id: string, occasionData: Record<string, unknown>)
       includeInDecoration: occasionData.includeInDecoration === true,
       updatedAt: new Date()
     };
-    
+
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
       { $set: updateData }
     );
-    
+
     if (result.matchedCount === 0) {
       return { success: false, error: 'Occasion not found' };
     }
-    
+
     const updatedOccasion = await collection.findOne({ _id: new ObjectId(id) });
-    
+
     console.log(`✅ Occasion updated in MongoDB:`, id);
     return {
       success: true,
@@ -3510,22 +4047,22 @@ const deleteOccasion = async (id: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(OCCASION_COLLECTION_NAME);
-    
+
     // Hard delete - completely remove from database
     const result = await collection.deleteOne(
       { _id: new ObjectId(id) }
     );
-    
+
     if (result.deletedCount === 0) {
       return { success: false, error: 'Occasion not found' };
     }
-    
+
     console.log(`✅ Occasion deleted from MongoDB:`, id);
     return { success: true };
   } catch (error) {
@@ -3543,11 +4080,11 @@ const getNextServiceId = async (): Promise<string> => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(SERVICE_COLLECTION_NAME);
     const lastService = await collection
       .find()
@@ -3574,30 +4111,31 @@ const saveService = async (serviceData: Record<string, unknown>) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(SERVICE_COLLECTION_NAME);
-    
+
     const serviceId = await getNextServiceId();
     const compressedData = await compressData(serviceData);
-    
+
     const service = {
       serviceId: serviceId,
       compressedData: compressedData,
       name: serviceData.name,
       items: serviceData.items || [],
       isActive: serviceData.isActive !== undefined ? serviceData.isActive : true,
+      showInBookingPopup: serviceData.showInBookingPopup !== undefined ? serviceData.showInBookingPopup : true,
       createdAt: new Date()
     };
-    
+
     const result = await collection.insertOne(service);
-    
+
     console.log(`✅ Service saved to MongoDB with ID:`, serviceId);
-    return { 
-      success: true, 
+    return {
+      success: true,
       service: {
         _id: result.insertedId,
         serviceId: serviceId,
@@ -3618,18 +4156,18 @@ const getAllServices = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(SERVICE_COLLECTION_NAME);
     const services = await collection.find({ isActive: true }).toArray();
-    
+
     const decompressedServices = await Promise.all(
       services.map(async (service) => {
         let decompressedData: any = {};
-        
+
         if (service.compressedData) {
           try {
             decompressedData = await decompressData(service.compressedData);
@@ -3645,7 +4183,7 @@ const getAllServices = async () => {
           ...item,
           showTag: item.showTag ?? false,
         }));
-        
+
         return {
           // Start from decompressed data so it provides defaults,
           // then override with authoritative DB fields.
@@ -3659,11 +4197,12 @@ const getAllServices = async () => {
           compulsory: service.compulsory,
           itemTagEnabled: service.itemTagEnabled,
           itemTagName: service.itemTagName,
+          showInBookingPopup: service.showInBookingPopup,
           createdAt: service.createdAt,
         };
       })
     );
-    
+
     console.log(`✅ Fetched ${decompressedServices.length} services from MongoDB`);
     return decompressedServices;
   } catch (error) {
@@ -3677,19 +4216,19 @@ const getAllServicesIncludingInactive = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(SERVICE_COLLECTION_NAME);
     // Fetch ALL services (including inactive) for admin panel
     const services = await collection.find({}).toArray();
-    
+
     const decompressedServices = await Promise.all(
       services.map(async (service) => {
         let decompressedData: any = {};
-        
+
         if (service.compressedData) {
           try {
             decompressedData = await decompressData(service.compressedData);
@@ -3705,7 +4244,7 @@ const getAllServicesIncludingInactive = async () => {
           ...item,
           showTag: item.showTag ?? false,
         }));
-        
+
         // Merge database fields with decompressed data
         // Direct fields take priority over decompressed data
         const mergedService = {
@@ -3719,10 +4258,11 @@ const getAllServicesIncludingInactive = async () => {
           compulsory: service.compulsory, // Direct field from database
           itemTagEnabled: service.itemTagEnabled, // Direct field from database
           itemTagName: service.itemTagName, // Direct field from database
+          showInBookingPopup: service.showInBookingPopup,
           createdAt: service.createdAt,
           updatedAt: service.updatedAt,
         };
-        
+
         console.log(`🔍 Service "${service.name}":`, {
           includeInDecoration: mergedService.includeInDecoration,
           compulsory: mergedService.compulsory,
@@ -3730,11 +4270,11 @@ const getAllServicesIncludingInactive = async () => {
           itemTagName: mergedService.itemTagName,
           isActive: mergedService.isActive
         });
-        
+
         return mergedService;
       })
     );
-    
+
     console.log(`✅ Fetched ${decompressedServices.length} services (including inactive) from MongoDB`);
     return decompressedServices;
   } catch (error) {
@@ -3746,23 +4286,23 @@ const getAllServicesIncludingInactive = async () => {
 const updateService = async (id: string, serviceData: Record<string, unknown>) => {
   try {
     console.log('🔄 updateService called with:', { id, serviceData });
-    
+
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(SERVICE_COLLECTION_NAME);
     const compressedData = await compressData(serviceData);
-    
+
     const updateData: Record<string, unknown> = {
       compressedData: compressedData,
       updatedAt: new Date()
     };
-    
+
     if (serviceData.name !== undefined) updateData.name = serviceData.name;
     if (serviceData.items !== undefined) updateData.items = serviceData.items;
     if (serviceData.isActive !== undefined) updateData.isActive = serviceData.isActive;
@@ -3782,20 +4322,24 @@ const updateService = async (id: string, serviceData: Record<string, unknown>) =
       updateData.itemTagName = serviceData.itemTagName;
       console.log('✅ Setting itemTagName to:', serviceData.itemTagName);
     }
-    
+    if (serviceData.showInBookingPopup !== undefined) {
+      updateData.showInBookingPopup = serviceData.showInBookingPopup;
+      console.log('✅ Setting showInBookingPopup to:', serviceData.showInBookingPopup);
+    }
+
     console.log('📦 Final updateData:', updateData);
-    
+
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
       { $set: updateData }
     );
-    
+
     if (result.matchedCount === 0) {
       return { success: false, error: 'Service not found' };
     }
-    
+
     const updatedService = await collection.findOne({ _id: new ObjectId(id) });
-    
+
     console.log(`✅ Service updated in MongoDB:`, id);
     return {
       success: true,
@@ -3819,22 +4363,22 @@ const deleteService = async (id: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(SERVICE_COLLECTION_NAME);
-    
+
     // Hard delete - completely remove from database
     const result = await collection.deleteOne(
       { _id: new ObjectId(id) }
     );
-    
+
     if (result.deletedCount === 0) {
       return { success: false, error: 'Service not found' };
     }
-    
+
     console.log(`✅ Service deleted from MongoDB:`, id);
     return { success: true };
   } catch (error) {
@@ -3852,11 +4396,11 @@ const getNextStaffId = async (): Promise<string> => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(USER_COLLECTION_NAME);
     const lastUser = await collection
       .find()
@@ -3884,17 +4428,17 @@ const saveStaff = async (staffData: Record<string, unknown>) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(USER_COLLECTION_NAME);
-    
+
     const staffId = await getNextStaffId();
     const normalizedAccess = staffData.bookingAccess === 'edit' ? 'edit' : 'view';
     const compressedData = await compressData({ ...staffData, bookingAccess: normalizedAccess });
-    
+
     const staff = {
       userId: staffId,
       compressedData: compressedData,
@@ -3910,12 +4454,12 @@ const saveStaff = async (staffData: Record<string, unknown>) => {
       bookingAccess: normalizedAccess,
       createdAt: new Date()
     };
-    
+
     const result = await collection.insertOne(staff);
-    
+
     console.log(`✅ Staff saved to MongoDB with ID:`, staffId);
-    return { 
-      success: true, 
+    return {
+      success: true,
       user: {
         _id: result.insertedId,
         userId: staffId,
@@ -3942,18 +4486,18 @@ const getAllUsers = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(USER_COLLECTION_NAME);
     const users = await collection.find({}).toArray();
-    
+
     const decompressedUsers = await Promise.all(
       users.map(async (user) => {
         let decompressedData: any = {};
-        
+
         if (user.compressedData) {
           try {
             decompressedData = await decompressData(user.compressedData);
@@ -3961,10 +4505,10 @@ const getAllUsers = async () => {
             console.error('❌ Error decompressing user data:', error);
           }
         }
-        
+
         const { bookingAccess: decompressedAccess, ...restDecompressed } = decompressedData || {};
         const normalizedAccess = decompressedAccess === 'edit' || user.bookingAccess === 'edit' ? 'edit' : 'view';
-        
+
         return {
           _id: user._id,
           userId: user.userId,
@@ -3983,7 +4527,7 @@ const getAllUsers = async () => {
         };
       })
     );
-    
+
     console.log(`✅ Fetched ${decompressedUsers.length} users from MongoDB`);
     return decompressedUsers;
   } catch (error) {
@@ -3997,23 +4541,23 @@ const updateUser = async (id: string, userData: Record<string, unknown>) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(USER_COLLECTION_NAME);
     const normalizedUserData = {
       ...userData,
       ...(userData.bookingAccess !== undefined ? { bookingAccess: userData.bookingAccess === 'edit' ? 'edit' : 'view' } : {})
     };
     const compressedData = await compressData(normalizedUserData);
-    
+
     const updateData: Record<string, unknown> = {
       compressedData: compressedData,
       updatedAt: new Date()
     };
-    
+
     if (userData.name !== undefined) updateData.name = userData.name;
     if (userData.email !== undefined) updateData.email = userData.email;
     if (userData.phone !== undefined) updateData.phone = userData.phone;
@@ -4024,18 +4568,18 @@ const updateUser = async (id: string, userData: Record<string, unknown>) => {
     if (userData.isActive !== undefined) updateData.isActive = userData.isActive;
     if (userData.password !== undefined) updateData.password = userData.password;
     if (userData.bookingAccess !== undefined) updateData.bookingAccess = userData.bookingAccess === 'edit' ? 'edit' : 'view';
-    
+
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
       { $set: updateData }
     );
-    
+
     if (result.matchedCount === 0) {
       return { success: false, error: 'User not found' };
     }
-    
+
     const updatedUser = await collection.findOne({ _id: new ObjectId(id) });
-    
+
     console.log(`✅ User updated in MongoDB:`, id);
     return {
       success: true,
@@ -4065,22 +4609,22 @@ const deleteUser = async (id: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(USER_COLLECTION_NAME);
-    
+
     // Hard delete - completely remove from database
     const result = await collection.deleteOne(
       { _id: new ObjectId(id) }
     );
-    
+
     if (result.deletedCount === 0) {
       return { success: false, error: 'User not found' };
     }
-    
+
     console.log(`✅ User deleted from MongoDB:`, id);
     return { success: true };
   } catch (error) {
@@ -4098,14 +4642,14 @@ const getSettings = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(SETTINGS_COLLECTION_NAME);
     const settings = await collection.findOne({ type: 'system' });
-    
+
     if (!settings) {
       return null;
     }
@@ -4118,7 +4662,7 @@ const getSettings = async () => {
         console.error('❌ Error decompressing settings data:', error);
       }
     }
-    
+
     return { ...settings, ...decompressedData };
   } catch (error) {
     console.error('❌ Error fetching settings from MongoDB:', error);
@@ -4129,25 +4673,25 @@ const getSettings = async () => {
 const getSystemSettings = async () => {
   try {
     const settings = await getSettings();
-    
+
     if (!settings) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: 'No system settings found in database',
-        settings: null 
+        settings: null
       };
     }
-    
-    return { 
-      success: true, 
-      settings: settings 
+
+    return {
+      success: true,
+      settings: settings
     };
   } catch (error) {
     console.error('❌ Error fetching system settings:', error);
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
-      settings: null 
+      settings: null
     };
   }
 };
@@ -4157,27 +4701,27 @@ const saveSettings = async (settingsData: Record<string, unknown>) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(SETTINGS_COLLECTION_NAME);
     const compressedData = await compressData(settingsData);
-    
+
     const settings = {
       type: 'system',
       compressedData: compressedData,
       ...settingsData,
       updatedAt: new Date()
     };
-    
+
     await collection.updateOne(
       { type: 'system' },
       { $set: settings },
       { upsert: true }
     );
-    
+
     console.log(`✅ Settings saved to MongoDB`);
     return { success: true };
   } catch (error) {
@@ -4192,19 +4736,19 @@ const getAdminByPassword = async (password: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(ADMIN_COLLECTION_NAME);
-    
+
     // Find admin by password
-    const admin = await collection.findOne({ 
+    const admin = await collection.findOne({
       password: password,
-      isActive: true 
+      isActive: true
     });
-    
+
     if (admin) {
       console.log('✅ Admin found in database');
       return admin;
@@ -4212,7 +4756,7 @@ const getAdminByPassword = async (password: string) => {
       console.log('❌ No admin found with that password');
       return null;
     }
-    
+
   } catch (error) {
     console.error('❌ Error getting admin by password:', error);
     return null;
@@ -4225,24 +4769,24 @@ const updateAdminProfile = async (adminId: string, updateData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(ADMIN_COLLECTION_NAME);
-    
+
     // Update admin profile
     const result = await collection.updateOne(
       { adminId: adminId },
-      { 
+      {
         $set: {
           ...updateData,
           updatedAt: new Date()
         }
       }
     );
-    
+
     if (result.modifiedCount > 0) {
       console.log('✅ Admin profile updated successfully');
       return { success: true };
@@ -4250,7 +4794,7 @@ const updateAdminProfile = async (adminId: string, updateData: any) => {
       console.log('❌ No admin found or no changes made');
       return { success: false, error: 'No changes made' };
     }
-    
+
   } catch (error) {
     console.error('❌ Error updating admin profile:', error);
     return { success: false, error: 'Failed to update admin profile' };
@@ -4263,41 +4807,41 @@ const updateAdminPassword = async (adminId: string, currentPassword: string, new
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(ADMIN_COLLECTION_NAME);
-    
+
     // First verify current password
-    const admin = await collection.findOne({ 
+    const admin = await collection.findOne({
       adminId: adminId,
-      password: currentPassword 
+      password: currentPassword
     });
-    
+
     if (!admin) {
       return { success: false, error: 'Current password is incorrect' };
     }
-    
+
     // Update password
     const result = await collection.updateOne(
       { adminId: adminId },
-      { 
+      {
         $set: {
           password: newPassword,
           updatedAt: new Date()
         }
       }
     );
-    
+
     if (result.modifiedCount > 0) {
       console.log('✅ Admin password updated successfully');
       return { success: true };
     } else {
       return { success: false, error: 'Failed to update password' };
     }
-    
+
   } catch (error) {
     console.error('❌ Error updating admin password:', error);
     return { success: false, error: 'Failed to update password' };
@@ -4310,15 +4854,15 @@ const getAdminById = async (adminId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(ADMIN_COLLECTION_NAME);
-    
+
     const admin = await collection.findOne({ adminId: adminId });
-    
+
     if (admin) {
       console.log('✅ Admin profile found');
       return admin;
@@ -4326,7 +4870,7 @@ const getAdminById = async (adminId: string) => {
       console.log('❌ Admin not found');
       return null;
     }
-    
+
   } catch (error) {
     console.error('❌ Error getting admin profile:', error);
     return null;
@@ -4339,28 +4883,28 @@ const getStaffById = async (staffId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(USER_COLLECTION_NAME);
-    
+
     // Try to find by userId first (FMT0001, etc.)
     let staff = await collection.findOne({ userId: staffId });
-    
+
     // If not found by userId, try by ObjectId
     if (!staff && ObjectId.isValid(staffId)) {
       staff = await collection.findOne({ _id: new ObjectId(staffId) });
     }
-    
+
     if (!staff) {
       return {
         success: false,
         error: 'Staff member not found'
       };
     }
-    
+
     // Decompress data if needed
     let decompressedData: any = {};
     if (staff.compressedData) {
@@ -4370,7 +4914,7 @@ const getStaffById = async (staffId: string) => {
         console.error('❌ Error decompressing staff data:', error);
       }
     }
-    
+
     const staffData = {
       _id: staff._id,
       userId: staff.userId,
@@ -4386,7 +4930,7 @@ const getStaffById = async (staffId: string) => {
       createdAt: staff.createdAt,
       ...decompressedData
     };
-    
+
     return {
       success: true,
       staff: staffData
@@ -4406,14 +4950,14 @@ const savePasswordChangeRequest = async (requestData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(REQUESTS_COLLECTION_NAME);
     const result = await collection.insertOne(requestData);
-    
+
     console.log('✅ Password change request saved:', result.insertedId);
     return result.insertedId;
   } catch (error) {
@@ -4428,14 +4972,14 @@ const getAllPasswordChangeRequests = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(REQUESTS_COLLECTION_NAME);
     const requests = await collection.find({}).sort({ requestedAt: -1 }).toArray();
-    
+
     console.log(`✅ Fetched ${requests.length} password change requests`);
     return requests;
   } catch (error) {
@@ -4450,14 +4994,14 @@ const getPasswordChangeRequestsByStaffId = async (staffId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(REQUESTS_COLLECTION_NAME);
     const requests = await collection.find({ staffId: staffId }).sort({ requestedAt: -1 }).toArray();
-    
+
     console.log(`✅ Fetched ${requests.length} password change requests for staff ${staffId}`);
     return requests;
   } catch (error) {
@@ -4472,22 +5016,22 @@ const updatePasswordChangeRequest = async (requestId: string, updateData: any) =
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(REQUESTS_COLLECTION_NAME);
     const result = await collection.updateOne(
       { _id: new ObjectId(requestId) },
       { $set: updateData }
     );
-    
+
     if (result.matchedCount === 0) {
       console.error('❌ No password change request found with ID:', requestId);
       return false;
     }
-    
+
     console.log('✅ Password change request updated:', requestId);
     return true;
   } catch (error) {
@@ -4502,24 +5046,24 @@ const updateUserByUserId = async (userId: string, userData: Record<string, unkno
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(USER_COLLECTION_NAME);
-    
+
     // Update by userId field
     const result = await collection.updateOne(
       { userId: userId },
       { $set: userData }
     );
-    
+
     if (result.matchedCount === 0) {
       console.error('❌ No user found with userId:', userId);
       return { success: false, error: 'User not found' };
     }
-    
+
     console.log('✅ User updated by userId:', userId);
     return { success: true };
   } catch (error) {
@@ -4534,21 +5078,21 @@ const saveTimeSlot = async (timeSlotData: any) => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     const collection = db!.collection(TIME_SLOTS_COLLECTION_NAME);
-    
+
     // Generate unique slot ID
     const slotId = `SLOT-${Date.now()}`;
-    
+
     const timeSlot = {
       slotId,
       ...timeSlotData,
       createdAt: new Date(),
       updatedAt: new Date()
     };
-    
+
     await collection.insertOne(timeSlot);
-    
+
     return {
       success: true,
       timeSlot,
@@ -4565,12 +5109,12 @@ const getAllTimeSlots = async () => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     const collection = db!.collection(TIME_SLOTS_COLLECTION_NAME);
     const timeSlots = await collection.find({}).sort({ startTime: 1 }).toArray();
-    
+
     console.log('🎰 Fetched time slots from database:', timeSlots.length);
-    
+
     return {
       success: true,
       timeSlots,
@@ -4587,25 +5131,25 @@ const updateTimeSlot = async (slotId: string, updateData: any) => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     const collection = db!.collection(TIME_SLOTS_COLLECTION_NAME);
-    
+
     const result = await collection.updateOne(
       { slotId },
-      { 
+      {
         $set: {
           ...updateData,
           updatedAt: new Date()
         }
       }
     );
-    
+
     if (result.matchedCount === 0) {
       return { success: false, error: 'Time slot not found' };
     }
-    
+
     const updatedSlot = await collection.findOne({ slotId });
-    
+
     return {
       success: true,
       timeSlot: updatedSlot
@@ -4621,15 +5165,15 @@ const deleteTimeSlot = async (slotId: string) => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     const collection = db!.collection(TIME_SLOTS_COLLECTION_NAME);
-    
+
     const result = await collection.deleteOne({ slotId });
-    
+
     if (result.deletedCount === 0) {
       return { success: false, error: 'Time slot not found' };
     }
-    
+
     return {
       success: true,
       message: 'Time slot deleted successfully'
@@ -4646,108 +5190,108 @@ const initializeCounters = async () => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     const collection = db!.collection<any>(COUNTERS_COLLECTION_NAME);
-    
+
     // Check if counters already exist
     const existingCounters = await collection.find({}).toArray();
-    
-        if (existingCounters.length === 0) {
-          // Initialize all booking counters with daily, weekly, monthly, total structure
-          const currentDate = new Date();
-          const currentDay = currentDate.getDate();
-          const currentMonth = currentDate.getMonth();
-          const currentYear = currentDate.getFullYear();
-          
-          // Calculate week start for initial counters
-          const currentWeekStart = new Date(currentDate);
-          currentWeekStart.setDate(currentDate.getDate() - currentDate.getDay());
-          const currentWeekStartDay = currentWeekStart.getDate();
-          const currentWeekStartMonth = currentWeekStart.getMonth();
-          const currentWeekStartYear = currentWeekStart.getFullYear();
-          
-          const initialCounters = [
-            { 
-              _id: 'confirmedCounter' as any, 
-              dailyCount: 0,
-              weeklyCount: 0,
-              monthlyCount: 0,
-              yearlyCount: 0,
-              totalCount: 0,
-              count: 0, // Legacy support
-              lastResetDay: currentDay,
-              lastResetWeekDay: currentWeekStartDay,
-              lastResetWeekMonth: currentWeekStartMonth,
-              lastResetWeekYear: currentWeekStartYear,
-              lastResetMonth: currentMonth, 
-              lastResetYear: currentYear 
-            },
-            { 
-              _id: 'manualCounter' as any, 
-              dailyCount: 0,
-              weeklyCount: 0,
-              monthlyCount: 0,
-              yearlyCount: 0,
-              totalCount: 0,
-              count: 0, // Legacy support
-              lastResetDay: currentDay,
-              lastResetWeekDay: currentWeekStartDay,
-              lastResetWeekMonth: currentWeekStartMonth,
-              lastResetWeekYear: currentWeekStartYear,
-              lastResetMonth: currentMonth, 
-              lastResetYear: currentYear 
-            },
-            { 
-              _id: 'completedCounter' as any, 
-              dailyCount: 0,
-              weeklyCount: 0,
-              monthlyCount: 0,
-              yearlyCount: 0,
-              totalCount: 0,
-              count: 0, // Legacy support
-              lastResetDay: currentDay,
-              lastResetWeekDay: currentWeekStartDay,
-              lastResetWeekMonth: currentWeekStartMonth,
-              lastResetWeekYear: currentWeekStartYear,
-              lastResetMonth: currentMonth, 
-              lastResetYear: currentYear 
-            },
-            { 
-              _id: 'cancelledCounter' as any, 
-              dailyCount: 0,
-              weeklyCount: 0,
-              monthlyCount: 0,
-              yearlyCount: 0,
-              totalCount: 0,
-              count: 0, // Legacy support
-              lastResetDay: currentDay,
-              lastResetWeekDay: currentWeekStartDay,
-              lastResetWeekMonth: currentWeekStartMonth,
-              lastResetWeekYear: currentWeekStartYear,
-              lastResetMonth: currentMonth, 
-              lastResetYear: currentYear 
-            },
-            { 
-              _id: 'incompleteCounter' as any, 
-              dailyCount: 0,
-              weeklyCount: 0,
-              monthlyCount: 0,
-              yearlyCount: 0,
-              totalCount: 0,
-              count: 0, // Legacy support
-              lastResetDay: currentDay,
-              lastResetWeekDay: currentWeekStartDay,
-              lastResetWeekMonth: currentWeekStartMonth,
-              lastResetWeekYear: currentWeekStartYear,
-              lastResetMonth: currentMonth, 
-              lastResetYear: currentYear 
-            }
-          ];
-          
-          await collection.insertMany(initialCounters);
-          console.log('✅ Initialized booking counters with daily/weekly/monthly/total structure in database');
+
+    if (existingCounters.length === 0) {
+      // Initialize all booking counters with daily, weekly, monthly, total structure
+      const currentDate = new Date();
+      const currentDay = currentDate.getDate();
+      const currentMonth = currentDate.getMonth();
+      const currentYear = currentDate.getFullYear();
+
+      // Calculate week start for initial counters
+      const currentWeekStart = new Date(currentDate);
+      currentWeekStart.setDate(currentDate.getDate() - currentDate.getDay());
+      const currentWeekStartDay = currentWeekStart.getDate();
+      const currentWeekStartMonth = currentWeekStart.getMonth();
+      const currentWeekStartYear = currentWeekStart.getFullYear();
+
+      const initialCounters = [
+        {
+          _id: 'confirmedCounter' as any,
+          dailyCount: 0,
+          weeklyCount: 0,
+          monthlyCount: 0,
+          yearlyCount: 0,
+          totalCount: 0,
+          count: 0, // Legacy support
+          lastResetDay: currentDay,
+          lastResetWeekDay: currentWeekStartDay,
+          lastResetWeekMonth: currentWeekStartMonth,
+          lastResetWeekYear: currentWeekStartYear,
+          lastResetMonth: currentMonth,
+          lastResetYear: currentYear
+        },
+        {
+          _id: 'manualCounter' as any,
+          dailyCount: 0,
+          weeklyCount: 0,
+          monthlyCount: 0,
+          yearlyCount: 0,
+          totalCount: 0,
+          count: 0, // Legacy support
+          lastResetDay: currentDay,
+          lastResetWeekDay: currentWeekStartDay,
+          lastResetWeekMonth: currentWeekStartMonth,
+          lastResetWeekYear: currentWeekStartYear,
+          lastResetMonth: currentMonth,
+          lastResetYear: currentYear
+        },
+        {
+          _id: 'completedCounter' as any,
+          dailyCount: 0,
+          weeklyCount: 0,
+          monthlyCount: 0,
+          yearlyCount: 0,
+          totalCount: 0,
+          count: 0, // Legacy support
+          lastResetDay: currentDay,
+          lastResetWeekDay: currentWeekStartDay,
+          lastResetWeekMonth: currentWeekStartMonth,
+          lastResetWeekYear: currentWeekStartYear,
+          lastResetMonth: currentMonth,
+          lastResetYear: currentYear
+        },
+        {
+          _id: 'cancelledCounter' as any,
+          dailyCount: 0,
+          weeklyCount: 0,
+          monthlyCount: 0,
+          yearlyCount: 0,
+          totalCount: 0,
+          count: 0, // Legacy support
+          lastResetDay: currentDay,
+          lastResetWeekDay: currentWeekStartDay,
+          lastResetWeekMonth: currentWeekStartMonth,
+          lastResetWeekYear: currentWeekStartYear,
+          lastResetMonth: currentMonth,
+          lastResetYear: currentYear
+        },
+        {
+          _id: 'incompleteCounter' as any,
+          dailyCount: 0,
+          weeklyCount: 0,
+          monthlyCount: 0,
+          yearlyCount: 0,
+          totalCount: 0,
+          count: 0, // Legacy support
+          lastResetDay: currentDay,
+          lastResetWeekDay: currentWeekStartDay,
+          lastResetWeekMonth: currentWeekStartMonth,
+          lastResetWeekYear: currentWeekStartYear,
+          lastResetMonth: currentMonth,
+          lastResetYear: currentYear
         }
-    
+      ];
+
+      await collection.insertMany(initialCounters);
+      console.log('✅ Initialized booking counters with daily/weekly/monthly/total structure in database');
+    }
+
     return { success: true };
   } catch (error) {
     console.error('❌ Error initializing counters:', error);
@@ -4761,26 +5305,26 @@ const checkAndResetCounters = async () => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     const collection = db!.collection(COUNTERS_COLLECTION_NAME);
-    
+
     // Get current IST time
     const now = new Date();
     const istNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    
+
     console.log('🔄 [AUTO-RESET] Checking counters for reset...');
-    
+
     const counters = await collection.findOne({ _id: 'confirmedCounter' as any });
-    
+
     if (!counters) {
       console.log('🔄 [AUTO-RESET] No counters found, initializing...');
       await initializeCounters();
       return { success: true, message: 'Counters initialized' };
     }
-    
+
     // Reset logic is handled in incrementCounter function
     return { success: true, message: 'Counters checked' };
-    
+
   } catch (error) {
     console.error('❌ Error checking counters:', error);
     return { success: false, error: 'Failed to check counters' };
@@ -4793,33 +5337,33 @@ const incrementCounter = async (counterType: string) => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     // First check and reset counters if needed
     await checkAndResetCounters();
-    
+
     const collection = db!.collection(COUNTERS_COLLECTION_NAME);
     const counterId = `${counterType}Counter`;
-    
+
     // Increment all counter types (daily, weekly, monthly, yearly, total)
     const result = await collection.findOneAndUpdate(
       { _id: counterId as any },
-      { 
-        $inc: { 
+      {
+        $inc: {
           dailyCount: 1,
           weeklyCount: 1,
           monthlyCount: 1,
           yearlyCount: 1,
           totalCount: 1,
           count: 1 // Keep legacy count for backward compatibility
-        } 
+        }
       },
       { returnDocument: 'after', upsert: true }
     );
-    
+
     if (result) {
       console.log(`📊 Incremented ${counterType} counter - Daily: ${result.value?.dailyCount || 0}, Weekly: ${result.value?.weeklyCount || 0}, Monthly: ${result.value?.monthlyCount || 0}, Yearly: ${result.value?.yearlyCount || 0}, Total: ${result.value?.totalCount || 0}`);
-      return { 
-        success: true, 
+      return {
+        success: true,
         dailyCount: result.value?.dailyCount || 0,
         weeklyCount: result.value?.weeklyCount || 0,
         monthlyCount: result.value?.monthlyCount || 0,
@@ -4827,7 +5371,7 @@ const incrementCounter = async (counterType: string) => {
         totalCount: result.value?.totalCount || 0
       };
     }
-    
+
     return { success: false, error: 'Failed to increment counter' };
   } catch (error) {
     console.error(`❌ Error incrementing ${counterType} counter:`, error);
@@ -4841,45 +5385,45 @@ const decrementCounter = async (counterType: string) => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     const collection = db!.collection(COUNTERS_COLLECTION_NAME);
     const counterId = `${counterType}Counter`;
-    
+
     // Get current counter values
     const currentCounter = await collection.findOne({ _id: counterId as any });
-    
+
     if (!currentCounter) {
       console.log(`⚠️ No ${counterType} counter found to decrement`);
       return { success: false, error: `${counterType} counter not found` };
     }
-    
+
     // Ensure we don't go below zero for any counter
     const dailyCount = Math.max(0, (currentCounter.dailyCount || 0) - 1);
     const weeklyCount = Math.max(0, (currentCounter.weeklyCount || 0) - 1);
     const monthlyCount = Math.max(0, (currentCounter.monthlyCount || 0) - 1);
     const yearlyCount = Math.max(0, (currentCounter.yearlyCount || 0) - 1);
     const totalCount = Math.max(0, (currentCounter.totalCount || currentCounter.count || 0) - 1);
-    
+
     // Update counter with decremented values
     const result = await collection.findOneAndUpdate(
       { _id: counterId as any },
-      { 
-        $set: { 
+      {
+        $set: {
           dailyCount: dailyCount,
           weeklyCount: weeklyCount,
           monthlyCount: monthlyCount,
           yearlyCount: yearlyCount,
           totalCount: totalCount,
           count: totalCount // Keep legacy count for backward compatibility
-        } 
+        }
       },
       { returnDocument: 'after' }
     );
-    
+
     if (result) {
       console.log(`📊 Decremented ${counterType} counter - Daily: ${result.value?.dailyCount || 0}, Weekly: ${result.value?.weeklyCount || 0}, Monthly: ${result.value?.monthlyCount || 0}, Yearly: ${result.value?.yearlyCount || 0}, Total: ${result.value?.totalCount || 0}`);
-      return { 
-        success: true, 
+      return {
+        success: true,
         dailyCount: result.value?.dailyCount || 0,
         weeklyCount: result.value?.weeklyCount || 0,
         monthlyCount: result.value?.monthlyCount || 0,
@@ -4887,7 +5431,7 @@ const decrementCounter = async (counterType: string) => {
         totalCount: result.value?.totalCount || 0
       };
     }
-    
+
     return { success: false, error: 'Failed to decrement counter' };
   } catch (error) {
     console.error(`❌ Error decrementing ${counterType} counter:`, error);
@@ -4900,19 +5444,19 @@ const getCounterValue = async (counterType: string) => {
     if (!isConnected || !db) {
       await connectToDatabase();
     }
-    
+
     // First check and reset if needed
     await checkAndResetCounters();
-    
+
     const collection = db!.collection(COUNTERS_COLLECTION_NAME);
     const counterId = `${counterType}Counter`;
-    
+
     const counter = await collection.findOne({ _id: counterId as any });
-    
+
     if (counter) {
       return { success: true, count: counter.count };
     }
-    
+
     return { success: true, count: 0 };
   } catch (error) {
     console.error(`❌ Error getting ${counterType} counter:`, error);
@@ -4978,9 +5522,9 @@ const saveTrustedCustomer = async (customerData: Record<string, unknown>) => {
       ? tags
       : typeof tags === 'string'
         ? (tags as string)
-            .split(',')
-            .map(tag => tag.trim())
-            .filter(Boolean)
+          .split(',')
+          .map(tag => tag.trim())
+          .filter(Boolean)
         : [];
     const billingPreference = rawBillingPreference === 'free' ? 'free' : 'paid';
 
@@ -5074,9 +5618,9 @@ const updateTrustedCustomer = async (id: string, customerData: Record<string, un
         ? tags
         : typeof tags === 'string'
           ? (tags as string)
-              .split(',')
-              .map(tag => tag.trim())
-              .filter(Boolean)
+            .split(',')
+            .map(tag => tag.trim())
+            .filter(Boolean)
           : [];
       updatePayload.tags = tagsArray;
     }
@@ -5166,18 +5710,18 @@ const database = {
       if (!isConnected || !db) {
         await connectToDatabase();
       }
-      
+
       if (!db) {
         throw new Error('Database not connected');
       }
-      
+
       const collection = db.collection(COLLECTION_NAME);
       const bookings = await collection
         .find({})
         .sort({ _id: -1 })
         .limit(limit)
         .toArray();
-      
+
       return bookings;
     } catch (error) {
       console.error('❌ Error getting latest bookings:', error);
@@ -5188,6 +5732,7 @@ const database = {
   deleteIncompleteBooking: deleteIncompleteBooking,
   deleteExpiredIncompleteBookings: deleteExpiredIncompleteBookings,
   getBookingById: getBookingById,
+  getBookingByTicketNumber: getBookingByTicketNumber,
   updateBooking: updateBooking,
   updateManualBooking: updateManualBooking,
   updateIncompleteBooking: updateIncompleteBooking,
@@ -5206,6 +5751,7 @@ const database = {
   updateTheater: updateTheater,
   reorderTheaters: reorderTheaters,
   deleteTheater: deleteTheater,
+  updateOrderStatusByTicket: updateOrderStatusByTicket,
   saveGalleryImage: saveGalleryImage,
   getAllGalleryImages: getAllGalleryImages,
   deleteGalleryImage: deleteGalleryImage,
@@ -5228,7 +5774,14 @@ const database = {
   deleteStaff: deleteUser, // deleteUser deletes staff data
   getAllUsers: getAllUsers, // Keep for backward compatibility
   updateUser: updateUser, // Keep for backward compatibility
-  deleteUser: deleteUser, // Keep for backward compatibility
+  saveOrderRecord: saveOrderRecord,
+  getOrders: getOrders,
+  getOrderCounts: getOrderCounts,
+  markOrderReadyForAutoDeletion: markOrderReadyForAutoDeletion,
+  cleanupReadyOrdersPastAutoDelete: cleanupReadyOrdersPastAutoDelete,
+  deleteOrdersByBookingReference: deleteOrdersByBookingReference,
+  deleteOrdersByBookingAndService: deleteOrdersByBookingAndService,
+  updateOrdersRemoveItems: updateOrdersRemoveItems,
   getSettings: getSettings,
   getSystemSettings: getSystemSettings,
   saveSettings: saveSettings,
@@ -5254,10 +5807,10 @@ const database = {
       if (!isConnected || !db) {
         await connectToDatabase();
       }
-      
+
       const collection = db!.collection(COUNTERS_COLLECTION_NAME);
       const counters = await collection.find({}).toArray();
-      
+
       const result: any = {};
       counters.forEach(counter => {
         const counterType = counter._id.toString().replace('Counter', '');
@@ -5269,7 +5822,7 @@ const database = {
           total: counter.totalCount || counter.count || 0
         };
       });
-      
+
       return { success: true, counters: result };
     } catch (error) {
       console.error('❌ Error getting all counters:', error);
@@ -5287,47 +5840,47 @@ const database = {
       if (!db) {
         throw new Error('Database not connected');
       }
-      
+
       // Get current IST time (same method used throughout the app)
       const now = new Date();
       const istNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-      
+
       const currentDate = istNow.toISOString().split('T')[0]; // YYYY-MM-DD
       const currentDay = istNow.getDay(); // 0 = Sunday
       const currentDayOfMonth = istNow.getDate();
       const currentMonth = istNow.getMonth() + 1; // 1-12
       const currentYear = istNow.getFullYear();
-      
+
       console.log(`🔄 [AUTO-RESET] Checking counters - IST: ${istNow.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
-      
+
       const countersCollection = db.collection<any>('counters');
-      
+
       // Get all individual counters
       const confirmedCounter = await countersCollection.findOne({ _id: 'confirmedCounter' as any });
       const manualCounter = await countersCollection.findOne({ _id: 'manualCounter' as any });
       const cancelledCounter = await countersCollection.findOne({ _id: 'cancelledCounter' as any });
       const completedCounter = await countersCollection.findOne({ _id: 'completedCounter' as any });
-      
+
       if (!confirmedCounter || !manualCounter || !cancelledCounter || !completedCounter) {
         console.log('🔄 [AUTO-RESET] Some counters missing, initializing...');
         await initializeCounters();
         return { success: true, message: 'Counters initialized' };
       }
-      
+
       const counters = {
         confirmed: confirmedCounter,
         manual: manualCounter,
         cancelled: cancelledCounter,
         completed: completedCounter
       };
-      
-const resetActions: string[] = [];
+
+      const resetActions: string[] = [];
       let needsUpdate = false;
-      
+
       // Check daily reset (every day at midnight IST)
       if (counters.confirmed.lastResetDay !== currentDayOfMonth) {
         console.log(`🔄 [AUTO-RESET] Daily reset needed - Last: ${counters.confirmed.lastResetDay}, Current: ${currentDayOfMonth}`);
-        
+
         // Reset daily counters for all types
         await countersCollection.updateOne(
           { _id: 'confirmedCounter' as any },
@@ -5345,15 +5898,15 @@ const resetActions: string[] = [];
           { _id: 'completedCounter' as any },
           { $set: { dailyCount: 0, lastResetDay: currentDayOfMonth } }
         );
-        
+
         resetActions.push('Daily counters reset');
         needsUpdate = true;
       }
-      
+
       // Check weekly reset (every Sunday at midnight IST)
       if (currentDay === 0 && counters.confirmed.lastResetWeekDay !== currentDayOfMonth) {
         console.log(`🔄 [AUTO-RESET] Weekly reset needed - Last: ${counters.confirmed.lastResetWeekDay}, Current: ${currentDayOfMonth}`);
-        
+
         // Reset weekly counters for all types
         await countersCollection.updateOne(
           { _id: 'confirmedCounter' as any },
@@ -5371,15 +5924,15 @@ const resetActions: string[] = [];
           { _id: 'completedCounter' as any },
           { $set: { weeklyCount: 0, lastResetWeekDay: currentDayOfMonth, lastResetWeekMonth: currentMonth, lastResetWeekYear: currentYear } }
         );
-        
+
         resetActions.push('Weekly counters reset');
         needsUpdate = true;
       }
-      
+
       // Check monthly reset (1st day of month at midnight IST)
       if (currentDayOfMonth === 1 && counters.confirmed.lastResetMonth !== (currentMonth - 1)) {
         console.log(`🔄 [AUTO-RESET] Monthly reset needed - Last: ${counters.confirmed.lastResetMonth}, Current: ${currentMonth - 1}`);
-        
+
         // Reset monthly counters for all types
         await countersCollection.updateOne(
           { _id: 'confirmedCounter' as any },
@@ -5397,15 +5950,15 @@ const resetActions: string[] = [];
           { _id: 'completedCounter' as any },
           { $set: { monthlyCount: 0, lastResetMonth: currentMonth - 1 } }
         );
-        
+
         resetActions.push('Monthly counters reset');
         needsUpdate = true;
       }
-      
+
       // Check yearly reset (January 1st at midnight IST)
       if (currentMonth === 1 && currentDayOfMonth === 1 && counters.confirmed.lastResetYear !== currentYear) {
         console.log(`🔄 [AUTO-RESET] Yearly reset needed - Last: ${counters.confirmed.lastResetYear}, Current: ${currentYear}`);
-        
+
         // Reset yearly counters for all types
         await countersCollection.updateOne(
           { _id: 'confirmedCounter' as any },
@@ -5423,15 +5976,15 @@ const resetActions: string[] = [];
           { _id: 'completedCounter' as any },
           { $set: { yearlyCount: 0, lastResetYear: currentYear } }
         );
-        
+
         resetActions.push('Yearly counters reset');
         needsUpdate = true;
       }
-      
+
       // Update counters if any reset was needed
       if (needsUpdate) {
         console.log(`✅ [AUTO-RESET] Counters updated: ${resetActions.join(', ')}`);
-        
+
         return {
           success: true,
           message: 'Counters automatically reset',
@@ -5440,7 +5993,7 @@ const resetActions: string[] = [];
         };
       } else {
         console.log(`✅ [AUTO-RESET] No reset needed - all counters current`);
-        
+
         return {
           success: true,
           message: 'No reset needed',
@@ -5448,7 +6001,7 @@ const resetActions: string[] = [];
           timestamp: istNow.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
         };
       }
-      
+
     } catch (error) {
       console.error('❌ [AUTO-RESET] Error in automatic counter reset:', error);
       return {
@@ -5491,18 +6044,18 @@ const getBookingsByOccasion = async (occasion: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     // Get collection
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Find bookings by occasion (limit to recent 50 for performance)
-    const bookings = await collection.find({ 
-      occasion: occasion 
+    const bookings = await collection.find({
+      occasion: occasion
     }).sort({ createdAt: -1 }).limit(50).toArray();
-    
+
     return {
       success: true,
       bookings: bookings,
@@ -5511,7 +6064,7 @@ const getBookingsByOccasion = async (occasion: string) => {
       database: DB_NAME,
       collection: COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting bookings by occasion from MongoDB:', error);
     return {
@@ -5529,35 +6082,35 @@ const saveFeedbackWithLimit = async (feedbackData: any) => {
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection('feedback');
-    
+
     // Check current count
     const currentCount = await collection.countDocuments();
     console.log(`📊 Current feedback count: ${currentCount}`);
-    
+
     // If we have 20 or more, delete the oldest one(s)
     if (currentCount >= 20) {
       const oldestFeedback = await collection.find({}).sort({ submittedAt: 1 }).limit(currentCount - 19).toArray();
-      
+
       if (oldestFeedback.length > 0) {
         const idsToDelete = oldestFeedback.map(f => f._id);
         await collection.deleteMany({ _id: { $in: idsToDelete } });
         console.log(`🗑️ Deleted ${oldestFeedback.length} oldest feedback entries`);
       }
     }
-    
+
     // Add new feedback
     const result = await collection.insertOne({
       ...feedbackData,
       createdAt: new Date(),
       updatedAt: new Date()
     });
-    
+
     // Get updated count
     const newCount = await collection.countDocuments();
     console.log(`✅ Feedback saved. New count: ${newCount}`);
-    
+
     return {
       success: true,
       feedbackId: result.insertedId.toString(),
@@ -5583,16 +6136,16 @@ const getFeedbackList = async () => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection('feedback');
     const feedback = await collection.find({}).sort({ submittedAt: -1 }).limit(20).toArray();
-    
+
     console.log(`📋 Retrieved ${feedback.length} feedback entries`);
-    
+
     return {
       success: true,
       feedback: feedback,
@@ -5617,18 +6170,18 @@ const addTestimonial = async (testimonialData: any) => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection('testimonials');
     const result = await collection.insertOne({
       ...testimonialData,
       createdAt: new Date(),
       updatedAt: new Date()
     });
-    
+
     return {
       success: true,
       testimonialId: result.insertedId.toString(),
@@ -5653,13 +6206,13 @@ const addFAQ = async (faqData: any) => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(FAQ_COLLECTION_NAME);
-    
+
     // Prepare FAQ data for compression
     const faqToStore = {
       ...faqData,
@@ -5668,10 +6221,10 @@ const addFAQ = async (faqData: any) => {
       isActive: true,
       order: await collection.countDocuments() + 1
     };
-    
+
     // Compress the FAQ data before storing
     const compressedData = await compressData(faqToStore);
-    
+
     const result = await collection.insertOne({
       compressedData: compressedData,
       _compressed: true,
@@ -5680,7 +6233,7 @@ const addFAQ = async (faqData: any) => {
       isActive: true,
       order: await collection.countDocuments() + 1
     });
-    
+
     return {
       success: true,
       faqId: result.insertedId.toString(),
@@ -5704,22 +6257,22 @@ const getAllFAQs = async () => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(FAQ_COLLECTION_NAME);
-    
+
     // First, let's check all documents without filtering
     const allRawFaqs = await collection.find({}).sort({ order: 1 }).toArray();
     console.log('📊 getAllFAQs: Found', allRawFaqs.length, 'total documents in FAQ collection');
     console.log('📋 All FAQ documents:', allRawFaqs);
-    
+
     // Now filter for active ones
     const rawFaqs = allRawFaqs.filter(faq => faq.isActive !== false); // Include docs where isActive is true or undefined
     console.log('📊 getAllFAQs: Found', rawFaqs.length, 'active FAQs in database');
-    
+
     // Decompress FAQ data
     const faqs = await Promise.all(rawFaqs.map(async (faq, index) => {
       console.log(`🔍 Processing FAQ ${index + 1}:`, {
@@ -5727,14 +6280,14 @@ const getAllFAQs = async () => {
         hasCompressedData: !!faq._compressed,
         hasCompressedField: !!faq.compressedData
       });
-      
+
       if (faq._compressed && faq.compressedData) {
         try {
           // Decompress the data
           console.log(`🔄 Decompressing FAQ ${index + 1}...`);
           const decompressedData = await decompressData(faq.compressedData) as any;
           console.log(`✅ FAQ ${index + 1} decompressed successfully:`, decompressedData);
-          
+
           // Ensure we have the required fields
           const finalFAQ = {
             _id: faq._id,
@@ -5744,14 +6297,14 @@ const getAllFAQs = async () => {
             isActive: faq.isActive !== false, // Default to true if not set
             order: faq.order || 1 // Default order if not set
           };
-          
+
           console.log(`📋 Final FAQ ${index + 1}:`, finalFAQ);
           return finalFAQ;
         } catch (decompressError) {
           console.error(`❌ FAQ ${index + 1} decompression failed:`, decompressError);
           console.error('Compressed data type:', typeof faq.compressedData);
           console.error('Compressed data:', faq.compressedData);
-          
+
           // Try to return a fallback FAQ with basic info
           return {
             _id: faq._id,
@@ -5774,7 +6327,7 @@ const getAllFAQs = async () => {
         };
       }
     }));
-    
+
     return {
       success: true,
       faqs: faqs,
@@ -5798,25 +6351,25 @@ const updateFAQ = async (faqId: string, faqData: any) => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(FAQ_COLLECTION_NAME);
-    
+
     // Prepare FAQ data for compression
     const faqToStore = {
       ...faqData,
       updatedAt: new Date()
     };
-    
+
     // Compress the FAQ data before storing
     const compressedData = await compressData(faqToStore);
-    
+
     const result = await collection.updateOne(
       { _id: new ObjectId(faqId) },
-      { 
+      {
         $set: {
           compressedData: compressedData,
           _compressed: true,
@@ -5824,14 +6377,14 @@ const updateFAQ = async (faqId: string, faqData: any) => {
         }
       }
     );
-    
+
     if (result.matchedCount === 0) {
       return {
         success: false,
         error: 'FAQ not found'
       };
     }
-    
+
     return {
       success: true,
       message: 'FAQ updated successfully'
@@ -5854,21 +6407,21 @@ const deleteFAQ = async (faqId: string) => {
         throw new Error('Failed to connect to database');
       }
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
-    
+
     const collection = db.collection(FAQ_COLLECTION_NAME);
     const result = await collection.deleteOne({ _id: new ObjectId(faqId) });
-    
+
     if (result.deletedCount === 0) {
       return {
         success: false,
         error: 'FAQ not found'
       };
     }
-    
+
     return {
       success: true,
       message: 'FAQ deleted successfully'
@@ -5883,7 +6436,7 @@ const deleteFAQ = async (faqId: string) => {
 };
 
 // Excel Records Management Functions
-const getAllExcelRecords = async function() {
+const getAllExcelRecords = async function () {
   try {
     if (!client) {
       await connectToDatabase();
@@ -5909,7 +6462,7 @@ const getAllExcelRecords = async function() {
   }
 };
 
-const saveExcelRecord = async function(recordData: any) {
+const saveExcelRecord = async function (recordData: any) {
   try {
     if (!client) {
       await connectToDatabase();
@@ -5920,7 +6473,7 @@ const saveExcelRecord = async function(recordData: any) {
     }
 
     const excelRecordsCollection = db.collection('excelRecords');
-    
+
     // Check if record exists for this type
     const existingRecord = await excelRecordsCollection.findOne({ type: recordData.type });
 
@@ -5928,7 +6481,7 @@ const saveExcelRecord = async function(recordData: any) {
       // Update existing record
       await excelRecordsCollection.updateOne(
         { type: recordData.type },
-        { 
+        {
           $set: {
             filename: recordData.filename,
             totalRecords: recordData.totalRecords,
@@ -5967,7 +6520,7 @@ const saveExcelRecord = async function(recordData: any) {
   }
 };
 
-const deleteExcelRecord = async function(recordId: string) {
+const deleteExcelRecord = async function (recordId: string) {
   try {
     if (!client) {
       await connectToDatabase();
@@ -6013,17 +6566,17 @@ const getAllPricing = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(PRICING_COLLECTION_NAME);
-    
+
     // Find all pricing data
     const pricingData = await collection.find({}).toArray();
-    
+
     console.log(`📊 Retrieved ${pricingData.length} pricing records from database`);
-    
+
     return {
       success: true,
       pricing: pricingData,
@@ -6031,7 +6584,7 @@ const getAllPricing = async () => {
       database: DB_NAME,
       collection: PRICING_COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting pricing data from MongoDB:', error);
     return {
@@ -6047,12 +6600,12 @@ const savePricing = async (pricingData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(PRICING_COLLECTION_NAME);
-    
+
     // Add timestamp and ID
     const pricing = {
       ...pricingData,
@@ -6061,10 +6614,10 @@ const savePricing = async (pricingData: any) => {
       updatedAt: new Date(),
       isActive: pricingData.isActive !== undefined ? pricingData.isActive : true
     };
-    
+
     // Insert pricing data into MongoDB
     const result = await collection.insertOne(pricing);
-    
+
     console.log('💰 New pricing data saved to MongoDB:', {
       database: DB_NAME,
       collection: PRICING_COLLECTION_NAME,
@@ -6072,7 +6625,7 @@ const savePricing = async (pricingData: any) => {
       pricingName: pricing.name || 'Unnamed Pricing',
       isActive: pricing.isActive
     });
-    
+
     return {
       success: true,
       message: 'Pricing data saved to MongoDB database',
@@ -6081,7 +6634,7 @@ const savePricing = async (pricingData: any) => {
         ...pricing
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error saving pricing data to MongoDB:', error);
     return {
@@ -6097,18 +6650,18 @@ const updatePricing = async (pricingId: string, pricingData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(PRICING_COLLECTION_NAME);
-    
+
     // Update pricing data
     const updateData = {
       ...pricingData,
       updatedAt: new Date()
     };
-    
+
     let result;
     if (ObjectId.isValid(pricingId) && pricingId.length === 24) {
       result = await collection.updateOne(
@@ -6121,21 +6674,21 @@ const updatePricing = async (pricingId: string, pricingData: any) => {
         { $set: updateData }
       );
     }
-    
+
     if (result.matchedCount === 0) {
       return {
         success: false,
         error: 'Pricing data not found'
       };
     }
-    
+
     console.log('✅ Pricing data updated in MongoDB:', pricingId);
-    
+
     return {
       success: true,
       message: 'Pricing data updated successfully'
     };
-    
+
   } catch (error) {
     console.error('❌ Error updating pricing data in MongoDB:', error);
     return {
@@ -6151,33 +6704,33 @@ const deletePricing = async (pricingId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(PRICING_COLLECTION_NAME);
-    
+
     let result;
     if (ObjectId.isValid(pricingId) && pricingId.length === 24) {
       result = await collection.deleteOne({ _id: new ObjectId(pricingId) });
     } else {
       result = await collection.deleteOne({ pricingId: pricingId });
     }
-    
+
     if (result.deletedCount === 0) {
       return {
         success: false,
         error: 'Pricing data not found'
       };
     }
-    
+
     console.log('🗑️ Pricing data deleted from MongoDB:', pricingId);
-    
+
     return {
       success: true,
       message: 'Pricing data deleted successfully'
     };
-    
+
   } catch (error) {
     console.error('❌ Error deleting pricing data from MongoDB:', error);
     return {
@@ -6195,17 +6748,17 @@ const getAllCancelReasons = async () => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(CANCEL_REASONS_COLLECTION_NAME);
-    
+
     // Find all cancel reasons
     const cancelReasons = await collection.find({}).toArray();
-    
+
     console.log(`📝 Retrieved ${cancelReasons.length} cancel reasons from database`);
-    
+
     return {
       success: true,
       cancelReasons: cancelReasons,
@@ -6213,7 +6766,7 @@ const getAllCancelReasons = async () => {
       database: DB_NAME,
       collection: CANCEL_REASONS_COLLECTION_NAME
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting cancel reasons from MongoDB:', error);
     return {
@@ -6229,12 +6782,12 @@ const saveCancelReason = async (cancelReasonData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(CANCEL_REASONS_COLLECTION_NAME);
-    
+
     // Add timestamp and ID
     const cancelReason = {
       ...cancelReasonData,
@@ -6243,10 +6796,10 @@ const saveCancelReason = async (cancelReasonData: any) => {
       updatedAt: new Date(),
       isActive: cancelReasonData.isActive !== undefined ? cancelReasonData.isActive : true
     };
-    
+
     // Insert cancel reason into MongoDB
     const result = await collection.insertOne(cancelReason);
-    
+
     console.log('📝 New cancel reason saved to MongoDB:', {
       database: DB_NAME,
       collection: CANCEL_REASONS_COLLECTION_NAME,
@@ -6254,7 +6807,7 @@ const saveCancelReason = async (cancelReasonData: any) => {
       reason: cancelReason.reason || 'Unnamed Reason',
       isActive: cancelReason.isActive
     });
-    
+
     return {
       success: true,
       message: 'Cancel reason saved to MongoDB database',
@@ -6263,7 +6816,7 @@ const saveCancelReason = async (cancelReasonData: any) => {
         ...cancelReason
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error saving cancel reason to MongoDB:', error);
     return {
@@ -6279,18 +6832,18 @@ const updateCancelReason = async (reasonId: string, cancelReasonData: any) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(CANCEL_REASONS_COLLECTION_NAME);
-    
+
     // Update cancel reason data
     const updateData = {
       ...cancelReasonData,
       updatedAt: new Date()
     };
-    
+
     let result;
     if (ObjectId.isValid(reasonId) && reasonId.length === 24) {
       result = await collection.updateOne(
@@ -6303,21 +6856,21 @@ const updateCancelReason = async (reasonId: string, cancelReasonData: any) => {
         { $set: updateData }
       );
     }
-    
+
     if (result.matchedCount === 0) {
       return {
         success: false,
         error: 'Cancel reason not found'
       };
     }
-    
+
     console.log('✅ Cancel reason updated in MongoDB:', reasonId);
-    
+
     return {
       success: true,
       message: 'Cancel reason updated successfully'
     };
-    
+
   } catch (error) {
     console.error('❌ Error updating cancel reason in MongoDB:', error);
     return {
@@ -6333,33 +6886,33 @@ const deleteCancelReason = async (reasonId: string) => {
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(CANCEL_REASONS_COLLECTION_NAME);
-    
+
     let result;
     if (ObjectId.isValid(reasonId) && reasonId.length === 24) {
       result = await collection.deleteOne({ _id: new ObjectId(reasonId) });
     } else {
       result = await collection.deleteOne({ reasonId: reasonId });
     }
-    
+
     if (result.deletedCount === 0) {
       return {
         success: false,
         error: 'Cancel reason not found'
       };
     }
-    
+
     console.log('🗑️ Cancel reason deleted from MongoDB:', reasonId);
-    
+
     return {
       success: true,
       message: 'Cancel reason deleted successfully'
     };
-    
+
   } catch (error) {
     console.error('❌ Error deleting cancel reason from MongoDB:', error);
     return {
@@ -6375,21 +6928,21 @@ const getBookingsByDateAndTheater = async (date: string, theaterName?: string) =
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(COLLECTION_NAME);
-    
+
     // Build query filter
     const query: any = { date };
     if (theaterName) {
       query.theaterName = theaterName;
     }
-    
+
     // Only fetch bookings for the specific date (and theater if provided)
     const bookings = await collection.find(query).toArray();
-    
+
     // Decompress booking data
     const decompressedBookings = [];
     for (const booking of bookings) {
@@ -6414,13 +6967,13 @@ const getBookingsByDateAndTheater = async (date: string, theaterName?: string) =
         decompressedBookings.push(booking);
       }
     }
-    
+
     return {
       success: true,
       bookings: decompressedBookings,
       total: decompressedBookings.length
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting bookings by date and theater:', error);
     return {
@@ -6448,27 +7001,27 @@ const getIncompleteBookingsByDateAndTheater = async (date: string, theaterName?:
     if (!isConnected) {
       await connectToDatabase();
     }
-    
+
     if (!db) {
       throw new Error('Database not connected');
     }
     const collection = db.collection(INCOMPLETE_COLLECTION_NAME);
-    
+
     // Build query filter
     const query: any = { date };
     if (theaterName) {
       query.theaterName = theaterName;
     }
-    
+
     // Only fetch incomplete bookings for the specific date (and theater if provided)
     const incompleteBookings = await collection.find(query).toArray();
-    
+
     return {
       success: true,
       incompleteBookings,
       total: incompleteBookings.length
     };
-    
+
   } catch (error) {
     console.error('❌ Error getting incomplete bookings by date and theater:', error);
     return {

@@ -7,7 +7,8 @@ import {
   Calendar, 
   Mail, 
   HelpCircle, 
-  Tag
+  Tag,
+  List
 } from 'lucide-react';
 
 interface ManagementSidebarProps {
@@ -19,6 +20,7 @@ export default function ManagementSidebar({ isOpen }: ManagementSidebarProps) {
   const pathname = usePathname();
   const [activeItem, setActiveItem] = useState('Dashboard');
   const [currentDateBookingsCount, setCurrentDateBookingsCount] = useState(0);
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
 
   // Helper function to get current date in IST
   const getCurrentDateIST = () => {
@@ -44,35 +46,56 @@ export default function ManagementSidebar({ isOpen }: ManagementSidebarProps) {
     return bookingDateIST === currentDate;
   };
 
-  // Fetch current date bookings count
-  useEffect(() => {
-    const fetchCurrentDateBookingsCount = async () => {
-      try {
-        // Fetch ONLY confirmed bookings from database
-        const dbResponse = await fetch('/api/admin/bookings');
-        const dbData = await dbResponse.json();
-        
-        let currentDateCount = 0;
-        
-        if (dbData.success && dbData.bookings) {
-          currentDateCount = dbData.bookings.filter((booking: any) => 
-            isCurrentDateBooking(booking.date) && booking.status.toLowerCase() === 'confirmed'
-          ).length;
-        }
+  const fetchCurrentDateBookingsCount = async () => {
+    try {
+      const dbResponse = await fetch('/api/admin/bookings');
+      const dbData = await dbResponse.json();
 
-        setCurrentDateBookingsCount(currentDateCount);
-      } catch (error) {
-        console.error('Error fetching current date bookings count:', error);
+      let currentDateCount = 0;
+
+      if (dbData.success && dbData.bookings) {
+        currentDateCount = dbData.bookings.filter(
+          (booking: any) =>
+            isCurrentDateBooking(booking.date) && booking.status.toLowerCase() === 'confirmed',
+        ).length;
       }
+
+      setCurrentDateBookingsCount(currentDateCount);
+    } catch (error) {
+      console.error('Error fetching current date bookings count:', error);
+    }
+  };
+
+  const fetchPendingOrdersCount = async () => {
+    try {
+      const response = await fetch('/api/admin/orders?mode=count');
+      const data = await response.json();
+
+      if (data.success) {
+        const total = Number(data.total) || 0;
+        const readyCount = Number(data.byStatus?.ready) || 0;
+        const actionable = Math.max(total - readyCount, 0);
+        setPendingOrdersCount(actionable);
+      }
+    } catch (error) {
+      console.error('Error fetching pending orders count:', error);
+    }
+  };
+
+  useEffect(() => {
+    const refreshAll = () => {
+      fetchCurrentDateBookingsCount();
+      fetchPendingOrdersCount();
     };
 
-    fetchCurrentDateBookingsCount();
-    
-    // Refresh every 15 seconds for better responsiveness
-    const interval = setInterval(fetchCurrentDateBookingsCount, 15000);
-    
+    refreshAll();
+
+    const interval = setInterval(refreshAll, 15000);
+
     return () => clearInterval(interval);
   }, []);
+
+  const ordersLabel = `Orders (${pendingOrdersCount})`;
 
   const menuItems = [
     {
@@ -88,6 +111,13 @@ export default function ManagementSidebar({ isOpen }: ManagementSidebarProps) {
       icon: Calendar,
       path: '/management/bookings',
       badge: currentDateBookingsCount > 0 ? currentDateBookingsCount : null
+    },
+    {
+      id: 'orders',
+      label: ordersLabel,
+      icon: List,
+      path: '/management/orders',
+      badge: pendingOrdersCount > 0 ? pendingOrdersCount : null,
     },
     {
       id: 'history',

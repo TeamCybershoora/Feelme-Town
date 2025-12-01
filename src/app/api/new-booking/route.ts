@@ -7,7 +7,7 @@ import emailService from '@/lib/email-service';
 // Helper function to extract dynamic service items from request body
 function getDynamicServiceItems(body: any): Record<string, any> {
   const dynamicServiceItems: Record<string, any> = {};
-  
+
   // Look for all fields that start with "selected" and contain service items
   Object.keys(body).forEach(key => {
     if (key.startsWith('selected') && Array.isArray(body[key])) {
@@ -16,7 +16,7 @@ function getDynamicServiceItems(body: any): Record<string, any> {
       console.log(`📦 Dynamic service items found: ${key}:`, body[key]);
     }
   });
-  
+
   return dynamicServiceItems;
 }
 
@@ -24,78 +24,86 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Step 1: Get occasion details from database
+    // Step 1: Get occasion details from database (only if occasion is provided)
     console.log('OccasionData:', body.occasionData);
-    
-    const occasions = await database.getAllOccasions();
-    console.log('All occasions from DB:', occasions.map(o => ({ name: o.name, requiredFields: o.requiredFields })));
-    
-    const selectedOccasion = occasions.find(occ => occ.name === body.occasion);
-    console.log('Found occasion:', selectedOccasion);
-    
-    if (!selectedOccasion) {
-      console.log('Occasion not found in database');
-      return NextResponse.json({
-        success: false,
-        error: 'Occasion not found in database'
-      });
+    console.log('Occasion from body:', body.occasion);
+
+    let selectedOccasion = null;
+
+    // Only validate occasion if it's provided and not empty (decoration = Yes case)
+    if (body.occasion && typeof body.occasion === 'string' && body.occasion.trim() !== '') {
+      const occasions = await database.getAllOccasions();
+      console.log('All occasions from DB:', occasions.map(o => ({ name: o.name, requiredFields: o.requiredFields })));
+
+      selectedOccasion = occasions.find(occ => occ.name === body.occasion);
+      console.log('Found occasion:', selectedOccasion);
+
+      if (!selectedOccasion) {
+        console.log('Occasion not found in database');
+        return NextResponse.json({
+          success: false,
+          error: 'Occasion not found in database'
+        });
+      }
+    } else {
+      console.log('No occasion provided (decoration = No), skipping occasion validation');
     }
 
-    
-    
-    
+
+
+
 
     // Step 2: Process occasion-specific fields
-    
-    
-    
+
+
+
     const dynamicOccasionFields: any = {};
-    
-    if (body.occasionData && selectedOccasion.requiredFields) {
+
+    if (body.occasionData && selectedOccasion && selectedOccasion.requiredFields) {
       console.log('Processing occasionData:', body.occasionData);
       console.log('Required fields:', selectedOccasion.requiredFields);
-      
+
       selectedOccasion.requiredFields.forEach((dbFieldName: string) => {
-        
-        
+
+
         // Try multiple ways to find the field in frontend data
         let fieldValue = null;
         let foundKey = null;
-        
+
         // Method 1: Direct match
         if (body.occasionData[dbFieldName]) {
           fieldValue = body.occasionData[dbFieldName];
           foundKey = dbFieldName;
-          
+
         }
-        
+
         // Method 2: Check all keys in occasionData for partial matches
         if (!fieldValue) {
           const frontendKeys = Object.keys(body.occasionData);
-          
-          
+
+
           for (const frontendKey of frontendKeys) {
             // Method 2a: Exact match (case insensitive, space insensitive)
             if (frontendKey.toLowerCase().replace(/\s+/g, '') === dbFieldName.toLowerCase().replace(/\s+/g, '')) {
               fieldValue = body.occasionData[frontendKey];
               foundKey = frontendKey;
-              
+
               break;
             }
-            
+
             // Method 2b: Check if frontend key contains database field name words
             const dbWords = dbFieldName.toLowerCase().split(/\s+/);
             const frontendWords = frontendKey.toLowerCase().split(/\s+/);
-            
+
             if (dbWords.every(word => frontendWords.some(fWord => fWord.includes(word) || word.includes(fWord)))) {
               fieldValue = body.occasionData[frontendKey];
               foundKey = frontendKey;
-              
+
               break;
             }
           }
         }
-        
+
         // Method 3: Use the frontend key as database field name if no match found
         if (!fieldValue && body.occasionData) {
           const frontendKeys = Object.keys(body.occasionData);
@@ -106,20 +114,20 @@ export async function POST(request: NextRequest) {
               const frontendKey = frontendKeys[dbFieldIndex];
               fieldValue = body.occasionData[frontendKey];
               foundKey = frontendKey;
-              
+
             }
           }
         }
-        
+
         if (fieldValue && fieldValue.toString().trim()) {
           const trimmedValue = fieldValue.toString().trim();
           const fieldLabel = selectedOccasion.fieldLabels?.[dbFieldName] || dbFieldName;
-          
+
           // Save with exact database field name
           dynamicOccasionFields[dbFieldName] = trimmedValue;
           dynamicOccasionFields[`${dbFieldName}_label`] = fieldLabel;
           dynamicOccasionFields[`${dbFieldName}_value`] = trimmedValue;
-          
+
           console.log(`Added field ${dbFieldName} with value:`, trimmedValue);
         } else {
           console.log(`No value found for field ${dbFieldName}`);
@@ -127,41 +135,36 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    
+
 
     // Step 3: Use pricing from frontend (includes all services and calculations)
-    
+
     // Use the totalAmount calculated by frontend (includes theater + services + extra guests + discounts)
     const totalAmount = body.totalAmount || 0;
-    
+
     // Use advance payment and venue payment from frontend if provided, otherwise calculate
     const advancePayment = body.advancePayment || Math.round(totalAmount * 0.30); // 30% advance
     const venuePayment = body.venuePayment || (totalAmount - advancePayment);
 
-    
 
-    // Step 4: Generate booking ID
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const randomNum = Math.floor(Math.random() * 900000) + 100000;
-    const bookingId = `FMT-${year}-${month}${day}-003-${randomNum}-${Math.floor(Math.random() * 90) + 10}`;
 
-    
+    // Step 4: Generate booking ID using database helper so it stays sequential (FMT-YYYY-COUNTER)
+    const bookingId = await (database as any).generateBookingId?.();
+
+
 
     // Step 5: Get theater capacity from database
     let theaterCapacity = { min: 2, max: 10 }; // Default fallback
-    
+
     try {
       // Fetch theater data to get actual capacity
       const theaterResult = await database.getAllTheaters();
       if (theaterResult.success && theaterResult.theaters) {
-        const selectedTheater = theaterResult.theaters.find((theater: any) => 
+        const selectedTheater = theaterResult.theaters.find((theater: any) =>
           theater.name === body.theaterName ||
           theater.name.includes(body.theaterName.split(' ')[0]) // Match by first word
         );
-        
+
         if (selectedTheater && selectedTheater.capacity && selectedTheater.capacity.min && selectedTheater.capacity.max) {
           theaterCapacity = {
             min: selectedTheater.capacity.min,
@@ -175,10 +178,10 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.log('❌ [Booking API] Error fetching theater capacity:', error);
     }
-    
+
     // Calculate extra guests based on actual theater capacity
     const actualExtraGuests = Math.max(0, (body.numberOfPeople || theaterCapacity.min) - theaterCapacity.min);
-    
+
     // Build pricing snapshot: prefer frontend, else fetch from DB (Standard Pricing)
     let pricingSnapshot: any = body.pricingData || null;
     if (!pricingSnapshot) {
@@ -195,7 +198,7 @@ export async function POST(request: NextRequest) {
             decorationFees: Number(first.decorationFees ?? 0)
           };
         }
-      } catch {}
+      } catch { }
     }
 
     // Compute decoration fee explicitly like slotBookingFee (from snapshot)
@@ -206,7 +209,7 @@ export async function POST(request: NextRequest) {
       (Array.isArray((body as any).selectedExtraAddOns) && (body as any).selectedExtraAddOns.length > 0);
 
     const dropdownDecorationFee = Number((pricingSnapshot && pricingSnapshot.decorationFees) ?? body?.pricingData?.decorationFees ?? 0);
-    const decorationAppliedFee = dropdownDecorationFee; // persist the dropdown fee value unconditionally
+    const decorationAppliedFee = hasAnyDecoration ? dropdownDecorationFee : 0;
 
     // Step 6: Create complete booking data
     const completeBookingData = {
@@ -219,32 +222,32 @@ export async function POST(request: NextRequest) {
       date: body.date,
       time: body.time,
       occasion: body.occasion.trim(),
-      
+
       // Guest information (dynamic based on theater capacity)
       numberOfPeople: body.numberOfPeople || theaterCapacity.min,
       extraGuestsCount: actualExtraGuests,
       extraGuestCharges: body.extraGuestCharges || 0,
-      
+
       // Store theater capacity for reference
       theaterCapacity: theaterCapacity,
       baseCapacity: theaterCapacity.min,
-      
+
       // Pricing
       totalAmount: totalAmount,
       advancePayment: advancePayment,
       venuePayment: venuePayment,
       // Store slot booking fee explicitly (prefer snapshot, fallback to advancePayment)
       slotBookingFee: Number((pricingSnapshot && pricingSnapshot.slotBookingFee) ?? body?.pricingData?.slotBookingFee ?? advancePayment),
-      // Store the Decoration dropdown fee explicitly on every booking
-      decorationFee: dropdownDecorationFee,
+      // Store the Decoration dropdown fee only when customer opted for/selected decor
+      decorationFee: hasAnyDecoration ? dropdownDecorationFee : 0,
       appliedCouponCode: body.appliedCouponCode,
       couponDiscount: body.couponDiscount || 0,
-      
+
       // Store pricing data used at time of booking (snapshot)
-      pricingData: pricingSnapshot || body.pricingData || { },
+      pricingData: pricingSnapshot || body.pricingData || {},
       // Keep helper for invoice math/compat
-      decorationAppliedFee: decorationAppliedFee,
-      
+      decorationAppliedFee,
+
       // Status and metadata
       status: body.status || 'confirmed',
       bookingType: body.bookingType || 'online',
@@ -253,10 +256,10 @@ export async function POST(request: NextRequest) {
       createdBy: body.createdBy || 'Customer',
       isManualBooking: body.isManualBooking || false,
       createdAt: new Date(),
-      
+
       // Dynamic occasion fields (this is the key part!)
       ...dynamicOccasionFields,
-      
+
       // Dynamic service items (completely dynamic - no hardcoded fields!)
       ...getDynamicServiceItems(body)
     };
@@ -266,16 +269,16 @@ export async function POST(request: NextRequest) {
     console.log('Dynamic service items:', getDynamicServiceItems(body));
 
     // Step 6: Save to database
-    
+
     const result = await database.saveBooking(completeBookingData);
 
     if (result.success) {
-      
+
       // Manual bookings are now only stored in database, not in JSON files
       if (completeBookingData.isManualBooking || completeBookingData.status === 'manual') {
         console.log('✅ Manual booking saved to database only (no JSON file):', completeBookingData.bookingId);
       }
-      
+
       // Sync Excel records after new booking
       try {
         await fetch(`${request.nextUrl.origin}/api/admin/sync-excel-records`, {
@@ -294,7 +297,7 @@ export async function POST(request: NextRequest) {
       }
 
       const bookingForEmail = (result as any).booking || { id: bookingId, ...completeBookingData };
-      emailService.sendBookingConfirmed(bookingForEmail as any).catch(() => {});
+      emailService.sendBookingConfirmed(bookingForEmail as any).catch(() => { });
 
       // Best-effort: ensure auto-cleanup scheduler is started (non-blocking)
       try {
@@ -302,8 +305,8 @@ export async function POST(request: NextRequest) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'start' })
-        }).catch(() => {});
-      } catch {}
+        }).catch(() => { });
+      } catch { }
 
       return NextResponse.json({
         success: true,
@@ -315,7 +318,7 @@ export async function POST(request: NextRequest) {
         collection: (result as any).collection || 'booking'
       });
     } else {
-      
+
       return NextResponse.json({
         success: false,
         error: 'Failed to save booking to database'
@@ -323,7 +326,7 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    
+
     return NextResponse.json({
       success: false,
       error: 'Internal server error'

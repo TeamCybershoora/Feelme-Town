@@ -8,6 +8,15 @@ interface ServiceItem {
   name: string;
   imageUrl: string;
   price?: number;
+  // Pricing mode: single price, half/full, or three-size (small/medium/full)
+  pricingMode?: 'single' | 'half-full' | 'three-size';
+  halfPrice?: number;
+  fullPrice?: number;
+  smallPrice?: number;
+  mediumPrice?: number;
+  largePrice?: number;
+  // Simple text category (e.g. Starters, Main Course)
+  categoryName?: string;
   showTag?: boolean; // Individual item tag toggle
 }
 
@@ -21,6 +30,7 @@ interface Service {
   compulsory?: boolean;
   itemTagName?: string; // Name for the tag (e.g., "Popular", "Recommended", "Bestseller")
   itemTagEnabled?: boolean; // Whether to show tags on items
+  showInBookingPopup?: boolean;
   createdAt?: Date;
 }
 
@@ -32,18 +42,30 @@ export default function ServicesPage() {
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
+  const [openSettingsPanels, setOpenSettingsPanels] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; type?: 'service' | 'item'; serviceId?: string; service?: Service; itemId?: string }>({ show: false });
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('active');
   
   const [serviceName, setServiceName] = useState('');
   const [itemName, setItemName] = useState('');
   const [itemPrice, setItemPrice] = useState('');
+  const [itemPricingMode, setItemPricingMode] = useState<'single' | 'half-full' | 'three-size'>('single');
+  const [itemHalfPrice, setItemHalfPrice] = useState('');
+  const [itemFullPrice, setItemFullPrice] = useState('');
+  const [itemSmallPrice, setItemSmallPrice] = useState('');
+  const [itemMediumPrice, setItemMediumPrice] = useState('');
+  const [itemLargePrice, setItemLargePrice] = useState('');
+  const [itemCategoryName, setItemCategoryName] = useState('');
   const [imagePreview, setImagePreview] = useState<string>('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [savingTagName, setSavingTagName] = useState<string | null>(null);
   const [savedTagNames, setSavedTagNames] = useState<Set<string>>(new Set());
   const [editingTagName, setEditingTagName] = useState<string | null>(null);
+  const [allCategories, setAllCategories] = useState<string[]>([]);
+  const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
+  const [showCategoryPopup, setShowCategoryPopup] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
 
   useEffect(() => {
     fetchServices();
@@ -81,6 +103,7 @@ export default function ServicesPage() {
           compulsory: service.compulsory ?? false,
           itemTagName: service.itemTagName ?? '', // No default, use database value
           itemTagEnabled: service.itemTagEnabled ?? false,
+          showInBookingPopup: service.showInBookingPopup ?? true,
           items: (service.items || []).map((item: any) => ({
             ...item,
             showTag: item.showTag ?? false // Ensure showTag field exists for all items
@@ -88,6 +111,17 @@ export default function ServicesPage() {
         }));
         
         setServices(normalizedServices);
+        
+        // Build shared category list from all items
+        const categorySet = new Set<string>();
+        normalizedServices.forEach((svc: Service) => {
+          (svc.items || []).forEach((item) => {
+            if (item.categoryName && item.categoryName.trim()) {
+              categorySet.add(item.categoryName.trim());
+            }
+          });
+        });
+        setAllCategories(Array.from(categorySet).sort());
         
         // Track which services have existing tag names from database
         const servicesWithTagNames = new Set<string>();
@@ -220,6 +254,18 @@ export default function ServicesPage() {
     setSelectedService(service);
     setItemName('');
     setItemPrice('');
+    setItemPricingMode('single');
+    setItemHalfPrice('');
+    setItemFullPrice('');
+    setItemSmallPrice('');
+    setItemMediumPrice('');
+    setItemLargePrice('');
+
+    // If categories already exist, default to the first one so the item
+    // actually gets that category even if the user doesn't touch the dropdown.
+    const defaultCategory = allCategories.length > 0 ? allCategories[0] : '';
+    setItemCategoryName(defaultCategory);
+
     setImagePreview('');
     setSelectedImageFile(null);
     setShowAddItemPopup(true);
@@ -240,11 +286,40 @@ export default function ServicesPage() {
       setUploadingImage(true);
       const imageUrl = await uploadImageToCloudinary(selectedImageFile);
 
+      // Resolve pricing based on selected mode
+      let resolvedPrice: number | undefined = undefined;
+      let halfPrice: number | undefined = undefined;
+      let fullPrice: number | undefined = undefined;
+      let smallPrice: number | undefined = undefined;
+      let mediumPrice: number | undefined = undefined;
+      let largePrice: number | undefined = undefined;
+
+      if (itemPricingMode === 'half-full') {
+        halfPrice = itemHalfPrice ? parseFloat(itemHalfPrice) : undefined;
+        fullPrice = itemFullPrice ? parseFloat(itemFullPrice) : undefined;
+        resolvedPrice = fullPrice ?? halfPrice;
+      } else if (itemPricingMode === 'three-size') {
+        smallPrice = itemSmallPrice ? parseFloat(itemSmallPrice) : undefined;
+        mediumPrice = itemMediumPrice ? parseFloat(itemMediumPrice) : undefined;
+        largePrice = itemLargePrice ? parseFloat(itemLargePrice) : undefined;
+        // Use large > medium > small as fallback for the base price
+        resolvedPrice = largePrice ?? mediumPrice ?? smallPrice;
+      } else {
+        resolvedPrice = itemPrice ? parseFloat(itemPrice) : undefined;
+      }
+
       const newItem: ServiceItem = {
         id: `ITEM${Date.now()}`,
         name: itemName.trim(),
         imageUrl: imageUrl,
-        price: itemPrice ? parseFloat(itemPrice) : undefined,
+        price: resolvedPrice,
+        pricingMode: itemPricingMode,
+        halfPrice,
+        fullPrice,
+        smallPrice,
+        mediumPrice,
+        largePrice,
+        categoryName: itemCategoryName.trim() || undefined,
         showTag: false // Default to no tag for new items
       };
 
@@ -263,6 +338,13 @@ export default function ServicesPage() {
         setShowAddItemPopup(false);
         setItemName('');
         setItemPrice('');
+        setItemPricingMode('single');
+        setItemHalfPrice('');
+        setItemFullPrice('');
+        setItemSmallPrice('');
+        setItemMediumPrice('');
+        setItemLargePrice('');
+        setItemCategoryName('');
         setImagePreview('');
         setSelectedImageFile(null);
         fetchServices();
@@ -370,6 +452,66 @@ export default function ServicesPage() {
     setEditingService(service);
     setServiceName(service.name);
     setShowAddServicePopup(true);
+  };
+
+  const toggleSettingsPanel = (serviceId: string) => {
+    setOpenSettingsPanels((prev) => {
+      const next = new Set(prev);
+      if (next.has(serviceId)) {
+        next.delete(serviceId);
+      } else {
+        next.add(serviceId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleShowInBooking = async (service: Service) => {
+    try {
+      const currentValue = service.showInBookingPopup ?? true;
+      const newValue = !currentValue;
+
+      setServices((prev) =>
+        prev.map((s) =>
+          s._id === service._id
+            ? { ...s, showInBookingPopup: newValue }
+            : s,
+        ),
+      );
+
+      const response = await fetch(`/api/admin/services?id=${service._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ showInBookingPopup: newValue }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        showToast(
+          `Service will ${newValue ? '' : 'not '}show in booking popup`,
+          'success',
+        );
+        fetchServices();
+      } else {
+        setServices((prev) =>
+          prev.map((s) =>
+            s._id === service._id
+              ? { ...s, showInBookingPopup: currentValue }
+              : s,
+          ),
+        );
+        showToast(data.error || 'Failed to update service', 'error');
+      }
+    } catch (error) {
+      setServices((prev) =>
+        prev.map((s) =>
+          s._id === service._id
+            ? { ...s, showInBookingPopup: service.showInBookingPopup }
+            : s,
+        ),
+      );
+      showToast('Failed to update service', 'error');
+    }
   };
 
   const handleToggleDecoration = async (service: Service) => {
@@ -743,6 +885,34 @@ export default function ServicesPage() {
     }
   };
 
+  // Group items by category for admin view
+  const groupItemsByCategory = (items: ServiceItem[]) => {
+    if (!Array.isArray(items) || items.length === 0) {
+      return [] as { categoryKey: string; label: string; items: ServiceItem[] }[];
+    }
+
+    const map = new Map<string, { label: string; items: ServiceItem[] }>();
+
+    items.forEach((item) => {
+      const raw = item.categoryName;
+      const trimmed = raw?.trim();
+      const hasCategory = !!trimmed;
+      const key = hasCategory ? trimmed! : '__uncategorized__';
+      const label = hasCategory ? trimmed! : 'Other Items';
+
+      if (!map.has(key)) {
+        map.set(key, { label, items: [] });
+      }
+      map.get(key)!.items.push(item);
+    });
+
+    return Array.from(map.entries()).map(([categoryKey, value]) => ({
+      categoryKey,
+      label: value.label,
+      items: value.items,
+    }));
+  };
+
   if (loading) {
     return (
       <div className="services-page">
@@ -810,30 +980,25 @@ export default function ServicesPage() {
                 <span className="items-count">{service.items.length} items</span>
               </div>
               <div className="service-actions">
-                <label className="toggle-container">
-                  <input
-                    type="checkbox"
-                    checked={service.isActive}
-                    onChange={() => handleToggleActive(service)}
-                  />
-                  <span className="toggle-label">{service.isActive ? 'Active' : 'Inactive'}</span>
-                </label>
-                <label className="toggle-container">
-                  <input
-                    type="checkbox"
-                    checked={service.includeInDecoration || false}
-                    onChange={() => handleToggleDecoration(service)}
-                  />
-                  <span className="toggle-label">Include in Decoration</span>
-                </label>
-                <label className="toggle-container">
-                  <input
-                    type="checkbox"
-                    checked={service.compulsory || false}
-                    onChange={() => handleToggleCompulsory(service)}
-                  />
-                  <span className="toggle-label">Compulsory</span>
-                </label>
+                <button
+                  className="service-settings-btn"
+                  onClick={() => toggleSettingsPanel(service._id!)}
+                  style={{
+                    padding: '0.45rem 1rem',
+                    borderRadius: '24px',
+                    border: 'none',
+                    background: openSettingsPanels.has(service._id!) ? '#F2B365' : '#1E1E1E',
+                    color: openSettingsPanels.has(service._id!) ? '#111' : '#fff',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                    boxShadow: openSettingsPanels.has(service._id!)
+                      ? '0 10px 20px rgba(242, 179, 101, 0.35)'
+                      : '0 10px 20px rgba(0, 0, 0, 0.2)',
+                  }}
+                >
+                  {openSettingsPanels.has(service._id!) ? 'Hide Settings' : 'Show Settings'}
+                </button>
                 <div className="tag-control-container">
                   <label className="toggle-container">
                     <input
@@ -951,40 +1116,134 @@ export default function ServicesPage() {
               </div>
             </div>
 
+            {openSettingsPanels.has(service._id!) && (
+              <div className="service-toggle-panel">
+                <label className="toggle-container">
+                  <input
+                    type="checkbox"
+                    checked={service.isActive}
+                    onChange={() => handleToggleActive(service)}
+                  />
+                  <span className="toggle-label">{service.isActive ? 'Active' : 'Inactive'}</span>
+                </label>
+                <label className="toggle-container">
+                  <input
+                    type="checkbox"
+                    checked={service.includeInDecoration || false}
+                    onChange={() => handleToggleDecoration(service)}
+                  />
+                  <span className="toggle-label">Include in Decoration</span>
+                </label>
+                <label className="toggle-container">
+                  <input
+                    type="checkbox"
+                    checked={service.showInBookingPopup ?? true}
+                    onChange={() => handleToggleShowInBooking(service)}
+                  />
+                  <span className="toggle-label">Show in Booking Popup</span>
+                </label>
+                <label className="toggle-container">
+                  <input
+                    type="checkbox"
+                    checked={service.compulsory || false}
+                    onChange={() => handleToggleCompulsory(service)}
+                  />
+                  <span className="toggle-label">Compulsory</span>
+                </label>
+                <div className="toggle-container">
+                  <span className="toggle-label">Item Tags</span>
+                  <label className="toggle-container">
+                    <input
+                      type="checkbox"
+                      checked={service.itemTagEnabled || false}
+                      onChange={() => handleToggleServiceTag(service)}
+                    />
+                    <span className="toggle-label">Enable</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
             {expandedServices.has(service._id!) && (
-              <div className="items-grid">
-                {service.items.map((item) => (
-                  <div key={item.id} className="item-card">
-                    <div className="item-image">
-                      <img src={item.imageUrl} alt={item.name} />
-                      {service.itemTagEnabled && service.itemTagName && item.showTag && (
-                        <div className="item-tag">
-                          {service.itemTagName}
-                        </div>
-                      )}
+              <div className="items-by-category">
+                {groupItemsByCategory(service.items || []).map((group) => (
+                  <div key={group.categoryKey} className="category-section">
+                    <div className="category-heading">{group.label}</div>
+                    <div className="category-items-summary">
+                      This category has: {group.items.map((it) => it.name).join(', ')}
                     </div>
-                    <div className="item-info">
-                      <h4>{item.name}</h4>
-                      {item.price && <p className="item-price">₹{item.price}</p>}
-                      {service.itemTagEnabled && (
-                        <div className="item-tag-control">
-                          <label className="item-toggle-container">
-                            <input
-                              type="checkbox"
-                              checked={item.showTag || false}
-                              onChange={() => handleToggleItemTag(service, item.id)}
-                            />
-                            <span className="item-toggle-label">Show Tag</span>
-                          </label>
+                    <div className="items-grid">
+                      {group.items.map((item) => (
+                        <div key={item.id} className="item-card">
+                          <div className="item-image">
+                            <img src={item.imageUrl} alt={item.name} />
+                            {service.itemTagEnabled && service.itemTagName && item.showTag && (
+                              <div className="item-tag">
+                                {service.itemTagName}
+                              </div>
+                            )}
+                          </div>
+                          <div className="item-info">
+                            <h4>{item.name}</h4>
+                            <p className="item-price">
+                              {item.pricingMode === 'half-full' ? (
+                                <>
+                                  {item.halfPrice && (
+                                    <span>
+                                      Half: ₹{item.halfPrice}
+                                      {item.fullPrice && ' / '}
+                                    </span>
+                                  )}
+                                  {item.fullPrice && <span>Full: ₹{item.fullPrice}</span>}
+                                  {!item.halfPrice && !item.fullPrice && item.price && (
+                                    <span>₹{item.price}</span>
+                                  )}
+                                </>
+                              ) : item.pricingMode === 'three-size' ? (
+                                <>
+                                  {item.smallPrice && (
+                                    <span>
+                                      S: ₹{item.smallPrice}
+                                      {(item.mediumPrice || item.largePrice) && ' / '}
+                                    </span>
+                                  )}
+                                  {item.mediumPrice && (
+                                    <span>
+                                      M: ₹{item.mediumPrice}
+                                      {item.largePrice && ' / '}
+                                    </span>
+                                  )}
+                                  {item.largePrice && <span>F: ₹{item.largePrice}</span>}
+                                  {!item.smallPrice && !item.mediumPrice && !item.largePrice && item.price && (
+                                    <span>₹{item.price}</span>
+                                  )}
+                                </>
+                              ) : item.price ? (
+                                <span>₹{item.price}</span>
+                              ) : null}
+                            </p>
+                            {service.itemTagEnabled && (
+                              <div className="item-tag-control">
+                                <label className="item-toggle-container">
+                                  <input
+                                    type="checkbox"
+                                    checked={item.showTag || false}
+                                    onChange={() => handleToggleItemTag(service, item.id)}
+                                  />
+                                  <span className="item-toggle-label">Show Tag</span>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                          <button 
+                            className="item-delete-btn" 
+                            onClick={() => handleDeleteItemClick(service, item.id)}
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
-                      )}
+                      ))}
                     </div>
-                    <button 
-                      className="item-delete-btn" 
-                      onClick={() => handleDeleteItemClick(service, item.id)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
                   </div>
                 ))}
               </div>
@@ -1048,15 +1307,158 @@ export default function ServicesPage() {
                 />
               </div>
 
+              {/* Pricing Type: Single vs Half/Full vs Small/Medium/Full */}
               <div className="form-group">
-                <label>Price (Optional)</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  value={itemPrice}
-                  onChange={(e) => setItemPrice(e.target.value)}
-                  placeholder="e.g., 299"
-                />
+                <label>Pricing Type</label>
+                <div className="pricing-mode-toggle">
+                  <label>
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      value="single"
+                      checked={itemPricingMode === 'single'}
+                      onChange={() => setItemPricingMode('single')}
+                    />
+                    <span>Single Price</span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      value="half-full"
+                      checked={itemPricingMode === 'half-full'}
+                      onChange={() => setItemPricingMode('half-full')}
+                    />
+                    <span>Half / Full</span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      value="three-size"
+                      checked={itemPricingMode === 'three-size'}
+                      onChange={() => setItemPricingMode('three-size')}
+                    />
+                    <span>Small / Medium / Full</span>
+                  </label>
+                </div>
+              </div>
+
+              {itemPricingMode === 'single' && (
+                <div className="form-group">
+                  <label>Price (Optional)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={itemPrice}
+                    onChange={(e) => setItemPrice(e.target.value)}
+                    placeholder="e.g., 299"
+                  />
+                </div>
+              )}
+
+              {itemPricingMode === 'half-full' && (
+                <div className="form-group half-full-grid">
+                  <div>
+                    <label>Half Price</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={itemHalfPrice}
+                      onChange={(e) => setItemHalfPrice(e.target.value)}
+                      placeholder="e.g., 199"
+                    />
+                  </div>
+                  <div>
+                    <label>Full Price</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={itemFullPrice}
+                      onChange={(e) => setItemFullPrice(e.target.value)}
+                      placeholder="e.g., 349"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {itemPricingMode === 'three-size' && (
+                <div className="form-group half-full-grid">
+                  <div>
+                    <label>Small Price</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={itemSmallPrice}
+                      onChange={(e) => setItemSmallPrice(e.target.value)}
+                      placeholder="e.g., 199"
+                    />
+                  </div>
+                  <div>
+                    <label>Medium Price</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={itemMediumPrice}
+                      onChange={(e) => setItemMediumPrice(e.target.value)}
+                      placeholder="e.g., 249"
+                    />
+                  </div>
+                  <div>
+                    <label>Full Price</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={itemLargePrice}
+                      onChange={(e) => setItemLargePrice(e.target.value)}
+                      placeholder="e.g., 299"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Category selection for grouping food items */}
+              <div className="form-group">
+                <label>Category (Optional)</label>
+
+                {allCategories.length > 0 && (
+                  <div className="category-select-row">
+                    <select
+                      className="form-input"
+                      value={itemCategoryName}
+                      onChange={(e) => setItemCategoryName(e.target.value)}
+                    >
+                      {allCategories.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn-secondary small"
+                      onClick={() => {
+                        setShowCategoryPopup(true);
+                        setNewCategoryName('');
+                      }}
+                    >
+                      Add Category
+                    </button>
+                  </div>
+                )}
+
+                {allCategories.length === 0 && (
+                  <button
+                    type="button"
+                    className="btn-secondary small"
+                    onClick={() => {
+                      setShowCategoryPopup(true);
+                      setNewCategoryName('');
+                    }}
+                  >
+                    Add Category
+                  </button>
+                )}
               </div>
 
               <div className="form-group">
@@ -1106,6 +1508,65 @@ export default function ServicesPage() {
                   disabled={uploadingImage}
                 >
                   {uploadingImage ? 'Uploading...' : 'Add Item'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Category Popup */}
+      {showCategoryPopup && (
+        <div className="popup-overlay" onClick={() => setShowCategoryPopup(false)}>
+          <div
+            className="popup-content category-popup"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="popup-header">
+              <h2>Add Category</h2>
+              <button
+                className="close-btn"
+                onClick={() => setShowCategoryPopup(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="popup-body small-popup-body">
+              <div className="form-group">
+                <label>Category Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="e.g., Starters, Main Course, Drinks"
+                />
+              </div>
+              <div className="form-actions">
+                <button
+                  className="btn-secondary"
+                  onClick={() => setShowCategoryPopup(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    const trimmed = newCategoryName.trim();
+                    if (!trimmed) {
+                      showToast('Please enter category name', 'error');
+                      return;
+                    }
+                    setAllCategories((prev) =>
+                      prev.includes(trimmed)
+                        ? [...prev].sort()
+                        : [...prev, trimmed].sort(),
+                    );
+                    setItemCategoryName(trimmed);
+                    setShowCategoryPopup(false);
+                  }}
+                >
+                  Save Category
                 </button>
               </div>
             </div>
@@ -1398,6 +1859,33 @@ export default function ServicesPage() {
           color: white;
         }
 
+        .items-by-category {
+          margin-top: 1rem;
+          display: flex;
+          flex-direction: column;
+          gap: 1.25rem;
+        }
+
+        .category-section {
+          border-top: 1px dashed #e5e7eb;
+          padding-top: 1rem;
+        }
+
+        .category-heading {
+          font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+          font-size: 0.95rem;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: #111827;
+          margin-bottom: 0.15rem;
+        }
+
+        .category-items-summary {
+          font-size: 0.8rem;
+          color: #374151;
+          margin-bottom: 0.5rem;
+        }
+
         .items-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -1505,6 +1993,10 @@ export default function ServicesPage() {
           overflow-y: auto;
         }
 
+        .popup-content.category-popup {
+          max-width: 420px;
+        }
+
         .popup-header {
           display: flex;
           justify-content: space-between;
@@ -1536,6 +2028,10 @@ export default function ServicesPage() {
 
         .popup-body {
           padding: 1.5rem;
+        }
+
+        .popup-body.small-popup-body {
+          padding: 1.25rem 1.5rem 1.25rem 1.5rem;
         }
 
         .form-group {

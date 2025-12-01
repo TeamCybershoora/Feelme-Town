@@ -25,6 +25,7 @@ const Navbar = () => {
   // Hidden admin access - click logo 5 times
   const [logoClickCount, setLogoClickCount] = useState(0);
   const [lastLogoClickTime, setLastLogoClickTime] = useState(0);
+  const [showAdminStaffPopup, setShowAdminStaffPopup] = useState(false);
 
   const handleButtonClick = (buttonName: string) => {
     setActiveButton(buttonName);
@@ -71,12 +72,44 @@ const Navbar = () => {
     
     setLastLogoClickTime(currentTime);
     
-    // If 5 clicks within 3 seconds, redirect to admin
+    // If 5 clicks within 3 seconds, open role chooser / redirect
     if (logoClickCount >= 4) { // 4 because we just incremented
-      
-      router.push('/Administrator');
       setLogoClickCount(0); // Reset counter
+
+      // Check existing sessions
+      try {
+        const adminToken = typeof window !== 'undefined' ? localStorage.getItem('adminToken') : null;
+        const staffToken = typeof window !== 'undefined' ? localStorage.getItem('staffToken') : null;
+
+        // If admin already logged in, go directly to Administrator panel
+        if (adminToken === 'authenticated') {
+          router.push('/Administrator');
+          return;
+        }
+
+        // If staff already logged in, go directly to staff dashboard
+        if (staffToken === 'authenticated') {
+          router.push('/management/dashboard');
+          return;
+        }
+
+        // Otherwise show popup to choose Admin or Staff
+        setShowAdminStaffPopup(true);
+      } catch {
+        // On any error, just show the popup
+        setShowAdminStaffPopup(true);
+      }
     }
+  };
+
+  const handleSelectAdmin = () => {
+    setShowAdminStaffPopup(false);
+    router.push('/Administrator');
+  };
+
+  const handleSelectStaff = () => {
+    setShowAdminStaffPopup(false);
+    router.push('/management');
   };
 
   const toggleMobileMenu = () => {
@@ -454,6 +487,23 @@ const Navbar = () => {
           </div>
         </div>
       </div>
+
+      {showAdminStaffPopup && (
+        <div className="admin-staff-popup-overlay" onClick={() => setShowAdminStaffPopup(false)}>
+          <div className="admin-staff-popup" onClick={(e) => e.stopPropagation()}>
+            <h3>Select Portal</h3>
+            <p>Choose which panel you want to open.</p>
+            <div className="admin-staff-popup-buttons">
+              <button className="admin-btn" onClick={handleSelectAdmin}>
+                Admin
+              </button>
+              <button className="staff-btn" onClick={handleSelectStaff}>
+                Staff
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <style jsx>{`
         .navbar {
@@ -962,6 +1012,98 @@ const Navbar = () => {
         .mobile-cta-button span {
           position: relative;
           z-index: 2;
+        }
+        
+        .admin-staff-popup-overlay {
+          position: fixed;
+          inset: 0;
+          width: 100vw;
+          height: 100vh;
+          background:
+            radial-gradient(circle at top, rgba(239, 68, 68, 0.26), transparent 55%),
+            radial-gradient(circle at bottom, rgba(30, 64, 175, 0.45), transparent 55%),
+            rgba(0, 0, 0, 0.82);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000000;
+          backdrop-filter: blur(32px);
+        }
+
+        .admin-staff-popup {
+          position: relative;
+          background: radial-gradient(circle at top left, rgba(248, 250, 252, 0.12), transparent 55%),
+            rgba(15, 23, 42, 0.92);
+          border-radius: 20px;
+          padding: 2.1rem 2.4rem 2rem;
+          border: 1px solid rgba(148, 163, 184, 0.55);
+          box-shadow:
+            0 24px 60px rgba(0, 0, 0, 0.9),
+            inset 0 0 0 1px rgba(15, 23, 42, 0.8);
+          max-width: 380px;
+          width: 92%;
+          text-align: center;
+          color: #e5e7eb;
+          backdrop-filter: blur(36px);
+        }
+
+        .admin-staff-popup h3 {
+          margin: 0 0 0.75rem 0;
+          font-family: 'Paralucent-DemiBold', Arial, Helvetica, sans-serif;
+          font-size: 1.3rem;
+        }
+
+        .admin-staff-popup p {
+          margin: 0 0 1.5rem 0;
+          font-size: 0.9rem;
+          color: #9ca3af;
+        }
+
+        .admin-staff-popup-buttons {
+          display: flex;
+          gap: 0.85rem;
+          justify-content: center;
+        }
+
+        .admin-staff-popup-buttons button {
+          flex: 1;
+          padding: 0.75rem 1rem;
+          border-radius: 999px;
+          border: 1px solid rgba(148, 163, 184, 0.55);
+          font-family: 'Paralucent-Medium', Arial, Helvetica, sans-serif;
+          font-size: 0.9rem;
+          cursor: pointer;
+          transition: all 0.22s ease;
+          background: radial-gradient(circle at top, rgba(248, 250, 252, 0.18), transparent 60%),
+            rgba(15, 23, 42, 0.9);
+          color: #e5e7eb;
+          box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.9), 0 12px 30px rgba(15, 23, 42, 0.7);
+        }
+
+        .admin-btn {
+          background: linear-gradient(135deg, rgba(248, 113, 113, 0.15), rgba(239, 68, 68, 0.4)),
+            rgba(15, 23, 42, 0.9);
+          border-color: rgba(248, 113, 113, 0.7);
+        }
+
+        .admin-btn:hover {
+          transform: translateY(-1px) translateZ(0);
+          box-shadow: 0 14px 32px rgba(239, 68, 68, 0.65);
+          background: linear-gradient(135deg, rgba(248, 113, 113, 0.25), rgba(239, 68, 68, 0.55)),
+            rgba(15, 23, 42, 0.92);
+        }
+
+        .staff-btn {
+          background: linear-gradient(135deg, rgba(74, 222, 128, 0.15), rgba(34, 197, 94, 0.4)),
+            rgba(15, 23, 42, 0.9);
+          border-color: rgba(74, 222, 128, 0.7);
+        }
+
+        .staff-btn:hover {
+          transform: translateY(-1px) translateZ(0);
+          box-shadow: 0 14px 32px rgba(34, 197, 94, 0.6);
+          background: linear-gradient(135deg, rgba(74, 222, 128, 0.25), rgba(34, 197, 94, 0.55)),
+            rgba(15, 23, 42, 0.92);
         }
         
         .navbar-center {

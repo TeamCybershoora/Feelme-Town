@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/db-connect';
+import database from '@/lib/db-connect';
 
 // GET /api/cancel-reasons - Get cancel reasons from database
 export async function GET() {
   try {
     console.log('📋 Fetching cancel reasons from database...');
-    const database = await connectToDatabase();
     
     // Get cancel reasons from database
-    const cancelReasons = await (database as any).getAllCancelReasons();
-    
+    const result = await (database as any).getAllCancelReasons();
+
+    const cancelReasons = result && result.success
+      ? (result.cancelReasons || [])
+      : [];
+
     if (!cancelReasons || cancelReasons.length === 0) {
       console.log('⚠️ No cancel reasons found in database, returning defaults...');
       
@@ -77,10 +80,12 @@ export async function POST(request: Request) {
     const trimmedReason = reason.trim();
     console.log('📝 Adding new cancel reason to database:', trimmedReason);
 
-    const database = await connectToDatabase();
-    
     // Check if reason already exists
-    const existingReasons = await (database as any).getAllCancelReasons();
+    const existingResult = await (database as any).getAllCancelReasons();
+    const existingReasons = existingResult && existingResult.success
+      ? (existingResult.cancelReasons || [])
+      : [];
+
     const reasonExists = existingReasons.some(
       (item: any) => item.reason.toLowerCase() === trimmedReason.toLowerCase()
     );
@@ -139,7 +144,6 @@ export async function DELETE(request: Request) {
     }
 
     console.log('🗑️ Deleting cancel reason from database:', { id, reason });
-    const database = await connectToDatabase();
     
     // Delete from database
     const result = await (database as any).deleteCancelReason(id || reason);

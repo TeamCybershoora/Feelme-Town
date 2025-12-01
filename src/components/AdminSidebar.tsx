@@ -2,27 +2,27 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { 
-  LayoutDashboard, 
-  Calendar, 
-  Mail, 
-  HelpCircle, 
-  Users, 
-  Settings, 
-  Theater, 
-  List, 
-  FileText, 
-  Image, 
-  MessageSquare, 
-  Tag, 
-  Clock, 
-  Wrench, 
+import {
+  LayoutDashboard,
+  Calendar,
+  Mail,
+  HelpCircle,
+  Users,
+  Settings,
+  Theater,
+  List,
+  FileText,
+  Image,
+  MessageSquare,
+  Tag,
+  Clock,
+  Wrench,
   User,
   DollarSign,
   FileSpreadsheet,
   Edit,
   X,
-  ShieldCheck
+  ShieldCheck,
 } from 'lucide-react';
 
 interface AdminSidebarProps {
@@ -35,15 +35,16 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
   const [activeItem, setActiveItem] = useState('Dashboard');
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [currentDateBookingsCount, setCurrentDateBookingsCount] = useState(0);
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
 
   // Helper function to get current date in IST
   const getCurrentDateIST = () => {
     const now = new Date();
-    return now.toLocaleDateString('en-IN', { 
+    return now.toLocaleDateString('en-IN', {
       timeZone: 'Asia/Kolkata',
       year: 'numeric',
       month: '2-digit',
-      day: '2-digit'
+      day: '2-digit',
     });
   };
 
@@ -51,11 +52,11 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
   const isCurrentDateBooking = (bookingDate: string) => {
     if (!bookingDate) return false;
     const currentDate = getCurrentDateIST();
-    const bookingDateIST = new Date(bookingDate).toLocaleDateString('en-IN', { 
+    const bookingDateIST = new Date(bookingDate).toLocaleDateString('en-IN', {
       timeZone: 'Asia/Kolkata',
       year: 'numeric',
       month: '2-digit',
-      day: '2-digit'
+      day: '2-digit',
     });
     return bookingDateIST === currentDate;
   };
@@ -66,27 +67,27 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       try {
         const response = await fetch('/api/admin/requests');
         const data = await response.json();
-        
+
         if (data.success && data.requests) {
           const pendingCount = data.requests.filter((req: any) => req.status === 'pending').length;
           setPendingRequestsCount(pendingCount);
         }
       } catch (error) {
-        
+        // swallow
       }
     };
 
     const fetchCurrentDateBookingsCount = async () => {
       try {
-        // Fetch ONLY confirmed bookings from database
         const dbResponse = await fetch('/api/admin/bookings');
         const dbData = await dbResponse.json();
-        
+
         let currentDateCount = 0;
-        
+
         if (dbData.success && dbData.bookings) {
-          currentDateCount = dbData.bookings.filter((booking: any) => 
-            isCurrentDateBooking(booking.date) && booking.status.toLowerCase() === 'confirmed'
+          currentDateCount = dbData.bookings.filter(
+            (booking: any) =>
+              isCurrentDateBooking(booking.date) && booking.status.toLowerCase() === 'confirmed',
           ).length;
         }
 
@@ -96,15 +97,32 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       }
     };
 
-    fetchPendingRequestsCount();
-    fetchCurrentDateBookingsCount();
-    
-    // Refresh every 15 seconds for better responsiveness
-    const interval = setInterval(() => {
+    const fetchPendingOrdersCount = async () => {
+      try {
+        const response = await fetch('/api/admin/orders?mode=count');
+        const data = await response.json();
+
+        if (data.success) {
+          const total = Number(data.total) || 0;
+          const readyCount = Number(data.byStatus?.ready) || 0;
+          const actionable = Math.max(total - readyCount, 0);
+          setPendingOrdersCount(actionable);
+        }
+      } catch (error) {
+        console.error('Error fetching pending orders count:', error);
+      }
+    };
+
+    const refreshAll = () => {
       fetchPendingRequestsCount();
       fetchCurrentDateBookingsCount();
-    }, 15000);
-    
+      fetchPendingOrdersCount();
+    };
+
+    refreshAll();
+
+    const interval = setInterval(refreshAll, 15000);
+
     return () => clearInterval(interval);
   }, []);
 
@@ -131,6 +149,8 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
     };
   }, []);
 
+  const ordersLabel = `Orders (${pendingOrdersCount})`;
+
   const menuItems = [
     {
       id: 'dashboard',
@@ -152,6 +172,13 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       icon: Edit,
       path: '/Administrator/edit-booking-requests',
       badge: null
+    },
+    {
+      id: 'orders',
+      label: ordersLabel,
+      icon: List,
+      path: '/Administrator/orders',
+      badge: pendingOrdersCount > 0 ? pendingOrdersCount : null,
     },
     {
       id: 'support-mail',
@@ -203,6 +230,7 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       path: '/Administrator/history',
       badge: null
     },
+    
     {
       id: 'invoices',
       label: 'Invoices',

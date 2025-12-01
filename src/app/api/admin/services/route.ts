@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    const { name, items } = body;
+    const { name, items, showInBookingPopup } = body;
     
     if (!name) {
       return NextResponse.json(
@@ -65,7 +65,8 @@ export async function POST(request: NextRequest) {
     const serviceData = {
       name,
       items: items || [],
-      isActive: true
+      isActive: true,
+      showInBookingPopup: showInBookingPopup ?? true,
     };
 
     const result = await database.saveService(serviceData);
@@ -104,7 +105,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, items, isActive, includeInDecoration, compulsory, itemTagEnabled, itemTagName } = body;
+    const { name, items, isActive, includeInDecoration, compulsory, itemTagEnabled, itemTagName, showInBookingPopup } = body;
 
     console.log('🔄 PUT /api/admin/services - Received body:', body);
     console.log('🔍 includeInDecoration value:', includeInDecoration);
@@ -120,6 +121,7 @@ export async function PUT(request: NextRequest) {
     if (compulsory !== undefined) updateData.compulsory = compulsory;
     if (itemTagEnabled !== undefined) updateData.itemTagEnabled = itemTagEnabled;
     if (itemTagName !== undefined) updateData.itemTagName = itemTagName;
+    if (showInBookingPopup !== undefined) updateData.showInBookingPopup = showInBookingPopup;
     
     console.log('📦 updateData being sent to database:', updateData);
 

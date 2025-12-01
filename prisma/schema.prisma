@@ -14,6 +14,7 @@ datasource db {
 model CancelledBooking {
   id                   Int      @id @default(autoincrement())
   bookingId            String   @unique @map("booking_id") @db.VarChar(255)
+  ticketNumber         String?  @map("ticket_number") @db.VarChar(50)
   name                 String   @db.VarChar(255)
   email                String   @db.VarChar(255)
   phone                String?  @db.VarChar(20)
@@ -33,6 +34,7 @@ model CancelledBooking {
 
   @@map("cancelled_bookings")
   @@index([bookingId])
+  @@index([ticketNumber])
   @@index([email])
   @@index([bookingDate])
   @@index([cancelledAt])
@@ -42,6 +44,7 @@ model CancelledBooking {
 model CompletedBooking {
   id                   Int      @id @default(autoincrement())
   bookingId            String   @unique @map("booking_id") @db.VarChar(255)
+  ticketNumber         String   @unique @map("ticket_number") @db.VarChar(50)
   name                 String   @db.VarChar(255)
   email                String   @db.VarChar(255)
   phone                String?  @db.VarChar(20)
@@ -60,6 +63,7 @@ model CompletedBooking {
 
   @@map("completed_bookings")
   @@index([bookingId])
+  @@index([ticketNumber])
   @@index([email])
   @@index([bookingDate])
   @@index([completedAt])

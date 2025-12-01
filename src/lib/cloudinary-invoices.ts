@@ -30,12 +30,29 @@ export async function uploadInvoiceToCloudinary(
     // Use node-fetch explicitly in Node runtime
     const fetch = (await import('node-fetch')).default as unknown as typeof globalThis.fetch;
 
-    // Load Cloudinary settings from DB
-    const settings = await database.getSettings();
-    const cloudName = settings?.cloudinaryCloudName || '';
-    const apiKey = settings?.cloudinaryApiKey || '';
-    const apiSecret = settings?.cloudinaryApiSecret || '';
-    const baseFolder = settings?.cloudinaryFolder || 'feelmetown';
+    // Load Cloudinary settings from DB (preferred) and fall back to env vars
+    const settings = await database.getSettings().catch(() => null as any);
+
+    const cloudName =
+      settings?.cloudinaryCloudName ||
+      process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ||
+      process.env.CLOUDINARY_CLOUD_NAME ||
+      '';
+
+    const apiKey =
+      settings?.cloudinaryApiKey ||
+      process.env.CLOUDINARY_API_KEY ||
+      '';
+
+    const apiSecret =
+      settings?.cloudinaryApiSecret ||
+      process.env.CLOUDINARY_API_SECRET ||
+      '';
+
+    const baseFolder =
+      settings?.cloudinaryFolder ||
+      process.env.NEXT_PUBLIC_CLOUDINARY_FOLDER ||
+      'feelmetown';
     const folder = `${baseFolder.replace(/\/$/, '')}/invoices`;
 
     if (!cloudName || !apiKey || !apiSecret) {
