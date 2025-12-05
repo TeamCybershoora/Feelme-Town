@@ -436,6 +436,25 @@ export async function POST(request: NextRequest) {
               const deleteResult = await collection.deleteOne({ _id: expiredBooking.mongoId });
               if (deleteResult.deletedCount > 0) {
                 console.log(`✅ Auto-completed booking deleted from MongoDB: ${completedRecord.bookingId}`);
+
+                try {
+                  const orderCleanup = await (database as any).deleteOrdersByBookingReference?.({
+                    bookingId: completedRecord.bookingId,
+                    mongoBookingId: expiredBooking.mongoId?.toString?.(),
+                    ticketNumber: bookingData.ticketNumber,
+                  });
+                  if (orderCleanup?.success) {
+                    console.log(
+                      `🧹 Removed ${orderCleanup.deletedCount} order records for booking ${completedRecord.bookingId}`,
+                    );
+                  }
+                } catch (orderCleanupErr) {
+                  console.warn(
+                    '⚠️ Failed to cleanup order records for expired booking:',
+                    completedRecord.bookingId,
+                    orderCleanupErr,
+                  );
+                }
                 
                 // Increment completed counter
                 try {

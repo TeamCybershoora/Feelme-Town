@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Search, Filter } from 'lucide-react';
+import { RefreshCw, Search, Eye } from 'lucide-react';
+import { consumeOrderAlertDetail, type OrderAlertDetailPayload } from '@/lib/order-alert';
 
 interface OrderItem {
   id?: string;
@@ -18,6 +19,10 @@ interface OrderRecord {
   mongoBookingId?: string;
   ticketNumber?: string;
   customerName?: string;
+  theaterName?: string;
+  bookingDate?: string;
+  bookingTime?: string;
+  numberOfPeople?: number;
   serviceName?: string;
   serviceField?: string;
   canonicalField?: string;
@@ -34,9 +39,12 @@ interface OrderRecord {
   performedBy?: string;
   recordedAt?: string;
   createdAt?: string;
+  orderPrepMinutes?: number;
+  orderPrepReadyAt?: string;
 }
 
 const limitOptions = [50, 100, 200, 300, 500];
+const prepTimeOptions = [10, 15, 20];
 
 const currency = (value?: number) =>
   typeof value === 'number'
@@ -57,6 +65,50 @@ const formatTimestamp = (value?: string) => {
   });
 };
 
+const formatShortTime = (value?: string) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
+const formatDisplayDate = (value?: string) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  }
+  return value;
+};
+
+const formatTimeSlot = (value?: string) => {
+  if (!value) return '—';
+  if (/\d{1,2}:\d{2}\s*(AM|PM)\s*-\s*\d{1,2}:\d{2}\s*(AM|PM)/i.test(value)) {
+    return value.toUpperCase();
+  }
+  const match = value.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+  if (!match) return value;
+  const [, hours, minutes, period] = match;
+  let hour = parseInt(hours, 10);
+  const mins = minutes.padStart(2, '0');
+  let resolvedPeriod = period?.toUpperCase();
+  if (!resolvedPeriod) {
+    resolvedPeriod = hour >= 12 ? 'PM' : 'AM';
+    if (hour > 12) hour -= 12;
+    if (hour === 0) hour = 12;
+  }
+  return `${hour}:${mins} ${resolvedPeriod}`;
+};
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -70,22 +122,34 @@ export default function OrdersPage() {
   const [buttonLoading, setButtonLoading] = useState<Record<string, boolean>>({});
   const [viewDetailOpen, setViewDetailOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
-  const [pendingAlertOrder, setPendingAlertOrder] = useState<OrderRecord | null>(null);
-  const [pendingAlertOpen, setPendingAlertOpen] = useState(false);
-  const [dismissedTickets, setDismissedTickets] = useState<string[]>([]);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReasons, setCancelReasons] = useState<string[]>([]);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelNotes, setCancelNotes] = useState('');
   const [cancelLoading, setCancelLoading] = useState(false);
   const [modalActionLoading, setModalActionLoading] = useState(false);
+  const [prepModalOrder, setPrepModalOrder] = useState<OrderRecord | null>(null);
+  const [prepMinutesSelection, setPrepMinutesSelection] = useState<number>(15);
+  const [prepCustomMinutes, setPrepCustomMinutes] = useState('');
+  const [prepModalError, setPrepModalError] = useState('');
+  const [prepModalLoading, setPrepModalLoading] = useState(false);
+  const [prepModalAction, setPrepModalAction] = useState<'received' | 'ready'>('received');
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  const fetchOrders = async (silent = false) => {
+  useEffect(() => {
+    const detail = consumeOrderAlertDetail();
+    if (detail?.order) {
+      setSelectedOrder(detail.order as OrderRecord);
+      setViewDetailOpen(true);
+    }
+  }, []);
+
+  const fetchOrders = async (opts: { silent?: boolean } = {}) => {
+    const { silent = false } = opts;
     try {
       if (!silent) {
         setLoading(true);
@@ -96,7 +160,13 @@ export default function OrdersPage() {
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (serviceFilter) params.set('serviceName', serviceFilter);
 
-      const res = await fetch(`/api/admin/orders?${params.toString()}`, { cache: 'no-store' });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(`/api/admin/orders?${params.toString()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
       const data = await res.json();
 
       if (!res.ok || !data.success) {
@@ -104,6 +174,7 @@ export default function OrdersPage() {
       }
 
       const fetched = Array.isArray(data.orders) ? data.orders : [];
+
       setOrders(fetched);
       setButtonStates(() => {
         const next: Record<string, 'initial' | 'received' | 'ready'> = {};
@@ -111,6 +182,16 @@ export default function OrdersPage() {
           const ticket = order.ticketNumber;
           if (!ticket) return;
           const status = (order.status || '').toLowerCase();
+          const actionType = (order.actionType || '').toLowerCase();
+          const hasItems = Array.isArray(order.items) && order.items.length > 0;
+
+          // If a new modification with items was recorded after delivery (append/save),
+          // treat this as a fresh cycle so the button goes back to "Order Received".
+          if ((actionType === 'append' || actionType === 'save') && hasItems) {
+            next[ticket] = 'initial';
+            return;
+          }
+
           if (status === 'ready') {
             next[ticket] = 'ready';
           } else if (status === 'received' || status === 'placed') {
@@ -121,35 +202,96 @@ export default function OrdersPage() {
         });
         return next;
       });
+
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        console.warn('Orders fetch aborted (timeout)');
+        return;
+      }
       setError(err?.message || 'Unable to fetch orders');
     } finally {
-      setLoading(false);
+      if (!opts.silent) {
+        setLoading(false);
+      }
     }
   };
 
-  const handleNotify = async (order: OrderRecord) => {
+  const adjustCustomMinutes = (delta: number) => {
+    const currentValue = prepCustomMinutes.trim() ? Number(prepCustomMinutes) : prepMinutesSelection;
+    const safeCurrent = Number.isFinite(currentValue) && currentValue > 0 ? currentValue : 15;
+    const next = Math.max(1, Math.round(safeCurrent + delta));
+    setPrepCustomMinutes(String(next));
+    setPrepMinutesSelection(next);
+  };
+
+  const getSelectedPrepMinutes = () => {
+    if (prepCustomMinutes.trim()) {
+      const parsed = Number(prepCustomMinutes.trim());
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.round(parsed);
+      }
+      return null;
+    }
+    return prepMinutesSelection;
+  };
+
+  const openPrepModal = (order: OrderRecord, action: 'received' | 'ready' = 'received') => {
+    setPrepModalOrder(order);
+    setPrepModalAction(action);
+    setPrepMinutesSelection(order.orderPrepMinutes || 15);
+    setPrepCustomMinutes('');
+    setPrepModalError('');
+    setPrepModalLoading(false);
+  };
+
+  const closePrepModal = () => {
+    setPrepModalOrder(null);
+    setPrepModalError('');
+    setPrepCustomMinutes('');
+    setPrepModalLoading(false);
+  };
+
+  const performNotify = async (order: OrderRecord, nextAction: 'received' | 'ready', prepMinutes?: number) => {
     if (!order.ticketNumber) {
       alert('No ticket number associated with this order.');
       return;
     }
 
     const key = order.ticketNumber;
-    const stage = buttonStates[key] || 'initial';
-    const nextAction = stage === 'received' ? 'ready' : 'received';
-
     try {
       setButtonLoading((prev) => ({ ...prev, [key]: true }));
+      const payload: Record<string, any> = {
+        ticketNumber: order.ticketNumber,
+        status: nextAction,
+      };
+      if (typeof prepMinutes === 'number' && prepMinutes > 0) {
+        payload.prepMinutes = prepMinutes;
+      }
       const res = await fetch('/api/order-items/notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticketNumber: order.ticketNumber, status: nextAction }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to notify customer');
       }
       setButtonStates((prev) => ({ ...prev, [key]: nextAction === 'received' ? 'received' : 'ready' }));
+      setOrders((prev) =>
+        prev.map((item) =>
+          item.ticketNumber === order.ticketNumber
+            ? {
+                ...item,
+                status: nextAction,
+                orderPrepMinutes:
+                  typeof prepMinutes === 'number'
+                    ? prepMinutes
+                    : data.prepMinutes ?? item.orderPrepMinutes,
+                orderPrepReadyAt: data.prepReadyAt || item.orderPrepReadyAt,
+              }
+            : item,
+        ),
+      );
     } catch (err: any) {
       alert(err?.message || 'Failed to notify customer');
     } finally {
@@ -157,8 +299,50 @@ export default function OrdersPage() {
     }
   };
 
+  const handleNotifyClick = (order: OrderRecord) => {
+    if (!order.ticketNumber) {
+      alert('No ticket number associated with this order.');
+      return;
+    }
+    const key = order.ticketNumber;
+    const stage = buttonStates[key] || 'initial';
+    // Safety guard: once an order is marked ready (Delivered) or while a request is in flight,
+    // do not allow any further clicks to trigger actions.
+    if (buttonLoading[key] || stage === 'ready') {
+      return;
+    }
+    const nextAction = stage === 'received' ? 'ready' : 'received';
+
+    if (nextAction === 'received') {
+      openPrepModal(order, 'received');
+      return;
+    }
+
+    performNotify(order, 'ready');
+  };
+
+  const handlePrepSubmit = async () => {
+    if (!prepModalOrder) return;
+    const minutes = getSelectedPrepMinutes();
+    if (!minutes || minutes <= 0) {
+      setPrepModalError('Please choose or enter a valid number of minutes.');
+      return;
+    }
+    try {
+      setPrepModalLoading(true);
+      await performNotify(prepModalOrder, prepModalAction, minutes);
+      closePrepModal();
+    } finally {
+      setPrepModalLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchOrders(true);
+    fetchOrders({ silent: true });
+    const interval = setInterval(() => {
+      fetchOrders({ silent: true });
+    }, 2000);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, serviceFilter, limit]);
 
@@ -179,7 +363,7 @@ export default function OrdersPage() {
           <header className="orders-header">
             <div>
               <p className="orders-kicker">Operations</p>
-              <h1>Orders board</h1>
+              <h1>Orders Board</h1>
               <p className="orders-subtitle">Every service-specific item the team adds lands here in real time.</p>
             </div>
             <div className="header-actions">
@@ -229,8 +413,9 @@ export default function OrdersPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>Booking</th>
-                    <th>Service</th>
+                    <th>Customer</th>
+                    <th>Theater</th>
+                    <th>Time Slot</th>
                     <th>Items (Name · Qty · Price)</th>
                     <th>Subtotal</th>
                     <th>Action</th>
@@ -248,12 +433,16 @@ export default function OrdersPage() {
                   {orders.map((order) => (
                     <tr key={order._id || `${order.bookingId}-${order.ticketNumber}-${order.recordedAt}`}>
                       <td>
-                        <div className="table-title">{order.bookingId || '—'}</div>
+                        <div className="table-title">{order.customerName || '—'}</div>
                         <div className="table-sub">Ticket: {order.ticketNumber || '—'}</div>
                       </td>
                       <td>
-                        <div className="table-title">{order.serviceName || '—'}</div>
+                        <div className="table-title">{order.theaterName || order.serviceName || '—'}</div>
                         {order.performedBy && <div className="table-sub">By: {order.performedBy}</div>}
+                      </td>
+                      <td>
+                        <div className="table-title">{formatDisplayDate(order.bookingDate)}</div>
+                        <div className="table-sub">{formatTimeSlot(order.bookingTime)}</div>
                       </td>
                       <td>
                         <div className="items-pill-grid">
@@ -273,31 +462,39 @@ export default function OrdersPage() {
                           Invoice: {currency(order.totalAmountBefore)} → {currency(order.totalAmountAfter)}
                         </div>
                       </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="view-detail-button"
-                          onClick={() => {
-                            setSelectedOrder(order);
-                            setViewDetailOpen(true);
-                          }}
-                        >
-                          View Detail
-                        </button>
-                        <button
-                          type="button"
-                          className="notify-button"
-                          disabled={buttonLoading[order.ticketNumber || ''] || buttonStates[order.ticketNumber || ''] === 'ready'}
-                          onClick={() => handleNotify(order)}
-                        >
-                          {buttonLoading[order.ticketNumber || '']
-                            ? 'Sending…'
-                            : buttonStates[order.ticketNumber || ''] === 'received'
-                            ? 'Order Placed'
-                            : buttonStates[order.ticketNumber || ''] === 'ready'
-                            ? 'Notified'
-                            : 'Order Received'}
-                        </button>
+                      <td className="action-cell">
+                        <div className="action-buttons">
+                          <button
+                            type="button"
+                            className="view-detail-button"
+                            onClick={() => {
+                              setSelectedOrder(order);
+                              setViewDetailOpen(true);
+                            }}
+                          >
+                            <Eye size={14} style={{ marginRight: '6px', opacity: 0.7 }} />
+                            View Detail
+                          </button>
+                          <div className="action-stack">
+                            <button
+                              type="button"
+                              className={`notify-button ${buttonStates[order.ticketNumber || ''] || 'initial'}`}
+                              disabled={buttonLoading[order.ticketNumber || ''] || buttonStates[order.ticketNumber || ''] === 'ready'}
+                              onClick={() => handleNotifyClick(order)}
+                            >
+                              {buttonLoading[order.ticketNumber || '']
+                                ? 'Sending…'
+                                : buttonStates[order.ticketNumber || ''] === 'received'
+                                ? 'Order Placed'
+                                : buttonStates[order.ticketNumber || ''] === 'ready'
+                                ? 'Delivered'
+                                : 'Order Received'}
+                            </button>
+                            {order.orderPrepMinutes && (
+                              <div className="eta-pill">ETA: {order.orderPrepMinutes} min ({formatShortTime(order.orderPrepReadyAt) || 'soon'})</div>
+                            )}
+                          </div>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -336,8 +533,9 @@ export default function OrdersPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>Booking</th>
+                    <th>Customer</th>
                     <th>Service</th>
+                    <th>Time Slot</th>
                     <th>Items</th>
                     <th>Subtotal</th>
                   </tr>
@@ -346,10 +544,14 @@ export default function OrdersPage() {
                   {orders.map((order) => (
                     <tr key={`modal-${order._id || order.ticketNumber}`}>
                       <td>
-                        <div className="table-title">{order.bookingId || '—'}</div>
+                        <div className="table-title">{order.customerName || '—'}</div>
                         <div className="table-sub">Ticket: {order.ticketNumber || '—'}</div>
                       </td>
-                      <td>{order.serviceName || '—'}</td>
+                      <td>{order.theaterName || order.serviceName || '—'}</td>
+                      <td>
+                        <div>{formatDisplayDate(order.bookingDate)}</div>
+                        <div className="table-sub">{formatTimeSlot(order.bookingTime)}</div>
+                      </td>
                       <td>
                         {(order.items || []).map((item, index) => (
                           <div key={`${order._id || order.ticketNumber}-${index}`} className="item-pill">
@@ -377,9 +579,17 @@ export default function OrdersPage() {
           <div className="modal-header">
             <div>
               <p className="orders-kicker">Order detail</p>
-              <h2>Booking {selectedOrder.bookingId || '—'}</h2>
+              <h2>{selectedOrder.customerName || 'Customer'}</h2>
+              <div className="order-detail-tags">
+                <span className="tag theater-tag">{selectedOrder.theaterName || selectedOrder.serviceName || 'Theater'}</span>
+                {typeof selectedOrder.numberOfPeople === 'number' && selectedOrder.numberOfPeople > 0 && (
+                  <span className="people-circle" title={`${selectedOrder.numberOfPeople} guests`}>
+                    {selectedOrder.numberOfPeople}
+                  </span>
+                )}
+              </div>
               <p className="orders-subtitle">
-                Ticket: {selectedOrder.ticketNumber || '—'} • {selectedOrder.serviceName || '—'} • {(selectedOrder.items || []).length} items
+                Ticket: {selectedOrder.ticketNumber || '—'} • {(selectedOrder.items || []).length} items
               </p>
             </div>
             <button type="button" className="icon-button" onClick={() => setViewDetailOpen(false)}>×</button>
@@ -410,6 +620,76 @@ export default function OrdersPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {prepModalOrder && (
+      <div className="modal-backdrop">
+        <div className="prep-modal-card">
+          <div className="modal-header">
+            <div>
+              <p className="orders-kicker">Set prep time</p>
+              <h2>
+                {prepModalOrder.customerName || 'Customer'} • {prepModalOrder.ticketNumber}
+              </h2>
+              <p className="orders-subtitle">Tell the guest how long the kitchen needs before we email them.</p>
+            </div>
+            <button type="button" className="icon-button" onClick={closePrepModal}>
+              ×
+            </button>
+          </div>
+
+          <div className="prep-options">
+            {prepTimeOptions.map((minutes) => {
+              const selected = !prepCustomMinutes && prepMinutesSelection === minutes;
+              return (
+                <button
+                  key={minutes}
+                  type="button"
+                  className={`prep-chip ${selected ? 'prep-chip-active' : ''}`}
+                  onClick={() => {
+                    setPrepMinutesSelection(minutes);
+                    setPrepCustomMinutes('');
+                  }}
+                >
+                  {minutes} min
+                </button>
+              );
+            })}
+            <div className="prep-custom-input">
+              <label htmlFor="prep-custom">Custom minutes</label>
+              <div className="custom-input-shell">
+                <button type="button" className="stepper" onClick={() => adjustCustomMinutes(-5)} aria-label="Decrease prep minutes">
+                  −
+                </button>
+                <input
+                  id="prep-custom"
+                  type="number"
+                  min={1}
+                  placeholder="e.g. 25"
+                  value={prepCustomMinutes}
+                  onChange={(e) => {
+                    setPrepCustomMinutes(e.target.value);
+                  }}
+                />
+                <button type="button" className="stepper" onClick={() => adjustCustomMinutes(5)} aria-label="Increase prep minutes">
+                  +
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {prepModalError && <p className="prep-error">{prepModalError}</p>}
+
+          <div className="modal-actions">
+            <button type="button" className="secondary" onClick={closePrepModal} disabled={prepModalLoading}>
+              Cancel
+            </button>
+            <button type="button" className="primary" onClick={handlePrepSubmit} disabled={prepModalLoading}>
+              {prepModalLoading ? 'Sending…' : 'Send order received email'}
+            </button>
           </div>
         </div>
       </div>
@@ -448,10 +728,10 @@ export default function OrdersPage() {
       .view-orders-button {
         border: 1px solid #e5e7eb;
         background: #fff7ed;
-        color: #c2410c;
-        border-radius: 999px;
-        padding: 12px 20px;
+        color: #ff0000ff;
         font-weight: 600;
+        padding: 12px 24px;
+        border-radius: 999px;
         cursor: pointer;
       }
       .orders-header h1 {
@@ -626,7 +906,7 @@ export default function OrdersPage() {
         color: #475569;
       }
       .table-actions button {
-        border: 1px solid #e2e8f0;
+        border: 1px solid transparent;
         background: #f8fafc;
         color: #111827;
         border-radius: 999px;
@@ -718,6 +998,51 @@ export default function OrdersPage() {
         color: #6b7280;
         margin-top: 6px;
       }
+      .orders-subtitle {
+        font-size: 0.875rem;
+        color: #6b7280;
+        margin: 4px 0 0;
+      }
+      .order-detail-tags {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+        flex-wrap: wrap;
+      }
+      .order-detail-tags .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.35rem 0.85rem;
+        border-radius: 999px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      .theater-tag {
+        color: #fee2e2;
+        background: #b91c1c;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+      }
+      .people-tag {
+        color: #fff;
+        background: linear-gradient(120deg, rgba(59, 130, 246, 0.9), rgba(236, 72, 153, 0.65));
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      .people-circle {
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        color: #ffffff;
+        background: radial-gradient(circle at 30% 30%, rgba(59, 130, 246, 0.95), rgba(99, 102, 241, 0.85));
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+      }
       .items-table {
         display: flex;
         flex-direction: column;
@@ -748,6 +1073,172 @@ export default function OrdersPage() {
         padding: 10px 26px;
         cursor: pointer;
       }
+      .prep-modal-card {
+        width: 100%;
+        max-width: 540px;
+        border-radius: 32px;
+        border: 1px solid #e5e7eb;
+        background: #ffffff;
+        color: #111827;
+        padding: 32px;
+        box-shadow: 0 30px 70px rgba(15, 23, 42, 0.2);
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+      .prep-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .prep-chip {
+        border-radius: 999px;
+        border: 1px solid #e2e8f0;
+        padding: 10px 18px;
+        background: #f1f5f9;
+        font-weight: 700;
+        color: #0f172a;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease, border 0.15s ease;
+      }
+      .prep-chip-active {
+        background: #111827;
+        color: #ffffff;
+        border-color: #111827;
+      }
+      .prep-custom-input {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1;
+        min-width: 140px;
+      }
+      .custom-input-shell {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: #0f172a;
+        border-radius: 16px;
+        padding: 6px 10px;
+        border: 1px solid #111827;
+      }
+      .prep-custom-input input {
+        border-radius: 12px;
+        border: none;
+        padding: 10px 12px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #f8fafc;
+        background: transparent;
+        width: 100%;
+      }
+      .prep-custom-input input::placeholder {
+        color: rgba(248, 250, 252, 0.6);
+      }
+      .stepper {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: none;
+        background: #020617;
+        color: #f8fafc;
+        font-size: 20px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: inset 0 0 0 1px rgba(248, 250, 252, 0.08);
+      }
+      .stepper:hover {
+        background: #111827;
+      }
+      .prep-error {
+        color: #b91c1c;
+        font-size: 13px;
+      }
+      .action-cell {
+        text-align: right;
+      }
+      .action-buttons {
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-end;
+        gap: 12px;
+      }
+      .action-stack {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+        min-width: 160px;
+      }
+      .view-detail-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 0.5px solid rgba(15, 23, 42, 0.3);
+        background: transparent;
+        color: rgba(15, 23, 42, 0.8);
+        font-weight: 500;
+        padding: 9px 18px 9px 14px;
+        border-radius: 999px;
+        box-shadow: none;
+        cursor: pointer;
+        white-space: nowrap;
+        margin-top: 2px;
+        transition: all 0.2s ease;
+      }
+      .view-detail-button:hover {
+        background: rgba(15, 23, 42, 0.05);
+      }
+      .notify-button {
+        margin-top: 0;
+        min-width: 160px;
+        border-radius: 999px;
+        padding: 10px 22px;
+        font-weight: 600;
+        font-size: 13px;
+        color: #ffffff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        cursor: pointer;
+        background: linear-gradient(90deg, #fe8c00, #f83600);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      .notify-button.initial {
+        background: linear-gradient(90deg, #f97316, #ea580c);
+      }
+      .notify-button.received {
+        background: linear-gradient(90deg, #fb923c, #f97316);
+        box-shadow: 0 18px 35px rgba(249, 115, 22, 0.35);
+      }
+      .notify-button.ready {
+        background: linear-gradient(90deg, #22c55e, #16a34a);
+        box-shadow: 0 18px 35px rgba(34, 197, 94, 0.35);
+      }
+      .notify-button:hover {
+        transform: translateY(-1px);
+      }
+      .notify-button:disabled,
+      .notify-button.ready:disabled {
+        background: #9ca3af;
+        box-shadow: none;
+        cursor: not-allowed;
+        transform: none;
+        opacity: 0.8;
+      }
+      .eta-pill {
+        margin-top: 8px;
+        font-size: 11px;
+        color: #92400e;
+        background: rgba(254, 215, 170, 0.6);
+        border-radius: 999px;
+        padding: 4px 10px;
+        display: inline-block;
+      }
       @media (max-width: 768px) {
         .orders-header {
           flex-direction: column;
@@ -767,29 +1258,6 @@ export default function OrdersPage() {
         to {
           transform: rotate(360deg);
         }
-      }
-      .notify-button {
-        border: none;
-        border-radius: 999px;
-        padding: 10px 18px;
-        font-weight: 600;
-        cursor: pointer;
-        background: linear-gradient(90deg, #f97316, #fb923c);
-        color: #fff;
-        min-width: 140px;
-      }
-      .view-detail-button {
-        border: 1px solid #e5e7eb;
-        border-radius: 999px;
-        padding: 10px 16px;
-        font-weight: 600;
-        background: #f9fafb;
-        color: #111827;
-        margin-right: 8px;
-      }
-      .notify-button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
       }
       .modal-body {
         margin-top: 16px;

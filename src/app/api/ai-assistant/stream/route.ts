@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { generateLocalResponse, streamResponse } from '@/lib/local-ai-responder';
 
 export async function POST(request: NextRequest) {
   try {
@@ -7,21 +8,16 @@ export async function POST(request: NextRequest) {
       return new NextResponse(JSON.stringify({ success: false, error: 'Message is required' }), { status: 400 });
     }
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      console.error('❌ OpenRouter API key not found in environment variables');
-      return new NextResponse(JSON.stringify({ success: false, error: 'OpenRouter API key not configured' }), { status: 500 });
-    }
-
-    const modelName = process.env.OPENROUTER_MODEL || 'meituan/longcat-flash-chat:free';
     const siteUrl = process.env.SITE_URL || 'http://localhost:3000';
+    const useLocalAI = process.env.USE_LOCAL_AI === 'true' || !process.env.OPENROUTER_API_KEY;
     
-    console.log('🤖 Stream API using model:', modelName);
-    console.log('🔑 API Key present:', !!apiKey);
     console.log('📝 Message received:', message);
+    console.log('🤖 Using Local AI:', useLocalAI);
 
     // Fetch AI Memory data directly from JSON files
-    let aiMemoryData = '';
+    let aiMemory: any = null;
+    let systemInfo: any = null;
+    
     try {
       console.log('🧠 Loading AI Memory from JSON files...');
       
@@ -30,13 +26,99 @@ export async function POST(request: NextRequest) {
       if (memoryResponse.ok) {
         const memoryResult = await memoryResponse.json();
         if (memoryResult.success) {
-          aiMemoryData = formatMemoryForAI(memoryResult.memory);
+          aiMemory = memoryResult.memory;
           console.log('✅ AI Memory loaded from JSON files');
         }
       }
+      
+      // Fetch system info for contact details - CRITICAL for contact requests
+      const systemInfoResponse = await fetch(`${siteUrl}/api/ai-system-info`);
+      if (systemInfoResponse.ok) {
+        const systemInfoResult = await systemInfoResponse.json();
+        console.log('🔍 System info API raw response:', JSON.stringify(systemInfoResult, null, 2));
+        if (systemInfoResult.success && systemInfoResult.systemInfo) {
+          systemInfo = systemInfoResult.systemInfo;
+          console.log('✅ System info loaded successfully:', {
+            phone: systemInfo.sitePhone,
+            whatsapp: systemInfo.siteWhatsapp,
+            email: systemInfo.siteEmail,
+            address: systemInfo.siteAddress,
+            siteName: systemInfo.siteName
+          });
+        } else {
+          console.warn('⚠️ System info response success but no systemInfo data:', systemInfoResult);
+        }
+      } else {
+        const errorText = await systemInfoResponse.text().catch(() => 'Unknown error');
+        console.error('❌ System info API response not ok:', systemInfoResponse.status, errorText);
+      }
     } catch (error) {
-      console.error('❌ Failed to load AI Memory:', error);
+      console.error('❌ Failed to load AI Memory or System Info:', error);
     }
+
+    // Use Local AI if enabled or if OpenRouter API key is not available
+    if (useLocalAI) {
+      console.log('🤖 Using Local AI Responder...');
+      
+      const localResponse = await generateLocalResponse(message, aiMemory || {}, systemInfo);
+      
+      // Stream the response character by character
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          const words = localResponse.split(' ');
+          let currentText = '';
+          
+          for (let i = 0; i < words.length; i++) {
+            currentText += (currentText ? ' ' : '') + words[i];
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: currentText + (i < words.length - 1 ? ' ' : '') })}\n\n`));
+            
+            // Small delay to simulate typing
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+          
+          controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+          controller.close();
+        }
+      });
+      
+      return new NextResponse(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        }
+      });
+    }
+
+    // Fallback to OpenRouter if API key is available
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      console.error('❌ OpenRouter API key not found');
+      // Use local AI as fallback
+      const localResponse = await generateLocalResponse(message, aiMemory || {}, systemInfo);
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: localResponse })}\n\n`));
+          controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+          controller.close();
+        }
+      });
+      return new NextResponse(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        }
+      });
+    }
+
+    const modelName = process.env.OPENROUTER_MODEL || 'meituan/longcat-flash-chat:free';
+    console.log('🤖 Stream API using model:', modelName);
+    console.log('🔑 API Key present:', !!apiKey);
+    
+    const aiMemoryData = await formatMemoryForAI(aiMemory || {});
 
     const systemPrompt = `You are Ankit, a warm-hearted, emotionally connected receptionist at FeelME Town theater who genuinely cares about customers.
 
@@ -116,11 +198,57 @@ Remember: You're not just answering questions, you're helping create magical mom
     if (!openRouterResponse.ok) {
       const errorText = await openRouterResponse.text();
       console.error('❌ OpenRouter API Error:', openRouterResponse.status, errorText);
+      
+      // Handle 429 rate limit errors specifically
+      if (openRouterResponse.status === 429) {
+        // Fetch contact info from system settings for rate limit message
+        let contactPhone = 'Contact us';
+        let contactWhatsApp = 'Contact us';
+        let contactEmail = 'Contact us';
+        let contactAddress = 'Contact us';
+        
+        try {
+          const systemInfoResponse = await fetch(`${siteUrl}/api/ai-system-info`);
+          if (systemInfoResponse.ok) {
+            const systemInfoResult = await systemInfoResponse.json();
+            if (systemInfoResult.success && systemInfoResult.systemInfo) {
+              contactPhone = systemInfoResult.systemInfo.sitePhone || contactPhone;
+              contactWhatsApp = systemInfoResult.systemInfo.siteWhatsapp || contactWhatsApp;
+              contactEmail = systemInfoResult.systemInfo.siteEmail || contactEmail;
+              contactAddress = systemInfoResult.systemInfo.siteAddress || contactAddress;
+            }
+          }
+        } catch (fetchError) {
+          console.error('Failed to fetch contact info for rate limit:', fetchError);
+        }
+        
+        // Return a stream with a friendly rate limit message including contact info
+        const rateLimitMessage = `Sorry yaar! 😅 Abhi thoda busy hai AI service (rate limit). Thoda wait karke phir se try karo ya phir contact karo - main manually help kar sakta hun!\n\n📞 Phone: ${contactPhone}\n💬 WhatsApp: ${contactWhatsApp}\n📧 Email: ${contactEmail}\n📍 Address: ${contactAddress}`;
+        
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: rateLimitMessage })}\n\n`));
+            controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+            controller.close();
+          }
+        });
+        
+        return new NextResponse(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          }
+        });
+      }
+      
+      // For other errors, return JSON error
       return new NextResponse(JSON.stringify({ 
         success: false, 
         error: 'AI service error',
         details: errorText
-      }), { status: 500 });
+      }), { status: openRouterResponse.status });
     }
 
     // Create a readable stream
@@ -190,20 +318,38 @@ Remember: You're not just answering questions, you're helping create magical mom
   }
 }
 
-function formatMemoryForAI(memory: any): string {
+async function formatMemoryForAI(memory: any): Promise<string> {
   let formattedMemory = '';
   
-  // Extract contact details from FAQ first
-  let contactPhone = '+91 9870691784';
-  let contactWhatsApp = '+91 9520936655';
+  // Fetch contact details from system settings API (not hardcoded)
+  let contactPhone = 'Contact us'; // Will be fetched from DB
+  let contactWhatsApp = 'Contact us'; // Will be fetched from DB
   
-  if (memory.faq?.faq?.length > 0) {
-    const bookingFAQ = memory.faq.faq.find((faq: any) => faq.id === 'booking-process');
-    if (bookingFAQ && bookingFAQ.answer) {
-      const phoneMatch = bookingFAQ.answer.match(/\+91\s?9870691784/);
-      const whatsappMatch = bookingFAQ.answer.match(/\+91\s?9520936655/);
-      if (phoneMatch) contactPhone = phoneMatch[0];
-      if (whatsappMatch) contactWhatsApp = whatsappMatch[0];
+  try {
+    const siteUrl = process.env.SITE_URL || 'http://localhost:3000';
+    const systemInfoResponse = await fetch(`${siteUrl}/api/ai-system-info`);
+    if (systemInfoResponse.ok) {
+      const systemInfoResult = await systemInfoResponse.json();
+      if (systemInfoResult.success && systemInfoResult.systemInfo) {
+        contactPhone = systemInfoResult.systemInfo.sitePhone || contactPhone;
+        contactWhatsApp = systemInfoResult.systemInfo.siteWhatsapp || contactWhatsApp;
+        console.log('✅ Contact info fetched from system settings:', { contactPhone, contactWhatsApp });
+      }
+    }
+  } catch (error) {
+    console.error('⚠️ Failed to fetch system settings, using fallback:', error);
+    // Try to extract from FAQ as secondary fallback
+    if (memory.faq?.faq?.length > 0) {
+      const bookingFAQ = memory.faq.faq.find((faq: any) => faq.id === 'booking-process');
+      if (bookingFAQ && bookingFAQ.answer) {
+        const phoneMatch = bookingFAQ.answer.match(/\+91\s?\d{10}/);
+        const whatsappMatch = bookingFAQ.answer.match(/\+91\s?\d{10}/g);
+        if (phoneMatch) contactPhone = phoneMatch[0];
+        if (whatsappMatch && whatsappMatch.length > 1) contactWhatsApp = whatsappMatch[1];
+        else if (whatsappMatch && whatsappMatch.length === 1 && whatsappMatch[0] !== phoneMatch[0]) {
+          contactWhatsApp = whatsappMatch[0];
+        }
+      }
     }
   }
   

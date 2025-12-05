@@ -1,12 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/useToast';
 import ToastContainer from '@/components/ToastContainer';
 import { Mail, Send, Reply, Archive, Trash2, Globe, Phone, MessageSquare, X } from 'lucide-react';
 
 export default function SupportPage() {
   const { showSuccess, showError, toasts, removeToast } = useToast();
+  const [contactPhone, setContactPhone] = useState<string>('');
+  const [contactWhatsApp, setContactWhatsApp] = useState<string>('');
+
+  useEffect(() => {
+    const fetchContactInfo = async () => {
+      try {
+        const response = await fetch('/api/ai-system-info');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.systemInfo) {
+            setContactPhone(data.systemInfo.sitePhone || '');
+            setContactWhatsApp(data.systemInfo.siteWhatsapp || '');
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch contact info:', error);
+      }
+    };
+    fetchContactInfo();
+  }, []);
   const [emails] = useState([
     {
       id: 1,
@@ -211,17 +231,19 @@ export default function SupportPage() {
                 <Globe size={16} /> Website
               </a>
               <a
-                href="tel:+919520936655"
+                href={contactPhone ? `tel:${contactPhone.replace(/[^\d]/g, '')}` : '#'}
                 className="action-btn"
                 style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-                title="Call Cybershoora"
+                title="Call Support"
+                onClick={(e) => !contactPhone && e.preventDefault()}
               >
                 <Phone size={16} /> Call
               </a>
               <a
-                href="https://wa.me/919520936655"
+                href={contactWhatsApp ? `https://wa.me/${contactWhatsApp.replace(/[^\d]/g, '')}` : '#'}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => !contactWhatsApp && e.preventDefault()}
                 className="action-btn"
                 style={{ display: 'flex', alignItems: 'center', gap: 8 }}
                 title="WhatsApp Cybershoora"

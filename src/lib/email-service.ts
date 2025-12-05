@@ -48,10 +48,39 @@ const renderOccasionDetails = (bookingData: Record<string, any>) => {
   }
 };
 
+const formatPrepReadyTime = (readyAt?: string) => {
+  if (!readyAt) return '';
+  try {
+    return new Date(readyAt).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+};
+
+const describePrepEta = (bookingData: BookingData) => {
+  if (!bookingData.orderPrepMinutes) return '';
+  const estimatedReadyTime = formatPrepReadyTime(bookingData.orderPrepReadyAt);
+  return ` It should be ready in approximately ${bookingData.orderPrepMinutes} minutes${
+    estimatedReadyTime ? ` (around ${estimatedReadyTime})` : ''
+  }.`;
+};
+
 const buildOrderStatusEmail = (
   bookingData: BookingData,
   options: { title: string; message: string; ctaLabel: string; trackUrl: string; badge: string },
-) => `
+) => {
+  const hasPrepEstimate = Boolean(bookingData.orderPrepMinutes);
+  const estimatedReadyTime = formatPrepReadyTime(bookingData.orderPrepReadyAt);
+  const prepCopy = hasPrepEstimate
+    ? `Your food should be ready in approximately <strong>${bookingData.orderPrepMinutes} minutes</strong>${
+        estimatedReadyTime ? ` (around ${estimatedReadyTime})` : ''
+      }.`
+    : '';
+
+  return `
   <!DOCTYPE html>
   <html>
     <head>
@@ -61,9 +90,11 @@ const buildOrderStatusEmail = (
         body { background:#0b0b0b; color:#fff; font-family: 'Inter', Arial, sans-serif; margin:0; padding:0; }
         .wrapper { max-width:640px; margin:0 auto; padding:32px 20px; }
         .card { background:#111; border-radius:20px; padding:28px; border:1px solid #1f1f1f; box-shadow:0 20px 50px rgba(0,0,0,0.4); }
-        .title { font-size:24px; font-weight:700; margin-bottom:8px; }
+        .title { font-size:24px; font-weight:700; margin-bottom:8px; color:#ffffff; }
         .badge { display:inline-block; margin-bottom:14px; padding:6px 14px; border-radius:999px; font-size:12px; letter-spacing:0.1em; background:#f87171; color:#0b0b0b; font-weight:700; }
         .sub { color:#bbb; font-size:14px; line-height:1.7; }
+        .eta-card { margin-top:18px; padding:16px; border-radius:16px; background:#0f172a; border:1px solid rgba(248, 181, 0, 0.45); color:#fef3c7; font-size:14px; line-height:1.6; }
+        .eta-card strong { color:#fde047; }
         .ticket { margin:22px 0; padding:18px; border-radius:18px; background:linear-gradient(135deg,#e50914,#b20710); text-align:center; font-size:20px; letter-spacing:0.32em; font-weight:800; }
         .cta { display:inline-block; margin-top:22px; padding:14px 28px; border-radius:999px; background:#f2b365; color:#000; text-decoration:none; font-weight:700; }
         .footer { text-align:center; margin-top:26px; color:#888; font-size:12px; }
@@ -75,6 +106,7 @@ const buildOrderStatusEmail = (
           <div class="badge">${options.badge}</div>
           <div class="title">${options.title}</div>
           <div class="sub">${options.message}</div>
+          ${hasPrepEstimate ? `<div class="eta-card">⏱️ ${prepCopy} We’ll ping you again the moment it’s ready to serve.</div>` : ''}
           ${bookingData.ticketNumber ? `<div class="ticket">${bookingData.ticketNumber.toUpperCase()}</div>` : ''}
           <a class="cta" href="${options.trackUrl}" target="_blank" rel="noreferrer">${options.ctaLabel}</a>
         </div>
@@ -83,6 +115,7 @@ const buildOrderStatusEmail = (
     </body>
   </html>
 `;
+};
 
 interface BookingData {
   id: string;
@@ -96,6 +129,8 @@ interface BookingData {
   numberOfPeople: number;
   totalAmount?: number;
   ticketNumber?: string;
+  orderPrepMinutes?: number;
+  orderPrepReadyAt?: string;
 }
 
 // Helper: Get settings for SMTP and notification gating
@@ -1619,10 +1654,11 @@ const emailService = {
     }
     const siteUrl = getSiteUrl();
     const trackUrl = bookingData.trackUrl || `${siteUrl}/order-items?ticket=${encodeURIComponent(bookingData.ticketNumber || '')}`;
+    const etaSentence = describePrepEta(bookingData);
     const html = buildOrderStatusEmail(bookingData, {
-      title: 'Your order is received 🍿',
+      title: 'Your order is Received 🍿',
       message:
-        'We just received your food order for your FeelME Town experience. Sit back and relax — once the order is ready, our team will notify you. You can track the status anytime using the button below.',
+        `We just received your food order for your FeelME Town experience.${etaSentence} Sit back and relax — once the order is ready, our team will notify you. You can track the status anytime using the button below.`,
       ctaLabel: 'Track your order',
       trackUrl,
       badge: 'ORDER RECEIVED',
@@ -1635,10 +1671,11 @@ const emailService = {
     }
     const siteUrl = getSiteUrl();
     const trackUrl = bookingData.trackUrl || `${siteUrl}/order-items?ticket=${encodeURIComponent(bookingData.ticketNumber || '')}`;
+    const etaSentence = describePrepEta(bookingData);
     const html = buildOrderStatusEmail(bookingData, {
-      title: 'Your order is ready 🍽️',
+      title: 'Your order is Ready 🍽️',
       message:
-        'Your food order is now ready to be served. Our team will bring it to you shortly. If you need anything else, feel free to reach out. Enjoy your private theatre experience!',
+        `Your food order is now ready to be served.${etaSentence} Our team will bring it to you shortly. If you need anything else, feel free to reach out. Enjoy your private theatre experience!`,
       ctaLabel: 'Track order status',
       trackUrl,
       badge: 'ORDER READY',

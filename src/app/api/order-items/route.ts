@@ -286,48 +286,114 @@ export async function POST(request: NextRequest) {
       } catch (cleanupError) {
         console.warn('⚠️ [order-items] Failed to remove cleared order records:', cleanupError);
       }
+
+      const cancellationItems =
+        removedItems.length > 0 ? removedItems : previousServiceItems;
+      const cancellationSubtotal = sumItems(cancellationItems);
+
+      try {
+        const cancellationPayload = {
+          bookingId: booking.bookingId || bookingIdForUpdate,
+          mongoBookingId: booking._id?.toString?.(),
+          ticketNumber: booking.ticketNumber,
+          customerName: booking.name,
+          theaterName: booking.theaterName,
+          bookingStatus: 'cancelled',
+          numberOfPeople: booking.numberOfPeople,
+          serviceName: serviceNameRaw,
+          serviceField,
+          canonicalField: canonicalFieldName,
+          items: cancellationItems,
+          subtotal: cancellationSubtotal,
+          previousSubtotal: previousServiceTotal,
+          changeSet: {
+            addedItems: [],
+            removedItems: cancellationItems,
+            removedSubtotal: previousServiceTotal,
+            addedSubtotal: 0,
+          },
+          removedItemNames: cancellationItems
+            .map((item) => item?.name)
+            .filter((name): name is string => Boolean(name)),
+          actionType: 'cancelled',
+          removalReason: 'Customer cancelled their order',
+          markPaid: false,
+          status: 'cancelled',
+          totalAmountBefore: originalTotalAmount,
+          totalAmountAfter: updatedTotalAmount,
+          venuePaymentBefore: originalVenuePayment,
+          venuePaymentAfter: updatedVenuePayment,
+          performedBy: performedByRaw,
+          recordedAt: new Date(),
+          bookingDate: booking.date,
+          bookingTime: booking.time,
+          eventOnly: true,
+          eventType: 'cancellation',
+          eventMessage: 'Customer cancelled their order',
+        };
+
+        await (database as any).saveOrderRecord?.(cancellationPayload);
+      } catch (cancellationRecordError) {
+        console.warn('⚠️ [order-items] Failed to record cancellation event:', cancellationRecordError);
+      }
     }
 
-    try {
-      const actionType = (isExplicitClearService || isClearingAfterUpdate)
-        ? 'clear'
-        : removedItems.length && newServiceItems.length
-        ? 'update'
-        : removedItems.length
-        ? 'remove'
-        : 'append';
-      const snapshotSubtotal = sumItems(updatedServiceItems);
-      const orderRecordPayload = {
-        bookingId: booking.bookingId || bookingIdForUpdate,
-        mongoBookingId: booking._id?.toString?.(),
-        ticketNumber: booking.ticketNumber,
-        customerName: booking.name,
-        serviceName: serviceNameRaw,
-        serviceField,
-        canonicalField: canonicalFieldName,
-        items: updatedServiceItems,
-        subtotal: snapshotSubtotal,
-        previousSubtotal: previousServiceTotal,
-        changeSet: {
-          addedItems: newServiceItems,
-          removedItems,
-          removedSubtotal,
-          addedSubtotal: newServiceTotal,
-        },
-        actionType,
-        markPaid,
-        status: isClearingAfterUpdate ? 'cleared' : markPaid ? 'paid' : 'pending',
-        totalAmountBefore: originalTotalAmount,
-        totalAmountAfter: updatedTotalAmount,
-        venuePaymentBefore: originalVenuePayment,
-        venuePaymentAfter: updatedVenuePayment,
-        performedBy: performedByRaw,
-        recordedAt: new Date(),
-      };
+    if (!isClearingAfterUpdate) {
+      try {
+        const actionType = isExplicitClearService
+          ? 'clear'
+          : removedItems.length && newServiceItems.length
+          ? 'update'
+          : removedItems.length
+          ? 'remove'
+          : 'append';
+        const snapshotSubtotal = sumItems(updatedServiceItems);
+        const eventType =
+          actionType === 'remove'
+            ? 'removal'
+            : actionType === 'append' || actionType === 'update'
+            ? 'addition'
+            : undefined;
+        const orderRecordPayload = {
+          bookingId: booking.bookingId || bookingIdForUpdate,
+          mongoBookingId: booking._id?.toString?.(),
+          ticketNumber: booking.ticketNumber,
+          customerName: booking.name,
+          theaterName: booking.theaterName,
+          bookingStatus: booking.status,
+          numberOfPeople: booking.numberOfPeople,
+          serviceName: serviceNameRaw,
+          serviceField,
+          canonicalField: canonicalFieldName,
+          items: updatedServiceItems,
+          subtotal: snapshotSubtotal,
+          previousSubtotal: previousServiceTotal,
+          changeSet: {
+            addedItems: newServiceItems,
+            removedItems,
+            removedSubtotal,
+            addedSubtotal: newServiceTotal,
+          },
+          removedItemNames: removedItems.map((item) => item?.name).filter((name): name is string => Boolean(name)),
+          actionType,
+          removalReason: removedItems.length
+            ? `Removed items: ${removedItems.map((item) => item?.name || 'Item').join(', ')}`
+            : undefined,
+          markPaid,
+          status: markPaid ? 'paid' : 'pending',
+          totalAmountBefore: originalTotalAmount,
+          totalAmountAfter: updatedTotalAmount,
+          venuePaymentBefore: originalVenuePayment,
+          venuePaymentAfter: updatedVenuePayment,
+          performedBy: performedByRaw,
+          recordedAt: new Date(),
+          eventType,
+        };
 
-      await (database as any).saveOrderRecord?.(orderRecordPayload);
-    } catch (orderRecordError) {
-      console.warn('⚠️ [order-items] Failed to log order record:', orderRecordError);
+        await (database as any).saveOrderRecord?.(orderRecordPayload);
+      } catch (orderRecordError) {
+        console.warn('⚠️ [order-items] Failed to log order record:', orderRecordError);
+      }
     }
 
     try {

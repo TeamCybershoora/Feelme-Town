@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     if (memoryResponse.ok) {
       const memoryResult = await memoryResponse.json();
       if (memoryResult.success) {
-        aiMemoryData = formatMemoryForAI(memoryResult.memory);
+        aiMemoryData = await formatMemoryForAI(memoryResult.memory);
         console.log('✅ AI Memory loaded from JSON files');
       }
     }
@@ -152,20 +152,38 @@ Remember: You're not just an AI, you're Ankit - a real person who loves helping 
   }
 }
 
-function formatMemoryForAI(memory: any): string {
+async function formatMemoryForAI(memory: any): Promise<string> {
   let formattedMemory = '';
   
-  // Extract contact details from FAQ first
-  let contactPhone = '+91 9870691784';
-  let contactWhatsApp = '+91 9520936655';
+  // Fetch contact details from system settings API (not hardcoded)
+  let contactPhone = 'Contact us'; // Will be fetched from DB
+  let contactWhatsApp = 'Contact us'; // Will be fetched from DB
   
-  if (memory.faq?.faq?.length > 0) {
-    const bookingFAQ = memory.faq.faq.find((faq: any) => faq.id === 'booking-process');
-    if (bookingFAQ && bookingFAQ.answer) {
-      const phoneMatch = bookingFAQ.answer.match(/\+91\s?9870691784/);
-      const whatsappMatch = bookingFAQ.answer.match(/\+91\s?9520936655/);
-      if (phoneMatch) contactPhone = phoneMatch[0];
-      if (whatsappMatch) contactWhatsApp = whatsappMatch[0];
+  try {
+    const siteUrl = process.env.SITE_URL || 'http://localhost:3000';
+    const systemInfoResponse = await fetch(`${siteUrl}/api/ai-system-info`);
+    if (systemInfoResponse.ok) {
+      const systemInfoResult = await systemInfoResponse.json();
+      if (systemInfoResult.success && systemInfoResult.systemInfo) {
+        contactPhone = systemInfoResult.systemInfo.sitePhone || contactPhone;
+        contactWhatsApp = systemInfoResult.systemInfo.siteWhatsapp || contactWhatsApp;
+        console.log('✅ Contact info fetched from system settings:', { contactPhone, contactWhatsApp });
+      }
+    }
+  } catch (error) {
+    console.error('⚠️ Failed to fetch system settings, using fallback:', error);
+    // Try to extract from FAQ as secondary fallback
+    if (memory.faq?.faq?.length > 0) {
+      const bookingFAQ = memory.faq.faq.find((faq: any) => faq.id === 'booking-process');
+      if (bookingFAQ && bookingFAQ.answer) {
+        const phoneMatch = bookingFAQ.answer.match(/\+91\s?\d{10}/);
+        const whatsappMatch = bookingFAQ.answer.match(/\+91\s?\d{10}/g);
+        if (phoneMatch) contactPhone = phoneMatch[0];
+        if (whatsappMatch && whatsappMatch.length > 1) contactWhatsApp = whatsappMatch[1];
+        else if (whatsappMatch && whatsappMatch.length === 1 && whatsappMatch[0] !== phoneMatch[0]) {
+          contactWhatsApp = whatsappMatch[0];
+        }
+      }
     }
   }
   

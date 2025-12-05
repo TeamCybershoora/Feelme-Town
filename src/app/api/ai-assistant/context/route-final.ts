@@ -20,33 +20,53 @@ export async function GET(request: NextRequest) {
       console.error('❌ Context API: Failed to load AI Memory:', error);
     }
 
-    // Extract contact details from FAQ
-    let contactPhone = '+91 9870691784';
-    let contactWhatsApp = '+91 9520936655';
+    // Fetch ALL system settings from database (not hardcoded)
+    let systemSettingsData: any = {
+      siteName: '',
+      siteAddress: '',
+      siteEmail: '',
+      sitePhone: '',
+      siteWhatsapp: '',
+      bookingExpiryHours: 24,
+      cancellationHours: 72,
+      refundPercentage: 80
+    };
     
-    if (aiMemoryData.faq?.faq?.length > 0) {
-      const bookingFAQ = aiMemoryData.faq.faq.find((faq: any) => faq.id === 'booking-process');
-      if (bookingFAQ && bookingFAQ.answer) {
-        const phoneMatch = bookingFAQ.answer.match(/\+91\s?9870691784/);
-        const whatsappMatch = bookingFAQ.answer.match(/\+91\s?9520936655/);
-        if (phoneMatch) contactPhone = phoneMatch[0];
-        if (whatsappMatch) contactWhatsApp = whatsappMatch[0];
+    try {
+      const systemInfoResponse = await fetch(`${siteUrl}/api/ai-system-info`);
+      if (systemInfoResponse.ok) {
+        const systemInfoResult = await systemInfoResponse.json();
+        if (systemInfoResult.success && systemInfoResult.systemInfo) {
+          systemSettingsData = {
+            siteName: systemInfoResult.systemInfo.siteName || '',
+            siteAddress: systemInfoResult.systemInfo.siteAddress || '',
+            siteEmail: systemInfoResult.systemInfo.siteEmail || '',
+            sitePhone: systemInfoResult.systemInfo.sitePhone || '',
+            siteWhatsapp: systemInfoResult.systemInfo.siteWhatsapp || '',
+            bookingExpiryHours: systemInfoResult.systemInfo.bookingExpiryHours || 24,
+            cancellationHours: systemInfoResult.systemInfo.cancellationHours || 72,
+            refundPercentage: systemInfoResult.systemInfo.refundPercentage || 80
+          };
+          console.log('✅ System settings fetched from database:', systemSettingsData);
+        }
       }
+    } catch (error) {
+      console.error('⚠️ Failed to fetch system settings:', error);
     }
 
     // Format context data from AI Memory
     const contextData = {
-      // System settings from AI Memory
+      // System settings from database (NO HARDCODED VALUES)
       systemSettings: {
-        siteName: 'FeelME Town',
-        siteAddress: 'Delhi, Dwarka',
-        sitePhone: contactPhone,
-        siteWhatsapp: contactWhatsApp,
-        siteEmail: 'feelmetown@gmail.com',
+        siteName: systemSettingsData.siteName,
+        siteAddress: systemSettingsData.siteAddress,
+        sitePhone: systemSettingsData.sitePhone,
+        siteWhatsapp: systemSettingsData.siteWhatsapp,
+        siteEmail: systemSettingsData.siteEmail,
         operatingHours: '10 AM - 12 AM (7 days a week)',
-        bookingExpiryHours: 24,
-        cancellationHours: 72,
-        refundPercentage: 80
+        bookingExpiryHours: systemSettingsData.bookingExpiryHours,
+        cancellationHours: systemSettingsData.cancellationHours,
+        refundPercentage: systemSettingsData.refundPercentage
       },
       
       // Theaters from AI Memory
@@ -73,14 +93,14 @@ export async function GET(request: NextRequest) {
         isWeekend: [0, 6].includes(new Date().getDay())
       },
       
-      // Business status
+      // Business status (from database)
       businessStatus: {
         isOpen: true,
         operatingHours: '10 AM - 12 AM (7 days a week)',
-        location: 'FeelME Town, Dwarka, Delhi',
-        phone: contactPhone,
-        whatsapp: contactWhatsApp,
-        email: 'feelmetown@gmail.com'
+        location: systemSettingsData.siteAddress || '',
+        phone: systemSettingsData.sitePhone,
+        whatsapp: systemSettingsData.siteWhatsapp,
+        email: systemSettingsData.siteEmail
       },
       
       // Special events (can be enhanced later)
@@ -109,20 +129,57 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: false,
       error: 'Failed to fetch context data',
-      context: getEmergencyContext()
+      context: await getEmergencyContext()
     }, { status: 500 });
   }
 }
 
-function getEmergencyContext() {
+async function getEmergencyContext() {
+  // Fetch ALL system settings from database (NO HARDCODED VALUES)
+  let systemSettingsData: any = {
+    siteName: '',
+    siteAddress: '',
+    siteEmail: '',
+    sitePhone: '',
+    siteWhatsapp: '',
+    bookingExpiryHours: 24,
+    cancellationHours: 72,
+    refundPercentage: 80
+  };
+  
+  try {
+    const siteUrl = process.env.SITE_URL || 'http://localhost:3000';
+    const systemInfoResponse = await fetch(`${siteUrl}/api/ai-system-info`);
+    if (systemInfoResponse.ok) {
+      const systemInfoResult = await systemInfoResponse.json();
+      if (systemInfoResult.success && systemInfoResult.systemInfo) {
+        systemSettingsData = {
+          siteName: systemInfoResult.systemInfo.siteName || '',
+          siteAddress: systemInfoResult.systemInfo.siteAddress || '',
+          siteEmail: systemInfoResult.systemInfo.siteEmail || '',
+          sitePhone: systemInfoResult.systemInfo.sitePhone || '',
+          siteWhatsapp: systemInfoResult.systemInfo.siteWhatsapp || '',
+          bookingExpiryHours: systemInfoResult.systemInfo.bookingExpiryHours || 24,
+          cancellationHours: systemInfoResult.systemInfo.cancellationHours || 72,
+          refundPercentage: systemInfoResult.systemInfo.refundPercentage || 80
+        };
+      }
+    }
+  } catch (error) {
+    console.error('⚠️ Failed to fetch system settings in emergency context:', error);
+  }
+  
   return {
     systemSettings: {
-      siteName: 'FeelME Town',
-      siteAddress: 'Delhi, Dwarka',
-      sitePhone: '+91 9870691784',
-      siteWhatsapp: '+91 9520936655',
-      siteEmail: 'feelmetown@gmail.com',
-      operatingHours: '10 AM - 12 AM (7 days a week)'
+      siteName: systemSettingsData.siteName,
+      siteAddress: systemSettingsData.siteAddress,
+      sitePhone: systemSettingsData.sitePhone,
+      siteWhatsapp: systemSettingsData.siteWhatsapp,
+      siteEmail: systemSettingsData.siteEmail,
+      operatingHours: '10 AM - 12 AM (7 days a week)',
+      bookingExpiryHours: systemSettingsData.bookingExpiryHours,
+      cancellationHours: systemSettingsData.cancellationHours,
+      refundPercentage: systemSettingsData.refundPercentage
     },
     theaters: [],
     occasions: [],
@@ -137,10 +194,10 @@ function getEmergencyContext() {
     businessStatus: {
       isOpen: true,
       operatingHours: '10 AM - 12 AM (7 days a week)',
-      location: 'FeelME Town, Dwarka, Delhi',
-      phone: '+91 9870691784',
-      whatsapp: '+91 9520936655',
-      email: 'feelmetown@gmail.com'
+      location: systemSettingsData.siteAddress || '',
+      phone: systemSettingsData.sitePhone,
+      whatsapp: systemSettingsData.siteWhatsapp,
+      email: systemSettingsData.siteEmail
     },
     specialEvents: [],
     defaultTheater: null

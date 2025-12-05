@@ -628,10 +628,17 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
       // Attach creator info for manual mode
       if (isManualMode) {
-        // Set explicit top-level creator info for DB convenience
-        bookingData.createdBy = (userInfo?.type === 'staff')
-          ? (userInfo?.staffName || userInfo?.staffId || 'Staff')
-          : (userInfo?.adminName || 'Admin');
+        // Build a clear "Booked by ..." label for database readability
+        if (userInfo?.type === 'staff') {
+          const labelName = userInfo.staffName || userInfo.staffId || 'Staff';
+          const idSuffix = userInfo.staffId ? ` (${userInfo.staffId})` : '';
+          bookingData.createdBy = `Booked by ${labelName}${idSuffix}`;
+        } else {
+          const adminLabel = userInfo?.adminName || 'Admin';
+          bookingData.createdBy = `Booked by ${adminLabel}`;
+        }
+
+        // Also persist raw creator details for future use
         if (userInfo?.staffId) bookingData.staffId = userInfo.staffId;
         if (userInfo?.staffName) bookingData.staffName = userInfo.staffName;
         if (userInfo?.adminName) bookingData.adminName = userInfo.adminName;

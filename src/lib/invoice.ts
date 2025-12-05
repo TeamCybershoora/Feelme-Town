@@ -558,7 +558,7 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
           <h2>${bookingData.name}</h2>
           <div class="contact-row">
             <span>📞</span>
-            <span>${bookingData.phone || '+91 9520936655'}</span>
+            <span>${bookingData.phone || 'N/A'}</span>
           </div>
           <div class="contact-row">
             <span>✉️</span>

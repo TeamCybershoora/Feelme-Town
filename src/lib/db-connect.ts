@@ -165,10 +165,14 @@ const getOrderCounts = async (filter: Record<string, any> = {}) => {
 
 const ORDER_AUTO_DELETE_MINUTES = 30;
 
-const updateOrderStatusByTicket = async (ticketNumber: string, status: string) => {
+const updateOrderStatusByTicket = async (
+  ticketNumber: string,
+  status?: string,
+  metadata?: Record<string, any>,
+) => {
   try {
-    if (!ticketNumber || !status) {
-      return { success: false, error: 'Ticket number and status are required' };
+    if (!ticketNumber) {
+      return { success: false, error: 'Ticket number is required' };
     }
 
     if (!isConnected) {
@@ -180,14 +184,25 @@ const updateOrderStatusByTicket = async (ticketNumber: string, status: string) =
     }
 
     const collection = db.collection(ORDERS_COLLECTION_NAME);
-    const normalizedStatus = status.trim().toLowerCase();
+    const updateDoc: Record<string, any> = {
+      updatedAt: new Date(),
+    };
+
+    if (typeof status === 'string' && status.trim()) {
+      updateDoc.status = status.trim().toLowerCase();
+    }
+
+    if (metadata && typeof metadata === 'object') {
+      Object.entries(metadata).forEach(([key, value]) => {
+        if (value === undefined) return;
+        updateDoc[key] = value;
+      });
+    }
+
     const result = await collection.updateMany(
       { ticketNumber },
       {
-        $set: {
-          status: normalizedStatus,
-          updatedAt: new Date(),
-        },
+        $set: updateDoc,
       },
     );
 
@@ -368,14 +383,285 @@ const getOrders = async (filter: Record<string, any> = {}, limit = 200) => {
       .limit(limit)
       .toArray();
 
+    const needsMeta = orders.filter(
+      (order) =>
+        !order.theaterName ||
+        typeof order.numberOfPeople !== 'number' ||
+        !order.bookingDate ||
+        !order.bookingTime,
+    );
+
+    const bookingIdsForCleanup: string[] = [];
+
+    if (needsMeta.length) {
+      const bookingCollection = db.collection(COLLECTION_NAME);
+      const manualCollection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
+
+      const bookingIds = Array.from(
+        new Set(
+          needsMeta
+            .map((order) => (typeof order.bookingId === 'string' ? order.bookingId : undefined))
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      const ticketNumbers = Array.from(
+        new Set(
+          needsMeta
+            .map((order) => (typeof order.ticketNumber === 'string' ? order.ticketNumber : undefined))
+            .filter((ticket): ticket is string => Boolean(ticket)),
+        ),
+      );
+      const mongoIds = Array.from(
+        new Set(
+          needsMeta
+            .map((order) => {
+              const idValue = order.mongoBookingId || order.mongoId;
+              if (typeof idValue === 'string' && ObjectId.isValid(idValue)) {
+                return idValue;
+              }
+              return undefined;
+            })
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+
+      const orFilters: Record<string, any>[] = [];
+      if (bookingIds.length) {
+        orFilters.push({ bookingId: { $in: bookingIds } });
+      }
+      if (ticketNumbers.length) {
+        orFilters.push({ ticketNumber: { $in: ticketNumbers } });
+      }
+      if (mongoIds.length) {
+        orFilters.push({ _id: { $in: mongoIds.map((id) => new ObjectId(id)) } });
+      }
+
+      const bookingMetaMap = new Map<
+        string,
+        { theaterName?: string; numberOfPeople?: number; bookingDate?: string; bookingTime?: string }
+      >();
+
+      const getPeopleCount = (record: Record<string, any> = {}) => {
+        const candidates = [
+          record.numberOfPeople,
+          record.number_of_people,
+          record.noOfPeople,
+          record.no_of_people,
+          record.peopleCount,
+          record.people_count,
+          record.totalGuests,
+          record.total_guests,
+        ];
+        for (const value of candidates) {
+          if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+            return value;
+          }
+        }
+        return undefined;
+      };
+
+      const mergeMeta = (
+        key: string,
+        meta: { theaterName?: string; numberOfPeople?: number; bookingDate?: string; bookingTime?: string },
+      ) => {
+        if (!key) return;
+        const existing = bookingMetaMap.get(key) || {};
+        bookingMetaMap.set(key, {
+          theaterName: meta.theaterName || existing.theaterName,
+          numberOfPeople:
+            typeof meta.numberOfPeople === 'number' ? meta.numberOfPeople : existing.numberOfPeople,
+          bookingDate: meta.bookingDate || existing.bookingDate,
+          bookingTime: meta.bookingTime || existing.bookingTime,
+        });
+      };
+
+      if (orFilters.length) {
+        const bookingDocs = await bookingCollection
+          .find({ $or: orFilters })
+          .project({
+            bookingId: 1,
+            ticketNumber: 1,
+            theaterName: 1,
+            numberOfPeople: 1,
+            totalGuests: 1,
+            date: 1,
+            time: 1,
+            timeSlot: 1,
+            selectedTimeSlot: 1,
+          })
+          .toArray();
+
+        bookingDocs.forEach((doc) => {
+          if (!doc) return;
+          const meta = {
+            theaterName: doc.theaterName,
+            numberOfPeople: getPeopleCount(doc),
+            bookingDate: typeof doc.date === 'string' ? doc.date : undefined,
+            bookingTime: typeof doc.time === 'string'
+              ? doc.time
+              : typeof (doc as any).timeSlot === 'string'
+              ? (doc as any).timeSlot
+              : typeof (doc as any).selectedTimeSlot === 'string'
+              ? (doc as any).selectedTimeSlot
+              : undefined,
+          };
+          if (doc.bookingId) {
+            mergeMeta(`bookingId:${doc.bookingId}`, meta);
+          }
+          if (doc.ticketNumber) {
+            mergeMeta(`ticket:${doc.ticketNumber}`, meta);
+          }
+          if (doc._id) {
+            mergeMeta(`mongo:${doc._id.toString()}`, meta);
+          }
+        });
+
+        const manualDocs = await manualCollection
+          .find({ $or: orFilters })
+          .project({
+            bookingId: 1,
+            ticketNumber: 1,
+            theaterName: 1,
+            theater: 1,
+            numberOfPeople: 1,
+            date: 1,
+            time: 1,
+            timeSlot: 1,
+            selectedTimeSlot: 1,
+          })
+          .toArray();
+
+        manualDocs.forEach((doc) => {
+          if (!doc) return;
+          const meta = {
+            theaterName: doc.theaterName || doc.theater,
+            numberOfPeople: getPeopleCount(doc),
+            bookingDate: typeof doc.date === 'string' ? doc.date : undefined,
+            bookingTime: typeof doc.time === 'string'
+              ? doc.time
+              : typeof (doc as any).timeSlot === 'string'
+              ? (doc as any).timeSlot
+              : typeof (doc as any).selectedTimeSlot === 'string'
+              ? (doc as any).selectedTimeSlot
+              : undefined,
+          };
+          if (doc.bookingId) {
+            mergeMeta(`bookingId:${doc.bookingId}`, meta);
+          }
+          if (doc.ticketNumber) {
+            mergeMeta(`ticket:${doc.ticketNumber}`, meta);
+          }
+          if (doc._id) {
+            mergeMeta(`mongo:${doc._id.toString()}`, meta);
+          }
+        });
+      }
+
+      if (bookingMetaMap.size) {
+        for (const order of orders) {
+          const meta =
+            (order.bookingId && bookingMetaMap.get(`bookingId:${order.bookingId}`)) ||
+            (order.ticketNumber && bookingMetaMap.get(`ticket:${order.ticketNumber}`)) ||
+            (order.mongoBookingId && bookingMetaMap.get(`mongo:${order.mongoBookingId}`)) ||
+            (order.mongoId && bookingMetaMap.get(`mongo:${order.mongoId}`));
+          if (!meta) continue;
+          if (!order.theaterName && meta.theaterName) {
+            order.theaterName = meta.theaterName;
+          }
+          if (typeof order.numberOfPeople !== 'number' && typeof meta.numberOfPeople === 'number') {
+            order.numberOfPeople = meta.numberOfPeople;
+          }
+          if (!order.bookingDate && meta.bookingDate) {
+            order.bookingDate = meta.bookingDate;
+          }
+          if (!order.bookingTime && meta.bookingTime) {
+            order.bookingTime = meta.bookingTime;
+          }
+        }
+      }
+    }
+
+    const missingTheaterOrders = orders.filter((order) => !order.theaterName && (order.bookingId || order.mongoBookingId || order.ticketNumber));
+
+    if (missingTheaterOrders.length) {
+      const bookingCollection = db.collection(COLLECTION_NAME);
+      const manualCollection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
+
+      const referencesToCheck = missingTheaterOrders.map((order) => ({
+        bookingId: order.bookingId,
+        mongoBookingId: order.mongoBookingId,
+        ticketNumber: order.ticketNumber,
+      }));
+
+      const uniqueBookingIds = Array.from(new Set(referencesToCheck.map((ref) => ref.bookingId).filter((id): id is string => Boolean(id))));
+      const uniqueMongoIds = Array.from(new Set(referencesToCheck.map((ref) => ref.mongoBookingId).filter((id): id is string => Boolean(id && ObjectId.isValid(id)))));
+      const uniqueTicketNumbers = Array.from(new Set(referencesToCheck.map((ref) => ref.ticketNumber).filter((id): id is string => Boolean(id))));
+
+      const existenceOrFilters: Record<string, any>[] = [];
+      if (uniqueBookingIds.length) existenceOrFilters.push({ bookingId: { $in: uniqueBookingIds } });
+      if (uniqueTicketNumbers.length) existenceOrFilters.push({ ticketNumber: { $in: uniqueTicketNumbers } });
+      if (uniqueMongoIds.length) existenceOrFilters.push({ _id: { $in: uniqueMongoIds.map((id) => new ObjectId(id)) } });
+
+      let existingReferences = new Set<string>();
+
+      if (existenceOrFilters.length) {
+        const [bookingDocs, manualDocs] = await Promise.all([
+          bookingCollection
+            .find({ $or: existenceOrFilters })
+            .project({ bookingId: 1, ticketNumber: 1 })
+            .toArray(),
+          manualCollection
+            .find({ $or: existenceOrFilters })
+            .project({ bookingId: 1, ticketNumber: 1 })
+            .toArray(),
+        ]);
+
+        bookingDocs.forEach((doc) => {
+          if (!doc) return;
+          if (doc.bookingId) existingReferences.add(`bookingId:${doc.bookingId}`);
+          if (doc.ticketNumber) existingReferences.add(`ticket:${doc.ticketNumber}`);
+          if (doc._id) existingReferences.add(`mongo:${doc._id.toString()}`);
+        });
+
+        manualDocs.forEach((doc) => {
+          if (!doc) return;
+          if (doc.bookingId) existingReferences.add(`bookingId:${doc.bookingId}`);
+          if (doc.ticketNumber) existingReferences.add(`ticket:${doc.ticketNumber}`);
+          if (doc._id) existingReferences.add(`mongo:${doc._id.toString()}`);
+        });
+      }
+
+      missingTheaterOrders.forEach((order) => {
+        const keys = [
+          order.bookingId ? `bookingId:${order.bookingId}` : undefined,
+          order.ticketNumber ? `ticket:${order.ticketNumber}` : undefined,
+          order.mongoBookingId ? `mongo:${order.mongoBookingId}` : undefined,
+        ].filter((key): key is string => Boolean(key));
+
+        const hasReference = keys.some((key) => existingReferences.has(key));
+        if (!hasReference) {
+          bookingIdsForCleanup.push(order.bookingId || order.ticketNumber || order._id?.toString?.() || '');
+        }
+      });
+    }
+
+    if (bookingIdsForCleanup.length) {
+      await deleteOrdersByBookingReference({
+        bookingId: bookingIdsForCleanup.find((id) => id)?.toString(),
+      });
+    }
+
     return {
       success: true,
       orders,
       total: orders.length,
     };
   } catch (error) {
-    console.error('❌ Error fetching order records from MongoDB:', error);
-    return { success: false, error: 'Failed to fetch order records' };
+    console.error('❌ Error fetching order records:', error);
+    return {
+      success: false,
+      error: 'Failed to fetch order records',
+    };
   }
 };
 

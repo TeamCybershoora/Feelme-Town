@@ -358,11 +358,30 @@ async function fetchFAQData() {
     }
     
     // Fallback to static FAQs if no database FAQs found
+    // Fetch contact details from system settings (not hardcoded)
+    let contactPhone = 'Contact us'; // Will be fetched from DB
+    let contactWhatsApp = 'Contact us'; // Will be fetched from DB
+    
+    try {
+      const siteUrl = process.env.SITE_URL || 'http://localhost:3000';
+      const systemInfoResponse = await fetch(`${siteUrl}/api/ai-system-info`);
+      if (systemInfoResponse.ok) {
+        const systemInfoResult = await systemInfoResponse.json();
+        if (systemInfoResult.success && systemInfoResult.systemInfo) {
+          contactPhone = systemInfoResult.systemInfo.sitePhone || contactPhone;
+          contactWhatsApp = systemInfoResult.systemInfo.siteWhatsapp || contactWhatsApp;
+          console.log('✅ Contact info fetched from system settings for FAQ:', { contactPhone, contactWhatsApp });
+        }
+      }
+    } catch (error) {
+      console.error('⚠️ Failed to fetch system settings for FAQ fallback:', error);
+    }
+    
     return [
       {
         id: 'booking-process',
         question: 'How do I book a theater?',
-        answer: 'You can book through our website, call +91 9870691784, or WhatsApp +91 9520936655. Choose your theater, date, time, and complete the booking.',
+        answer: `You can book through our website, call ${contactPhone}, or WhatsApp ${contactWhatsApp}. Choose your theater, date, time, and complete the booking.`,
         category: 'booking'
       },
       {

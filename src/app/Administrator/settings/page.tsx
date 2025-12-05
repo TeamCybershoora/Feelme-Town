@@ -5,6 +5,12 @@ import { Save, Mail, Lock, User, Globe, Bell, Shield, Database, RotateCcw, Alert
 import { useToast } from '@/hooks/useToast';
 import ToastContainer from '@/components/ToastContainer';
 
+const DEFAULT_WHATSAPP_PREFILLS = [
+  "Hi! I'd like to book a show.",
+  "Hello, I have a question about my booking.",
+  "Can you tell me more about the theatre?"
+];
+
 interface Settings {
   // Site Settings
   siteName: string;
@@ -12,6 +18,7 @@ interface Settings {
   sitePhone: string;
   siteWhatsapp: string;
   siteAddress: string;
+  whatsappPrefilledMessages: string[];
   
   // Email Settings
   emailUser: string;
@@ -48,6 +55,7 @@ export default function SystemSettingsPage() {
     sitePhone: '',
     siteWhatsapp: '',
     siteAddress: '',
+    whatsappPrefilledMessages: DEFAULT_WHATSAPP_PREFILLS,
     emailUser: '',
     emailPass: '',
     emailFrom: '',
@@ -79,7 +87,7 @@ export default function SystemSettingsPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'notifications' | 'security' | 'booking' | 'cloudinary' | 'counters'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'email' | 'notifications' | 'security' | 'booking' | 'cloudinary' | 'whatsapp' | 'counters'>('general');
   const { toasts, removeToast, showSuccess, showError } = useToast();
   
   // Reset counters state
@@ -109,6 +117,9 @@ export default function SystemSettingsPage() {
           sitePhone: process.env.NEXT_PUBLIC_SITE_PHONE ?? s.sitePhone ?? '',
           siteWhatsapp: process.env.NEXT_PUBLIC_SITE_WHATSAPP ?? s.siteWhatsapp ?? '',
           siteAddress: process.env.NEXT_PUBLIC_SITE_ADDRESS ?? s.siteAddress ?? '',
+          whatsappPrefilledMessages: Array.isArray(s.whatsappPrefilledMessages) && s.whatsappPrefilledMessages.length
+            ? s.whatsappPrefilledMessages
+            : DEFAULT_WHATSAPP_PREFILLS,
 
           // Email strictly from DB
           emailUser: s.emailUser ?? '',
@@ -150,18 +161,42 @@ export default function SystemSettingsPage() {
     try {
       setSaving(true);
       
-      // Persist email-related and Cloudinary settings to database
+      // Persist current settings state (general + email + notification + security + booking + cloudinary)
       const payload = {
+        // General
+        siteName: settings.siteName,
+        siteEmail: settings.siteEmail,
+        sitePhone: settings.sitePhone,
+        siteWhatsapp: settings.siteWhatsapp,
+        siteAddress: settings.siteAddress,
+        whatsappPrefilledMessages: settings.whatsappPrefilledMessages,
+
+        // Email
         emailUser: settings.emailUser,
         emailPass: settings.emailPass,
         emailFrom: settings.emailFrom,
         smtpHost: settings.smtpHost,
         smtpPort: settings.smtpPort,
+
+        // Notifications
         enableEmailNotifications: settings.enableEmailNotifications,
+        enableSMSNotifications: settings.enableSMSNotifications,
+        enableBookingAlerts: settings.enableBookingAlerts,
+
+        // Security
+        sessionTimeout: settings.sessionTimeout,
+        maxLoginAttempts: settings.maxLoginAttempts,
+
+        // Booking
+        bookingExpiryHours: settings.bookingExpiryHours,
+        cancellationHours: settings.cancellationHours,
+        refundPercentage: settings.refundPercentage,
+
+        // Cloudinary
         cloudinaryCloudName: settings.cloudinaryCloudName,
         cloudinaryFolder: settings.cloudinaryFolder,
         cloudinaryApiKey: settings.cloudinaryApiKey,
-        cloudinaryApiSecret: settings.cloudinaryApiSecret
+        cloudinaryApiSecret: settings.cloudinaryApiSecret,
       };
 
       const response = await fetch('/api/admin/settings', {
@@ -315,8 +350,31 @@ export default function SystemSettingsPage() {
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'booking', label: 'Booking', icon: Database },
     { id: 'cloudinary', label: 'Cloudinary', icon: Database },
+    { id: 'whatsapp', label: 'WhatsApp Prefills', icon: User },
     { id: 'counters', label: 'Reset Counters', icon: RotateCcw }
   ];
+
+  const handlePrefillChange = (index: number, value: string) => {
+    setSettings(prev => {
+      const updated = [...prev.whatsappPrefilledMessages];
+      updated[index] = value;
+      return { ...prev, whatsappPrefilledMessages: updated };
+    });
+  };
+
+  const addPrefilledMessage = () => {
+    setSettings(prev => ({
+      ...prev,
+      whatsappPrefilledMessages: [...prev.whatsappPrefilledMessages, '']
+    }));
+  };
+
+  const removePrefilledMessage = (index: number) => {
+    setSettings(prev => ({
+      ...prev,
+      whatsappPrefilledMessages: prev.whatsappPrefilledMessages.filter((_, i) => i !== index)
+    }));
+  };
 
   return (
     <div className="settings-page">
@@ -401,6 +459,40 @@ export default function SystemSettingsPage() {
                   rows={3}
                 />
               </div>
+            </div>
+          )}
+
+          {activeTab === 'whatsapp' && (
+            <div className="settings-section">
+              <h2>WhatsApp Prefilled Messages</h2>
+              <p className="section-subtitle">These quick replies appear in the floating WhatsApp popup.</p>
+              <div className="prefills-list">
+                {settings.whatsappPrefilledMessages.map((message, index) => (
+                  <div key={index} className="prefill-item">
+                    <label>Message {index + 1}</label>
+                    <div className="prefill-input-row">
+                      <input
+                        type="text"
+                        value={message}
+                        onChange={(e) => handlePrefillChange(index, e.target.value)}
+                        placeholder="Type prefilled message"
+                      />
+                      {settings.whatsappPrefilledMessages.length > 1 && (
+                        <button
+                          type="button"
+                          className="remove-prefill-btn"
+                          onClick={() => removePrefilledMessage(index)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="add-prefill-btn" onClick={addPrefilledMessage}>
+                + Add Message
+              </button>
             </div>
           )}
 
@@ -885,6 +977,93 @@ export default function SystemSettingsPage() {
           margin-bottom: 2rem;
           padding-bottom: 1rem;
           border-bottom: 2px solid #f0f0f0;
+        }
+
+        .section-subtitle {
+          color: #555;
+          margin-top: -1.5rem;
+          margin-bottom: 1.5rem;
+          font-size: 0.95rem;
+        }
+
+        .prefills-list {
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .prefill-item {
+          padding: 1rem 1.25rem;
+          border: 1px solid #e5e5e5;
+          border-radius: 10px;
+          background: #fafafa;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        }
+
+        .prefill-item label {
+          margin-bottom: 0.4rem;
+          font-weight: 600;
+          display: inline-block;
+          color: #333;
+        }
+
+        .prefill-input-row {
+          display: flex;
+          gap: 0.75rem;
+        }
+
+        .prefill-input-row input {
+          flex: 1;
+          padding: 0.8rem 1rem;
+          border: 1px solid #d9d9d9;
+          border-radius: 8px;
+          font-size: 0.95rem;
+          background: white;
+          box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
+          color: #111;
+        }
+
+        .prefill-input-row input::placeholder {
+          color: #777;
+        }
+
+        .prefill-input-row input:focus {
+          outline: none;
+          border-color: var(--accent-color);
+          box-shadow: 0 0 0 3px rgba(237,32,36,0.15);
+        }
+
+        .remove-prefill-btn {
+          align-self: stretch;
+          padding: 0 1rem;
+          border-radius: 8px;
+          border: 1px solid rgba(220,38,38,0.3);
+          background: rgba(220,38,38,0.08);
+          color: #b91c1c;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .remove-prefill-btn:hover {
+          background: rgba(220,38,38,0.16);
+          border-color: rgba(220,38,38,0.45);
+        }
+
+        .add-prefill-btn {
+          border: 1px dashed var(--accent-color);
+          background: rgba(237,32,36,0.08);
+          color: var(--accent-color);
+          border-radius: 10px;
+          padding: 0.85rem 1.25rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .add-prefill-btn:hover {
+          background: rgba(237,32,36,0.15);
         }
 
         .form-group {

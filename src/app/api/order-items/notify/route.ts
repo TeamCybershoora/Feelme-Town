@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import emailService from '@/lib/email-service';
 import database from '@/lib/db-connect';
 
+const parsePrepMinutes = (value: unknown) => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.max(1, Math.round(parsed));
+};
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -28,9 +35,14 @@ export async function POST(request: NextRequest) {
     const origin = request.nextUrl?.origin || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
     const trackUrl = `${origin.replace(/\/$/, '')}/order-items?ticket=${encodeURIComponent(ticketNumber)}`;
 
+    const prepMinutes = parsePrepMinutes(body.prepMinutes);
+    const prepReadyAt = prepMinutes ? new Date(Date.now() + prepMinutes * 60 * 1000) : null;
+
     const payload = {
       ...booking,
       trackUrl,
+      orderPrepMinutes: prepMinutes ?? booking.orderPrepMinutes,
+      orderPrepReadyAt: prepReadyAt?.toISOString() ?? booking.orderPrepReadyAt,
     };
 
     const newStatus = statusRaw === 'ready' ? 'ready' : 'received';
@@ -40,7 +52,15 @@ export async function POST(request: NextRequest) {
       await emailService.sendOrderReceivedNotification(payload as any);
     }
 
-    await (database as any).updateOrderStatusByTicket?.(ticketNumber, newStatus);
+    const metadata: Record<string, any> = {};
+    if (prepMinutes) {
+      metadata.orderPrepMinutes = prepMinutes;
+    }
+    if (prepReadyAt) {
+      metadata.orderPrepReadyAt = prepReadyAt.toISOString();
+    }
+
+    await (database as any).updateOrderStatusByTicket?.(ticketNumber, newStatus, Object.keys(metadata).length ? metadata : undefined);
 
     let autoDeleteResult: any = null;
     if (newStatus === 'ready') {
@@ -55,6 +75,8 @@ export async function POST(request: NextRequest) {
       success: true,
       message: newStatus === 'ready' ? 'Customer notified that order is ready.' : 'Customer notified that order is received.',
       status: newStatus,
+      prepMinutes: prepMinutes || null,
+      prepReadyAt: prepReadyAt ? prepReadyAt.toISOString() : null,
       autoDeleteAt: autoDeleteResult?.autoDeleteAt || null,
     });
   } catch (error: any) {

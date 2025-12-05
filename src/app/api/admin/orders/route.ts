@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search')?.trim();
     const limit = sanitizeNumberParam(searchParams.get('limit'), 200, { min: 25, max: 500 });
     const mode = searchParams.get('mode')?.trim().toLowerCase();
+    const includeCompletedBookings = searchParams.get('includeCompletedBookings') === 'true';
 
     const filter: Record<string, any> = {};
 
@@ -44,6 +45,21 @@ export async function GET(request: NextRequest) {
         { serviceName: regex },
         { performedBy: regex },
       ];
+    }
+
+    if (!includeCompletedBookings) {
+      const activeBookingClause = {
+        $or: [
+          { bookingStatus: { $exists: false } },
+          { bookingStatus: { $nin: ['completed', 'cancelled', 'archived'] } },
+        ],
+      };
+
+      if (filter.$and) {
+        filter.$and.push(activeBookingClause);
+      } else {
+        filter.$and = [activeBookingClause];
+      }
     }
 
     if (mode === 'count') {
