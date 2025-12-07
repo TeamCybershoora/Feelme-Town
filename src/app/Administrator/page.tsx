@@ -107,24 +107,46 @@ export default function AdministratorPage() {
         manualBookingsResponse.json()
       ]);
       
-      const allBookings = [
-        ...(bookingsData.bookings || []),
-        ...(manualBookingsData.bookings || [])
-      ];
+      const bookingsList = bookingsData.bookings || [];
+      const manualList = manualBookingsData.manualBookings || manualBookingsData.bookings || [];
+
+      // Merge bookings by bookingId to avoid duplicates (manual copy + main copy)
+      const bookingMap = new Map<string, any>();
+
+      const upsertBooking = (booking: any, source: 'manual' | 'regular') => {
+        if (!booking) return;
+        const key = booking.bookingId || booking.id || booking._id?.toString();
+        if (!key) return;
+        const existing = bookingMap.get(key);
+
+        if (!existing) {
+          bookingMap.set(key, { ...booking, __source: source });
+          return;
+        }
+
+        // Prefer manual-specific metadata but keep existing fields
+        if (source === 'manual') {
+          bookingMap.set(key, { ...existing, ...booking, __source: source });
+        } else {
+          bookingMap.set(key, { ...booking, ...existing, __source: existing.__source || source });
+        }
+      };
+
+      bookingsList.forEach((booking: any) => upsertBooking(booking, 'regular'));
+      manualList.forEach((booking: any) => upsertBooking(booking, 'manual'));
+
+      const allBookings = Array.from(bookingMap.values());
 
       // Sort by creation date and take first 5
       const recent = allBookings
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5)
         .map(booking => ({
-          // Keep full booking object to preserve all dynamic fields
           ...booking,
-          // Normalize key names used by the dashboard UI
-          id: booking.bookingId || booking.id,
+          id: booking.bookingId || booking.id || booking._id,
           customerName: booking.name || booking.customerName,
           theater: booking.theaterName || booking.theater,
-          amount: booking.totalAmount || booking.amount,
-          // Ensure payment and selected items are available
+          amount: booking.totalAmount ?? booking.amount ?? 0,
           advancePayment: booking.advancePayment || 0,
           venuePayment: booking.venuePayment || 0,
           selectedMovies: booking.selectedMovies || [],

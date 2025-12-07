@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 
+const normalizeStatus = (value: unknown) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/\(.*?\)/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -38,7 +45,7 @@ export async function GET(request: NextRequest) {
     // Filter by status
     const bookedSlots = combinedBookings.filter((booking) => {
       const bookingData = booking as Record<string, unknown>;
-      const status = String(bookingData.status || '').toLowerCase();
+      const status = normalizeStatus(bookingData.status);
       return allowedStatuses.has(status);
     });
 

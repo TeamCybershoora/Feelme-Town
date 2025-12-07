@@ -18,6 +18,7 @@ interface Settings {
   sitePhone: string;
   siteWhatsapp: string;
   siteAddress: string;
+  websiteUrl: string;
   whatsappPrefilledMessages: string[];
   
   // Email Settings
@@ -55,6 +56,7 @@ export default function SystemSettingsPage() {
     sitePhone: '',
     siteWhatsapp: '',
     siteAddress: '',
+    websiteUrl: '',
     whatsappPrefilledMessages: DEFAULT_WHATSAPP_PREFILLS,
     emailUser: '',
     emailPass: '',
@@ -117,6 +119,7 @@ export default function SystemSettingsPage() {
           sitePhone: process.env.NEXT_PUBLIC_SITE_PHONE ?? s.sitePhone ?? '',
           siteWhatsapp: process.env.NEXT_PUBLIC_SITE_WHATSAPP ?? s.siteWhatsapp ?? '',
           siteAddress: process.env.NEXT_PUBLIC_SITE_ADDRESS ?? s.siteAddress ?? '',
+          websiteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? s.websiteUrl ?? '',
           whatsappPrefilledMessages: Array.isArray(s.whatsappPrefilledMessages) && s.whatsappPrefilledMessages.length
             ? s.whatsappPrefilledMessages
             : DEFAULT_WHATSAPP_PREFILLS,
@@ -169,6 +172,7 @@ export default function SystemSettingsPage() {
         sitePhone: settings.sitePhone,
         siteWhatsapp: settings.siteWhatsapp,
         siteAddress: settings.siteAddress,
+        websiteUrl: settings.websiteUrl,
         whatsappPrefilledMessages: settings.whatsappPrefilledMessages,
 
         // Email
@@ -457,6 +461,17 @@ export default function SystemSettingsPage() {
                   value={settings.siteAddress}
                   onChange={(e) => setSettings({ ...settings, siteAddress: e.target.value })}
                   rows={3}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Website URL</label>
+                <input
+                  type="url"
+                  className="form-input"
+                  value={settings.websiteUrl}
+                  onChange={(e) => setSettings({ ...settings, websiteUrl: e.target.value })}
+                  placeholder="https://feelme-town.com"
                 />
               </div>
             </div>

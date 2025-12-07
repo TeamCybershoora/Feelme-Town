@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
 import { RefreshCw, Search, Eye } from 'lucide-react';
 import { consumeOrderAlertDetail, type OrderAlertDetailPayload } from '@/lib/order-alert';
 
@@ -14,6 +15,7 @@ interface OrderItem {
 }
 
 interface OrderRecord {
+
   _id?: string;
   bookingId?: string;
   mongoBookingId?: string;
@@ -29,7 +31,7 @@ interface OrderRecord {
   items?: OrderItem[];
   subtotal?: number;
   previousSubtotal?: number;
-  actionType?: 'save' | 'clear';
+  actionType?: 'save' | 'clear' | 'append' | 'update' | 'remove' | 'cancelled';
   status?: string;
   markPaid?: boolean;
   totalAmountBefore?: number;
@@ -39,6 +41,7 @@ interface OrderRecord {
   performedBy?: string;
   recordedAt?: string;
   createdAt?: string;
+  updatedAt?: string;
   orderPrepMinutes?: number;
   orderPrepReadyAt?: string;
 }
@@ -92,6 +95,7 @@ const formatDisplayDate = (value?: string) => {
 
 const formatTimeSlot = (value?: string) => {
   if (!value) return '—';
+
   if (/\d{1,2}:\d{2}\s*(AM|PM)\s*-\s*\d{1,2}:\d{2}\s*(AM|PM)/i.test(value)) {
     return value.toUpperCase();
   }
@@ -108,6 +112,11 @@ const formatTimeSlot = (value?: string) => {
   }
   return `${hour}:${mins} ${resolvedPeriod}`;
 };
+
+const buildItemsFingerprint = (items?: OrderItem[]) =>
+  (items || [])
+    .map((item) => `${item.id || item.name || 'item'}:${item.quantity ?? 0}:${item.price ?? 0}`)
+    .join('|');
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -134,6 +143,7 @@ export default function OrdersPage() {
   const [prepModalError, setPrepModalError] = useState('');
   const [prepModalLoading, setPrepModalLoading] = useState(false);
   const [prepModalAction, setPrepModalAction] = useState<'received' | 'ready'>('received');
+  const changeSignatureRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
@@ -174,20 +184,76 @@ export default function OrdersPage() {
       }
 
       const fetched = Array.isArray(data.orders) ? data.orders : [];
+      const prevOrdersByTicket = new Map<
+        string,
+        {
+          order: OrderRecord;
+          itemsFingerprint: string;
+        }
+      >();
+      orders.forEach((existing) => {
+        if (!existing?.ticketNumber) return;
+        prevOrdersByTicket.set(existing.ticketNumber, {
+          order: existing,
+          itemsFingerprint: buildItemsFingerprint(existing.items),
+        });
+      });
 
       setOrders(fetched);
-      setButtonStates(() => {
+      setButtonStates((prev) => {
         const next: Record<string, 'initial' | 'received' | 'ready'> = {};
         fetched.forEach((order: OrderRecord) => {
           const ticket = order.ticketNumber;
           if (!ticket) return;
           const status = (order.status || '').toLowerCase();
           const actionType = (order.actionType || '').toLowerCase();
-          const hasItems = Array.isArray(order.items) && order.items.length > 0;
+          const isAppendLike = actionType === 'append' || actionType === 'save';
+          const isUpdateLike = actionType === 'update';
+          const isRemovalLike = actionType === 'remove' || actionType === 'clear' || actionType === 'cancelled';
+          const itemsLength = Array.isArray(order.items) ? order.items.length : 0;
+          const signatureBase = order.recordedAt || order.updatedAt || order.createdAt || '';
+          const signature = [
+            actionType || 'none',
+            signatureBase,
+            itemsLength,
+            typeof order.subtotal === 'number' ? order.subtotal : 'no-subtotal',
+          ].join('|');
 
-          // If a new modification with items was recorded after delivery (append/save),
-          // treat this as a fresh cycle so the button goes back to "Order Received".
-          if ((actionType === 'append' || actionType === 'save') && hasItems) {
+          const prevSignature = changeSignatureRef.current[ticket];
+          const hasPrevSignature = typeof prevSignature === 'string' && prevSignature.length > 0;
+          const signatureChanged = Boolean(signature) && hasPrevSignature && signature !== prevSignature;
+          const hasItems = itemsLength > 0;
+          const prevEntry = prevOrdersByTicket.get(ticket);
+          const prevOrder = prevEntry?.order;
+          const prevItemsFingerprint = prevEntry?.itemsFingerprint || '';
+          const currentItemsFingerprint = buildItemsFingerprint(order.items);
+
+          const itemsChanged = Boolean(prevOrder) && prevItemsFingerprint !== currentItemsFingerprint;
+          const subtotalChanged =
+            Boolean(prevOrder) && typeof prevOrder?.subtotal === 'number' && prevOrder.subtotal !== order.subtotal;
+          const actionChanged =
+            Boolean(prevOrder) && (prevOrder?.actionType || '').toLowerCase() !== (order.actionType || '').toLowerCase();
+          const statusChanged =
+            Boolean(prevOrder) && (prevOrder?.status || '').toLowerCase() !== (order.status || '').toLowerCase();
+
+          const changeDetected =
+            signatureChanged || (prevOrder && (itemsChanged || subtotalChanged || actionChanged || statusChanged));
+
+          if (signature && !hasPrevSignature) {
+            changeSignatureRef.current[ticket] = signature;
+          } else if (signatureChanged) {
+            changeSignatureRef.current[ticket] = signature;
+          }
+
+          // If new items were appended/saved after a delivery, restart the cycle.
+          if (status === 'ready' && changeDetected && hasItems && (isAppendLike || isUpdateLike)) {
+            next[ticket] = 'initial';
+            changeSignatureRef.current[ticket] = signature;
+            return;
+          }
+
+          // Only reset to "Order Received" when a fresh change event is detected (not on initial load).
+          if (changeDetected && (isAppendLike || isUpdateLike || isRemovalLike)) {
             next[ticket] = 'initial';
             return;
           }
@@ -197,7 +263,7 @@ export default function OrdersPage() {
           } else if (status === 'received' || status === 'placed') {
             next[ticket] = 'received';
           } else {
-            next[ticket] = 'initial';
+            next[ticket] = prev[ticket] ?? 'initial';
           }
         });
         return next;
@@ -587,6 +653,23 @@ export default function OrdersPage() {
                     {selectedOrder.numberOfPeople}
                   </span>
                 )}
+                {(() => {
+                  const status = (selectedOrder.status || '').toLowerCase();
+                  const isDelivered = status === 'ready' || status === 'readying';
+                  const label = isDelivered
+                    ? 'Delivered'
+                    : status === 'received'
+                    ? 'Order Received'
+                    : status
+                    ? status.replace(/^\w/, (c) => c.toUpperCase())
+                    : 'Pending';
+                  const badgeClass = isDelivered
+                    ? 'detail-status delivered'
+                    : status === 'received'
+                    ? 'detail-status received'
+                    : 'detail-status pending';
+                  return <span className={badgeClass}>{label}</span>;
+                })()}
               </div>
               <p className="orders-subtitle">
                 Ticket: {selectedOrder.ticketNumber || '—'} • {(selectedOrder.items || []).length} items

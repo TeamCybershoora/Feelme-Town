@@ -1416,6 +1416,27 @@ export default function Theater() {
                                             // Show all time slots - no time-based filtering
                                             
                                             
+                                            // Robust time normalization so edited bookings with slightly different
+                                            // formatting (like leading zeros) still match configured time slots
+                                            const normalizeTimeString = (value: string | null | undefined) => {
+                                                if (!value) return '';
+                                                const trimmed = String(value).trim();
+                                                if (!trimmed) return '';
+                                                const parts = trimmed.split('-').map(part => part.trim());
+                                                const normalizedParts = parts.map((part) => {
+                                                    const match = part.match(/(\d{1,2})\s*:\s*(\d{2})\s*(AM|PM)/i);
+                                                    if (!match) {
+                                                        return part.replace(/\s+/g, ' ').toUpperCase();
+                                                    }
+                                                    const hour = parseInt(match[1], 10);
+                                                    const minutes = match[2];
+                                                    const period = match[3].toUpperCase();
+                                                    const normalizedHour = String(hour);
+                                                    return `${normalizedHour}:${minutes} ${period}`;
+                                                });
+                                                return normalizedParts.join(' - ');
+                                            };
+
                                             // If no time slots available from database, show message
                                             if (allTimeSlots.length === 0) {
                                                 return (
@@ -1431,7 +1452,8 @@ export default function Theater() {
                                             
                                             
                                             return allTimeSlots.map((timeSlot: string) => {
-                                                const isBooked = bookedTimeSlots.includes(timeSlot);
+                                                const normalizedSlot = normalizeTimeString(timeSlot);
+                                                const isBooked = !!normalizedSlot && bookedTimeSlots.some((slot: string) => normalizeTimeString(slot) === normalizedSlot);
                                                 const isSelected = selectedTimeSlot === timeSlot;
                                                 
                                                 // Debug logging for each slot

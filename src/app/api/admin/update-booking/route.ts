@@ -27,7 +27,8 @@ export async function PUT(request: NextRequest) {
       userId,
       paidAt,
       sendInvoice = true,
-      isManualBooking = false 
+      isManualBooking = false,
+      resendConfirmationEmail = false
     } = body;
 
     if (!bookingId) {
@@ -520,6 +521,42 @@ export async function PUT(request: NextRequest) {
           }
         }
       }
+
+      if (result.success && resendConfirmationEmail) {
+        try {
+          let updatedBookingData: any = null;
+          if (isManual) {
+            const manualBookings = await database.getAllManualBookings();
+            updatedBookingData = manualBookings.manualBookings?.find((b: any) => (b.bookingId || b.id) === bookingId) || null;
+          } else {
+            const updatedBookingResult = await database.getBookingById(bookingId);
+            updatedBookingData = updatedBookingResult.booking;
+          }
+
+          const bookingForEmail = updatedBookingData || currentBooking;
+          if (bookingForEmail) {
+            const mailData: any = {
+              id: bookingForEmail.bookingId || bookingForEmail.id || bookingId,
+              name: bookingForEmail.name || bookingForEmail.customerName,
+              email: bookingForEmail.email,
+              phone: bookingForEmail.phone,
+              theaterName: bookingForEmail.theaterName || bookingForEmail.theater,
+              date: bookingForEmail.date,
+              time: bookingForEmail.time,
+              occasion: bookingForEmail.occasion,
+              numberOfPeople: bookingForEmail.numberOfPeople,
+              selectedCakes: bookingForEmail.selectedCakes || [],
+              selectedDecorItems: bookingForEmail.selectedDecorItems || [],
+              selectedGifts: bookingForEmail.selectedGifts || [],
+              selectedMovies: bookingForEmail.selectedMovies || [],
+            };
+            emailService.sendBookingConfirmed(mailData).catch(() => {});
+          }
+        } catch (resendError) {
+          console.error('⚠️ Failed to resend confirmation email:', resendError);
+        }
+      }
+
     }
 
     if (result.success) {

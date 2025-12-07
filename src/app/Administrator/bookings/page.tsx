@@ -718,14 +718,22 @@ export default function BookingsPage() {
   };
 
   const handleEditBooking = (booking: any) => {
-    const query = new URLSearchParams({
-      bookingId: String(booking.originalBookingId || booking.id || ''),
-      email: String(booking.email || ''),
-      theaterName: String(booking.theaterName || booking.theater || ''),
-      date: String(booking.date || ''),
-      time: String(booking.time || ''),
-    }).toString();
-    router.push(`/Editbooking?${query}`);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('editBookingSource', 'admin');
+      } catch {
+        // ignore
+      }
+    }
+    const params = new URLSearchParams();
+    const bookingId = booking.originalBookingId || booking.id || booking.bookingId;
+    if (bookingId) params.set('bookingId', String(bookingId));
+    if (booking._id) params.set('mongoId', String(booking._id));
+    if (booking.email) params.set('email', String(booking.email));
+    const phoneValue = booking.phone || booking.whatsappNumber;
+    if (phoneValue) params.set('phone', String(phoneValue));
+
+    router.push(`/EditBooking?${params.toString()}`);
   };
 
   // Delete/Cancel booking

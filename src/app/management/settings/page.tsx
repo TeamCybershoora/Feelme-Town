@@ -12,6 +12,7 @@ interface Settings {
   sitePhone: string;
   siteWhatsapp: string;
   siteAddress: string;
+  websiteUrl: string;
   
   // Email Settings
   emailUser: string;
@@ -48,6 +49,7 @@ export default function SystemSettingsPage() {
     sitePhone: '',
     siteWhatsapp: '',
     siteAddress: '',
+    websiteUrl: '',
     emailUser: '',
     emailPass: '',
     emailFrom: '',
@@ -94,12 +96,13 @@ export default function SystemSettingsPage() {
       if (data.success && data.settings) {
         const s = data.settings;
         const merged: Settings = {
-          // General and non-email from env (fallback to DB)
+          // General and non-email
           siteName: process.env.NEXT_PUBLIC_SITE_NAME ?? s.siteName ?? '',
           siteEmail: process.env.NEXT_PUBLIC_SITE_EMAIL ?? s.siteEmail ?? '',
           sitePhone: process.env.NEXT_PUBLIC_SITE_PHONE ?? s.sitePhone ?? '',
           siteWhatsapp: process.env.NEXT_PUBLIC_SITE_WHATSAPP ?? s.siteWhatsapp ?? '',
           siteAddress: process.env.NEXT_PUBLIC_SITE_ADDRESS ?? s.siteAddress ?? '',
+          websiteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? s.websiteUrl ?? '',
 
           // Email strictly from DB
           emailUser: s.emailUser ?? '',
@@ -145,6 +148,12 @@ export default function SystemSettingsPage() {
       
       // Persist email-related and Cloudinary settings to database
       const payload = {
+        siteName: settings.siteName,
+        siteEmail: settings.siteEmail,
+        sitePhone: settings.sitePhone,
+        siteWhatsapp: settings.siteWhatsapp,
+        siteAddress: settings.siteAddress,
+        websiteUrl: settings.websiteUrl,
         emailUser: settings.emailUser,
         emailPass: settings.emailPass,
         emailFrom: settings.emailFrom,
@@ -276,6 +285,17 @@ export default function SystemSettingsPage() {
                   value={settings.siteAddress}
                   onChange={(e) => setSettings({ ...settings, siteAddress: e.target.value })}
                   rows={3}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Website URL</label>
+                <input
+                  type="url"
+                  className="form-input"
+                  value={settings.websiteUrl}
+                  onChange={(e) => setSettings({ ...settings, websiteUrl: e.target.value })}
+                  placeholder="https://feelme-town.com"
                 />
               </div>
             </div>

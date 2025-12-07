@@ -200,7 +200,7 @@ export default function BookingsPage() {
       const [confirmedBookingsResponse, completedBookingsResponse, manualBookingsResponse, cancelledBookingsResponse, incompleteBookingsResponse] = await Promise.all([
         fetch('/api/admin/bookings'), // Confirmed bookings from database
         fetch('/api/admin/export-bookings-json?type=completed'), // Completed bookings from JSON file
-        fetch('/api/admin/export-bookings-json?type=manual'), // Manual bookings from JSON file
+        fetch('/api/admin/manual-bookings'), // Manual bookings from MongoDB
         fetch('/api/admin/export-bookings-json?type=cancelled'), // Cancelled bookings from JSON file
         fetch('/api/incomplete-booking') // Incomplete bookings from database
       ]);
@@ -231,8 +231,8 @@ export default function BookingsPage() {
       // Completed bookings from GoDaddy SQL (no fallback to JSON files)
       let completedArray = (completedData.bookings || []) as any[];
 
-      // Manual bookings are now fetched from database, not JSON files
-      let manualArray = (manualData.manualBookings || []) as any[];
+      // Manual bookings are fetched from MongoDB via the dedicated API
+      let manualArray = (manualData.manualBookings || manualData.bookings || manualData.records || []) as any[];
 
       // Cancelled bookings from GoDaddy SQL (no fallback to JSON files)
       let cancelledArray = (cancelledData.bookings || []) as any[];
@@ -274,7 +274,7 @@ export default function BookingsPage() {
       const manualBookings = (manualArray).map((booking: any) => ({
         ...booking,
         bookingType: 'manual',
-        status: 'manual',
+        status: booking.status || 'manual',
         paymentStatus: (booking.paymentStatus || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid',
         venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null,
         createdAtIST: convertToIST(booking.createdAt)
@@ -313,6 +313,14 @@ export default function BookingsPage() {
 
       // Transform data for display (keep status as-is from database)
       const transformedBookings = allBookingsToShow.map((booking: any, index: number) => {
+        const rawStatus = (booking.status || 'pending').toString();
+        const rawBookingType = (booking.bookingType || (booking.isManualBooking ? 'manual' : 'online')).toString();
+        const normalizedBookingType = rawBookingType.toLowerCase();
+        const normalizedStatus = rawStatus
+          .toLowerCase()
+          .replace(/\(.*?\)/g, '')
+          .replace(/\s+/g, '')
+          .trim() || 'pending';
         const normalizedPaymentStatus = (booking.paymentStatus || booking.payment_status || 'unpaid').toLowerCase() === 'paid' ? 'paid' : 'unpaid';
         // Use MongoDB _id as unique key (always unique) or create composite key
         const uniqueId = booking._id ? booking._id.toString() : `${booking.bookingId || booking.id || 'unknown'}-${index}-${Date.now()}`;
@@ -325,10 +333,12 @@ export default function BookingsPage() {
           theater: booking.theaterName || booking.theater || 'Unknown Theater',
           date: booking.date || '',
           time: booking.time || '',
-          status: booking.status || 'pending', // Keep exact status from database
+          status: rawStatus, // Preserve original casing/suffix for display
+          statusKey: normalizedStatus,
           amount: booking.totalAmount || booking.amount || 0,
           bookingDate: booking.createdAt ? new Date(booking.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          bookingType: booking.bookingType || 'online',
+          bookingType: normalizedBookingType,
+          bookingTypeLabel: rawBookingType,
           occasion: booking.occasion || '',
           paymentStatus: (booking.status || '').toLowerCase() === 'completed' ? 'paid' : normalizedPaymentStatus,
           occasionPersonName: booking.occasionPersonName || '',
@@ -339,7 +349,11 @@ export default function BookingsPage() {
           proposerName: booking.proposerName || '',
           valentineName: booking.valentineName || '',
           customCelebration: booking.customCelebration || '',
-          cancelReason: booking.cancelReason || booking.cancellationReason || ''
+          cancelReason: booking.cancelReason || booking.cancellationReason || '',
+          createdBy: booking.createdBy || '',
+          staffName: booking.staffName || '',
+          adminName: booking.adminName || '',
+          ticketNumber: booking.ticketNumber || booking.ticket_number || ''
         };
 
         // Debug: Log booking transformation
@@ -463,11 +477,11 @@ export default function BookingsPage() {
   // Calculate status counts
   const statusCounts = {
     all: bookings.length,
-    pending: bookings.filter(b => (b.status || '').toLowerCase() === 'pending').length,
-    confirmed: bookings.filter(b => (b.status || '').toLowerCase() === 'confirmed').length,
-    cancelled: bookings.filter(b => (b.status || '').toLowerCase() === 'cancelled').length,
-    completed: bookings.filter(b => (b.status || '').toLowerCase() === 'completed').length,
-    manual: bookings.filter(b => b.bookingType === 'manual' || (b.status && b.status.toLowerCase() === 'manual')).length,
+    pending: bookings.filter(b => (b.statusKey || '').toLowerCase() === 'pending').length,
+    confirmed: bookings.filter(b => (b.statusKey || '').toLowerCase() === 'confirmed').length,
+    cancelled: bookings.filter(b => (b.statusKey || '').toLowerCase() === 'cancelled').length,
+    completed: bookings.filter(b => (b.statusKey || '').toLowerCase() === 'completed').length,
+    manual: bookings.filter(b => b.bookingType === 'manual' || (b.statusKey && b.statusKey.toLowerCase() === 'manual')).length,
   };
 
   const filteredBookings = bookings.filter(booking => {
@@ -492,20 +506,17 @@ export default function BookingsPage() {
     if (statusFilter === 'All') {
       matchesFilter = true;
     } else if (statusFilter === 'Manual') {
-      // Show bookings with bookingType='manual' OR status='manual'
-      matchesFilter = booking.bookingType === 'manual' ||
-        (booking.status && booking.status.toLowerCase() === 'manual');
+      matchesFilter =
+        booking.bookingType === 'manual' ||
+        (booking.statusKey && booking.statusKey.toLowerCase() === 'manual');
     } else if (statusFilter === 'Cancelled') {
-      // Show bookings with status='cancelled'
-      const bookingStatus = (booking.status || '').toLowerCase();
+      const bookingStatus = (booking.statusKey || booking.status || '').toLowerCase();
       matchesFilter = bookingStatus === 'cancelled';
     } else if (statusFilter === 'Completed') {
-      // Show bookings with status='completed'
-      const bookingStatus = (booking.status || '').toLowerCase();
+      const bookingStatus = (booking.statusKey || booking.status || '').toLowerCase();
       matchesFilter = bookingStatus === 'completed';
     } else {
-      // Exact case-insensitive status matching from database
-      const bookingStatus = (booking.status || '').toLowerCase();
+      const bookingStatus = (booking.statusKey || booking.status || '').toLowerCase();
       const filterStatus = statusFilter.toLowerCase();
       matchesFilter = bookingStatus === filterStatus;
     }
@@ -718,14 +729,22 @@ export default function BookingsPage() {
   };
 
   const handleEditBooking = (booking: any) => {
-    const query = new URLSearchParams({
-      bookingId: String(booking.originalBookingId || booking.id || ''),
-      email: String(booking.email || ''),
-      theaterName: String(booking.theaterName || booking.theater || ''),
-      date: String(booking.date || ''),
-      time: String(booking.time || ''),
-    }).toString();
-    router.push(`/Editbooking?${query}`);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('editBookingSource', 'management');
+      } catch {
+        // ignore
+      }
+    }
+    const params = new URLSearchParams();
+    const bookingId = booking.originalBookingId || booking.id || booking.bookingId;
+    if (bookingId) params.set('bookingId', String(bookingId));
+    if (booking._id) params.set('mongoId', String(booking._id));
+    if (booking.email) params.set('email', String(booking.email));
+    const phoneValue = booking.phone || booking.whatsappNumber;
+    if (phoneValue) params.set('phone', String(phoneValue));
+
+    router.push(`/EditBooking?${params.toString()}`);
   };
 
   // Delete/Cancel booking
@@ -1105,7 +1124,7 @@ export default function BookingsPage() {
           <thead>
             <tr>
               <th>S.No</th>
-              <th>Booking ID</th>
+              <th>Booking / Ticket</th>
               <th>Customer</th>
               <th>Contact</th>
               <th>Theater</th>
@@ -1132,21 +1151,35 @@ export default function BookingsPage() {
                 const currentDateConfirmedBookings = displayedBookings.filter((b: any, i: number) =>
                   i <= index &&
                   isCurrentDateBooking(b.date) &&
-                  b.status.toLowerCase() === 'confirmed'
+                  (b.statusKey || '').toLowerCase() === 'confirmed'
                 );
                 const currentDateConfirmedBookingNumber = currentDateConfirmedBookings.length;
                 const normalizedPaymentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
                 const isPaid = normalizedPaymentStatus === 'paid';
-                const canTogglePayment = (booking.status || '').toLowerCase() === 'confirmed';
+                const canTogglePayment = (booking.statusKey || '').toLowerCase() === 'confirmed';
                 const isPaymentUpdating = paymentUpdatingId === booking.id;
 
                 return (
                   <tr key={booking.id}>
                     <td>{index + 1}</td>
-                    <td>#{booking.originalBookingId || booking.id}</td>
+                    <td>
+                      <div className="booking-id-cell">
+                        <div className="booking-number">#{booking.originalBookingId || booking.id}</div>
+                        {booking.ticketNumber ? (
+                          <div className="ticket-number">Ticket: {booking.ticketNumber}</div>
+                        ) : null}
+                      </div>
+                    </td>
                     <td>
                       <div className="customer-info">
-                        <div className="customer-name">{booking.customerName}</div>
+                        <div className="customer-name">
+                          {booking.customerName}
+                          {booking.bookingType === 'manual' && (
+                            <span className="booking-type-badge manual">
+                              Manual · {(booking.createdBy || booking.staffName || booking.adminName || 'Staff/Admin')}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td>
@@ -1170,7 +1203,7 @@ export default function BookingsPage() {
                     </td>
                     <td>{booking.cancelReason || '-'}</td>
                     <td>
-                      <span className={`status-badge ${booking.status.toLowerCase()}`}>
+                      <span className={`status-badge ${(booking.statusKey || booking.status || '').toLowerCase()}`}>
                         {booking.status}
                       </span>
                     </td>

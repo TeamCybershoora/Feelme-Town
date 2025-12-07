@@ -3,6 +3,7 @@
 
 import nodemailer from 'nodemailer';
 import database from '@/lib/db-connect';
+import getSiteUrl from '@/lib/site-url';
 const CURRENT_YEAR = new Date().getFullYear();
 // Helper: Render Occasion Details from dynamic fields present in bookingData
 const renderOccasionDetails = (bookingData: Record<string, any>) => {
@@ -141,11 +142,6 @@ const getSettingsOrDefault = async () => {
   } catch (e) {
     return {} as any;
   }
-};
-
-const getSiteUrl = () => {
-  const url = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_BASE_URL || process.env.BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
-  return (url || 'http://localhost:3000').replace(/\/$/, '');
 };
 
 const createTransporter = async () => {
@@ -529,7 +525,7 @@ const emailTemplates = {
   }),
 
   // Booking completed successfully
-  bookingComplete: (bookingData: BookingData) => ({
+  bookingComplete: (bookingData: BookingData, siteUrl: string) => ({
     subject: 'Booking Confirmed - FeelME Town - Premium Entertainment',
     html: `
       <!DOCTYPE html>
@@ -1113,7 +1109,7 @@ const emailTemplates = {
                   </p>
                 </div>
                 
-                <a href="${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/theater?cancelBookingId=${bookingData.id}&email=${encodeURIComponent(bookingData.email)}" class="cta-button cancel-button">Cancel Booking</a>
+                <a href="${siteUrl}/theater?cancelBookingId=${bookingData.id}&email=${encodeURIComponent(bookingData.email)}" class="cta-button cancel-button">Cancel Booking</a>
               </div>
               
               <div style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 15px;">
@@ -1191,7 +1187,7 @@ const emailTemplates = {
     selectedCakes?: Array<{ id: string; name: string; price: number; quantity: number }>;
     selectedDecorItems?: Array<{ id: string; name: string; price: number; quantity: number }>;
     selectedGifts?: Array<{ id: string; name: string; price: number; quantity: number }>
-  }) => ({
+  }, siteUrl: string) => ({
     subject: 'Complete Your Booking - FeelME Town - Don\'t Miss Out!',
     html: `
      <!DOCTYPE html>
@@ -1525,7 +1521,7 @@ const emailTemplates = {
                         <table cellpadding="0" cellspacing="0" border="0" style="background-color: #667eea; border-radius: 50px;">
                           <tr>
                             <td style="padding: 18px 45px;">
-                              <a href="${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/theater?bookingId=${bookingData.bookingId || 'incomplete'}&email=${encodeURIComponent(bookingData.email || '')}" 
+                              <a href="${siteUrl}/theater?bookingId=${bookingData.bookingId || 'incomplete'}&email=${encodeURIComponent(bookingData.email || '')}" 
                                  style="color: #ffffff; font-size: 16px; font-weight: bold; text-decoration: none; font-family: Arial, sans-serif;">Complete Booking Now & Save 20%</a>
                             </td>
                           </tr>
@@ -1652,7 +1648,7 @@ const emailService = {
     if (!bookingData?.email) {
       return { success: false, error: 'No email provided' };
     }
-    const siteUrl = getSiteUrl();
+    const siteUrl = await getSiteUrl();
     const trackUrl = bookingData.trackUrl || `${siteUrl}/order-items?ticket=${encodeURIComponent(bookingData.ticketNumber || '')}`;
     const etaSentence = describePrepEta(bookingData);
     const html = buildOrderStatusEmail(bookingData, {
@@ -1669,7 +1665,7 @@ const emailService = {
     if (!bookingData?.email) {
       return { success: false, error: 'No email provided' };
     }
-    const siteUrl = getSiteUrl();
+    const siteUrl = await getSiteUrl();
     const trackUrl = bookingData.trackUrl || `${siteUrl}/order-items?ticket=${encodeURIComponent(bookingData.ticketNumber || '')}`;
     const etaSentence = describePrepEta(bookingData);
     const html = buildOrderStatusEmail(bookingData, {
@@ -1689,7 +1685,7 @@ const emailService = {
     if (!bookingData.email) {
       return { success: false, error: 'No email provided' };
     }
-    const siteUrl = getSiteUrl();
+    const siteUrl = await getSiteUrl();
     const bookingId = bookingData.id || (bookingData as any).bookingId || '';
     const invoicePageUrl = `${siteUrl}/invoice/${encodeURIComponent(bookingId)}`;
     const fallbackPdfUrl = `${siteUrl}/api/generate-invoice?bookingId=${encodeURIComponent(bookingId)}&format=pdf`;
@@ -1745,7 +1741,7 @@ const emailService = {
     if (!bookingData.email) {
       return { success: false, error: 'No email provided' };
     }
-    const siteUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const siteUrl = await getSiteUrl();
     const template = {
       subject: 'Booking Confirmed - FeelME Town 🎉',
       html: `
@@ -1907,14 +1903,15 @@ const emailService = {
     }
 
     try {
+      const siteUrl = await getSiteUrl();
       // Generate email template
-      const template = emailTemplates.bookingComplete(bookingData);
+      const template = emailTemplates.bookingComplete(bookingData, siteUrl);
 
       // Generate PDF invoice
       console.log('📄 Generating PDF invoice for email attachment...');
       const fetch = (await import('node-fetch')).default;
 
-      const pdfResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/generate-invoice`, {
+      const pdfResponse = await fetch(`${siteUrl}/api/generate-invoice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1956,7 +1953,8 @@ const emailService = {
     } catch (error) {
       console.error('❌ Error generating PDF attachment:', error);
       // Fallback: send email without attachment
-      const template = emailTemplates.bookingComplete(bookingData);
+      const siteUrl = await getSiteUrl();
+      const template = emailTemplates.bookingComplete(bookingData, siteUrl);
       return await sendEmail(bookingData.email, template.subject, template.html);
     }
   },
@@ -2018,7 +2016,8 @@ const emailService = {
 
     }
 
-    const template = emailTemplates.bookingIncomplete(bookingData);
+    const siteUrl = await getSiteUrl();
+    const template = emailTemplates.bookingIncomplete(bookingData, siteUrl);
     return await sendEmail(bookingData.email, template.subject, template.html);
   },
 

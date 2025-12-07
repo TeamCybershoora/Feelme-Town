@@ -1,6 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 
+const normalizeStatus = (value: unknown) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/\(.*?\)/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+
+const normalizeTimePart = (token?: string) => {
+  if (!token) return '';
+  const trimmed = token.trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+  if (!match) {
+    return trimmed.replace(/\s+/g, ' ').toUpperCase();
+  }
+  let hour = parseInt(match[1], 10);
+  const minutes = match[2] ? match[2].padStart(2, '0') : '00';
+  const period = match[3].toUpperCase();
+  if (hour === 0) hour = 12;
+  if (hour > 12) hour = hour % 12 || 12;
+  return `${String(hour)}:${minutes} ${period}`;
+};
+
+const normalizeTimeRange = (value?: string) => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const parts = trimmed.split('-').map((part) => normalizeTimePart(part));
+  return parts.filter(Boolean).join(' - ');
+};
+
+// Normalize various date string formats to YYYY-MM-DD for reliable equality checks
+const normalizeDateToYMD = (input?: string | null): string | null => {
+  if (!input) return null;
+  const raw = String(input).trim();
+  if (!raw) return null;
+  try {
+    let candidate = raw;
+    // If contains weekday like "Tuesday, December 9, 2025" remove weekday+
+    candidate = candidate.replace(/^[A-Za-z]+\s*,\s*/,'').trim();
+    // If input like 2025-12-09 or December 9, 2025 both should parse
+    const d = new Date(candidate);
+    if (Number.isNaN(d.getTime())) return null;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  } catch {
+    return null;
+  }
+};
+
 // GET /api/time-slots-with-bookings - Get time slots with booking status
 export async function GET(request: NextRequest) {
   try {
@@ -213,36 +265,28 @@ export async function GET(request: NextRequest) {
     // Get all bookings for the specified date and theater
     const bookingsResult = await database.getAllBookings();
     let bookedSlots: string[] = [];
-    
+
     if (bookingsResult.success && date && theater) {
       const bookings = bookingsResult.bookings || [];
-      
-      
-      
-      
-      // Filter bookings for the specific date and theater
+      const allowedStatuses = new Set(['confirmed', 'completed', 'pending', 'manual', 'paid']);
+      const targetYMD = normalizeDateToYMD(date);
+
       bookedSlots = bookings
         .filter((booking: any) => {
-          // Check if booking matches date and theater
-          const bookingDate = booking.date;
+          const bookingDate = booking.date || booking.selectedDate;
           const bookingTheater = booking.theater || booking.theaterName;
-          
-          
-          
-          const dateMatch = bookingDate === date;
-          const theaterMatch = bookingTheater === theater || 
-                              (bookingTheater && bookingTheater.includes(theater.split(' ')[0])) ||
-                              (theater && theater.includes(bookingTheater));
-          const statusMatch = booking.status === 'confirmed' || booking.status === 'completed';
-          
-          
-          
+          const normalizedStatus = normalizeStatus(booking.status);
+          const bookingYMD = normalizeDateToYMD(bookingDate);
+          const dateMatch = !!bookingYMD && !!targetYMD && bookingYMD === targetYMD;
+          const theaterMatch =
+            bookingTheater === theater ||
+            (bookingTheater && theater && bookingTheater.includes(theater.split(' ')[0])) ||
+            (theater && bookingTheater && theater.includes(bookingTheater));
+          const statusMatch = allowedStatuses.has(normalizedStatus);
           return dateMatch && theaterMatch && statusMatch;
         })
-        .map((booking: any) => booking.time)
+        .map((booking: any) => normalizeTimeRange(booking.time || booking.timeSlot))
         .filter(Boolean);
-        
-      
     }
     
     // Function to check if time slot is within 1 hour (Time is going) - EXACT SAME LOGIC AS THEATER PAGE
@@ -286,8 +330,11 @@ export async function GET(request: NextRequest) {
 
     // Combine time slots with booking status and "going" status
     const timeSlotsWithStatus = theaterTimeSlots.map((slot: any) => {
-      const isBooked = bookedSlots.includes(slot.timeRange || `${slot.startTime} - ${slot.endTime}`);
-      const isGoing = isTimeSlotGoing(slot.timeRange); // Pass timeRange string to function
+      const slotRange = normalizeTimeRange(
+        slot.timeRange || `${formatTime12Hour(slot.startTime)} - ${formatTime12Hour(slot.endTime)}`
+      );
+      const isBooked = bookedSlots.includes(slotRange);
+      const isGoing = isTimeSlotGoing(slotRange); // Pass normalized timeRange
       
       let bookingStatus = 'available';
       if (isBooked) bookingStatus = 'booked';

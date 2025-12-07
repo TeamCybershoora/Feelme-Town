@@ -122,6 +122,15 @@ export default function OrderFoodPage() {
   const [autoFetchTriggered, setAutoFetchTriggered] = useState(false);
   const [notifyingCustomer, setNotifyingCustomer] = useState(false);
 
+  const normalizedBookingStatus = (booking?.status || '').toLowerCase();
+  const orderIsDelivered = normalizedBookingStatus === 'ready' || normalizedBookingStatus === 'readying';
+  const orderStatusLabel =
+    orderIsDelivered
+      ? 'Delivered'
+      : normalizedBookingStatus === 'received'
+      ? 'Order Received'
+      : normalizedBookingStatus || 'Pending';
+
   const normalizedTicketInput = ticketNumber.trim().toUpperCase();
   const bookingMatchesInput =
     normalizedTicketInput.length > 0 && booking?.ticketNumber?.toUpperCase() === normalizedTicketInput;
@@ -145,6 +154,11 @@ export default function OrderFoodPage() {
   const removeOrderedItem = async (idToRemove?: string) => {
     if (!booking) {
       setError('No booking loaded. Enter ticket number first.');
+      return;
+    }
+    if (orderIsDelivered) {
+      setInfo('');
+      setError('This order has already been delivered. Please contact the FeelME Town team to make changes.');
       return;
     }
     if (!idToRemove) return;
@@ -1667,11 +1681,46 @@ export default function OrderFoodPage() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                      <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Your Ordered Items</h2>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Your Ordered Items</h2>
+                        {booking && (
+                          <span
+                            style={{
+                              padding: '4px 12px',
+                              borderRadius: '999px',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              background: orderIsDelivered ? 'rgba(34,197,94,0.15)' : 'rgba(248,181,0,0.15)',
+                              color: orderIsDelivered ? '#4ade80' : '#fbbf24',
+                              border: `1px solid ${orderIsDelivered ? 'rgba(34,197,94,0.35)' : 'rgba(248,181,0,0.45)'}`,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                            }}
+                          >
+                            {orderStatusLabel}
+                          </span>
+                        )}
+                      </div>
                       <div style={{ color: mutedText, fontSize: '0.95rem' }}>
                         Service Total: <span style={{ color: goldColor, fontWeight: 700 }}>₹{Math.round(orderedTotal)}</span>
                       </div>
                     </div>
+
+                    {orderIsDelivered && (
+                      <div
+                        style={{
+                          marginBottom: 16,
+                          padding: '14px 16px',
+                          borderRadius: 18,
+                          background: 'rgba(34,197,94,0.08)',
+                          border: '1px solid rgba(34,197,94,0.25)',
+                          color: '#bbf7d0',
+                          fontSize: 13,
+                        }}
+                      >
+                        This order has been marked as delivered. Removing items is disabled until staff add new items again.
+                      </div>
+                    )}
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       {orderedList.map((item, idx) => (
@@ -1715,24 +1764,42 @@ export default function OrderFoodPage() {
                                 ₹{Number(item.price || 0) * Number(item.quantity || 0)}
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              disabled={saving}
-                              onClick={() => removeOrderedItem(item.id)}
-                              style={{
-                                padding: isSmallScreen ? '6px 10px' : '8px 12px',
-                                borderRadius: isSmallScreen ? 999 : 12,
-                                border: `1px solid ${borderColor}`,
-                                background: 'transparent',
-                                color: '#ff9b9b',
-                                fontWeight: 600,
-                                cursor: saving ? 'not-allowed' : 'pointer',
-                                fontSize: 12,
-                                minWidth: isSmallScreen ? 36 : 80,
-                              }}
-                            >
-                              {saving ? '…' : isSmallScreen ? '×' : 'Remove'}
-                            </button>
+                            {orderIsDelivered ? (
+                              <span
+                                style={{
+                                  padding: isSmallScreen ? '6px 10px' : '10px 18px',
+                                  borderRadius: 999,
+                                  border: '1px solid rgba(34,197,94,0.35)',
+                                  background: 'rgba(34,197,94,0.12)',
+                                  color: '#4ade80',
+                                  fontWeight: 600,
+                                  fontSize: 12,
+                                  minWidth: isSmallScreen ? 36 : 80,
+                                  textAlign: 'center',
+                                }}
+                              >
+                                Delivered
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => removeOrderedItem(item.id)}
+                                style={{
+                                  padding: isSmallScreen ? '6px 10px' : '8px 12px',
+                                  borderRadius: isSmallScreen ? 999 : 12,
+                                  border: `1px solid ${borderColor}`,
+                                  background: 'transparent',
+                                  color: '#ff9b9b',
+                                  fontWeight: 600,
+                                  cursor: saving ? 'not-allowed' : 'pointer',
+                                  fontSize: 12,
+                                  minWidth: isSmallScreen ? 36 : 80,
+                                }}
+                              >
+                                {saving ? '…' : isSmallScreen ? '×' : 'Remove'}
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1741,22 +1808,22 @@ export default function OrderFoodPage() {
                     <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
                       <button
                         type="button"
-                        disabled={saving}
+                        disabled={saving || orderIsDelivered}
                         onClick={cancelOrder}
                         style={{
                           flex: 1,
                           padding: '12px',
                           borderRadius: '24px',
-                          border: `1px solid ${borderColor}`,
-                          background: 'transparent',
-                          color: '#ff9b9b',
+                          border: `1px solid ${orderIsDelivered ? 'rgba(34,197,94,0.35)' : borderColor}`,
+                          background: orderIsDelivered ? 'rgba(34,197,94,0.08)' : 'transparent',
+                          color: orderIsDelivered ? '#4ade80' : '#ff9b9b',
                           fontWeight: 600,
-                          cursor: saving ? 'not-allowed' : 'pointer',
+                          cursor: saving || orderIsDelivered ? 'not-allowed' : 'pointer',
                           fontSize: 14,
-                          opacity: saving ? 0.6 : 1,
+                          opacity: saving || orderIsDelivered ? 0.6 : 1,
                         }}
                       >
-                        {saving ? 'Cancelling…' : 'Cancel All Order'}
+                        {orderIsDelivered ? 'Delivered' : saving ? 'Cancelling…' : 'Cancel All Order'}
                       </button>
                       <button
                         type="button"

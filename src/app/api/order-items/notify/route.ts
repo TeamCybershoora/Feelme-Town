@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import emailService from '@/lib/email-service';
 import database from '@/lib/db-connect';
+import getSiteUrl from '@/lib/site-url';
 
 const parsePrepMinutes = (value: unknown) => {
   if (value === null || value === undefined) return null;
@@ -32,8 +33,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Booking does not have an email on file.' }, { status: 400 });
     }
 
-    const origin = request.nextUrl?.origin || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-    const trackUrl = `${origin.replace(/\/$/, '')}/order-items?ticket=${encodeURIComponent(ticketNumber)}`;
+    const siteUrl = await getSiteUrl();
+    const trackUrl = `${siteUrl}/order-items?ticket=${encodeURIComponent(ticketNumber)}`;
 
     const prepMinutes = parsePrepMinutes(body.prepMinutes);
     const prepReadyAt = prepMinutes ? new Date(Date.now() + prepMinutes * 60 * 1000) : null;
