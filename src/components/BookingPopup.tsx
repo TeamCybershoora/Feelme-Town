@@ -116,6 +116,23 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const { showSuccess, showError, toasts, removeToast } = useToast();
   const [isSendingEditRequest, setIsSendingEditRequest] = useState(false);
 
+  const buildCreatorMetadata = () => {
+    if (!isManualMode || !userInfo || !userInfo.type) return undefined;
+    if (userInfo.type === 'staff') {
+      return {
+        type: 'staff' as const,
+        staffName: userInfo.staffName || 'Staff Member',
+        staffId: userInfo.staffId,
+        profilePhoto: userInfo.profilePhoto
+      };
+    }
+    return {
+      type: 'admin' as const,
+      adminName: userInfo.adminName || 'Administrator',
+      profilePhoto: userInfo.profilePhoto
+    };
+  };
+
   const [formData, setFormData] = useState<BookingForm>({
     bookingName: '',
     numberOfPeople: 1, // Will be auto-adjusted by useEffect when theater data loads
@@ -599,6 +616,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         venuePayment,
         appliedCouponCode: appliedCouponCode || undefined,
         couponDiscount: appliedDiscount || 0,
+        couponDiscountType: appliedDiscountType || undefined,
+        couponDiscountValue: appliedDiscountValue || undefined,
         status: isManualMode ? 'manual' : 'confirmed',
         bookingType: isManualMode ? 'manual' : 'online',
         isManualBooking: !!isManualMode,
@@ -628,17 +647,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
       // Attach creator info for manual mode
       if (isManualMode) {
-        // Build a clear "Booked by ..." label for database readability
-        if (userInfo?.type === 'staff') {
-          const labelName = userInfo.staffName || userInfo.staffId || 'Staff';
-          const idSuffix = userInfo.staffId ? ` (${userInfo.staffId})` : '';
-          bookingData.createdBy = `Booked by ${labelName}${idSuffix}`;
-        } else {
-          const adminLabel = userInfo?.adminName || 'Admin';
-          bookingData.createdBy = `Booked by ${adminLabel}`;
-        }
-
-        // Also persist raw creator details for future use
+        bookingData.createdBy = buildCreatorMetadata();
+        // Also persist raw creator details for compatibility with older flows
         if (userInfo?.staffId) bookingData.staffId = userInfo.staffId;
         if (userInfo?.staffName) bookingData.staffName = userInfo.staffName;
         if (userInfo?.adminName) bookingData.adminName = userInfo.adminName;
@@ -856,9 +866,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
       // Attach creator info for manual mode
       if (isManualMode) {
-        baseBookingData.createdBy = (userInfo?.type === 'staff')
-          ? (userInfo?.staffName || userInfo?.staffId || 'Staff')
-          : (userInfo?.adminName || 'Admin');
+        baseBookingData.createdBy = buildCreatorMetadata();
         if (userInfo?.staffId) baseBookingData.staffId = userInfo.staffId;
         if (userInfo?.staffName) baseBookingData.staffName = userInfo.staffName;
         if (userInfo?.adminName) baseBookingData.adminName = userInfo.adminName;
@@ -1413,6 +1421,14 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     );
   };
 
+  const resetCouponState = () => {
+    setAppliedCouponCode(null);
+    setAppliedDiscount(0);
+    setCouponError(null);
+    setAppliedDiscountType(null);
+    setAppliedDiscountValue(null);
+  };
+
   const handleInputChange = async (field: keyof BookingForm, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
 
@@ -1850,6 +1866,15 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
     return total;
   };
 
+  const hasDecorationSelection =
+    formData.wantDecorItems === 'Yes' ||
+    selectedServices['__decoration__'] === 'Yes';
+  const hasGiftSelection =
+    formData.wantGifts === 'Yes' ||
+    selectedServices['Gifts Items'] === 'Yes' ||
+    selectedServices['Gifts'] === 'Yes';
+  const isCouponEligible = hasDecorationSelection || hasGiftSelection;
+
   // Coupon code state and helpers
   const [couponCode, setCouponCode] = useState('');
   const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
@@ -1858,15 +1883,85 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
   const [appliedDiscount, setAppliedDiscount] = useState<number>(0);
   const [appliedDiscountType, setAppliedDiscountType] = useState<'percentage' | 'fixed' | null>(null);
   const [appliedDiscountValue, setAppliedDiscountValue] = useState<number | null>(null);
+  type CouponInfo = {
+    couponCode: string;
+    discountType: 'percentage' | 'fixed';
+    discountValue: number;
+    usageLimit?: number | null;
+    validDate?: string | Date | null;
+    expireDate?: string | Date | null;
+  };
+  const [availableCoupons, setAvailableCoupons] = useState<CouponInfo[]>([]);
+  const [couponsLoading, setCouponsLoading] = useState(false);
+  const [couponsError, setCouponsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCouponEligible && appliedDiscount > 0) {
+      resetCouponState();
+    }
+  }, [isCouponEligible, appliedDiscount]);
+
+  useEffect(() => {
+    let abortController: AbortController | null = null;
+    const shouldFetchCoupons = isCouponEligible;
+
+    if (!shouldFetchCoupons) {
+      setAvailableCoupons([]);
+      return;
+    }
+
+    const fetchCoupons = async () => {
+      try {
+        setCouponsLoading(true);
+        setCouponsError(null);
+        abortController = new AbortController();
+        const resp = await fetch('/api/coupons', { signal: abortController.signal });
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.coupons)) {
+          setAvailableCoupons(data.coupons);
+        } else {
+          setAvailableCoupons([]);
+          setCouponsError(data.error || 'Unable to load coupons');
+        }
+      } catch (error) {
+        if ((error as DOMException).name === 'AbortError') {
+          return;
+        }
+        setCouponsError('Unable to load coupons');
+        setAvailableCoupons([]);
+      } finally {
+        setCouponsLoading(false);
+      }
+    };
+
+    void fetchCoupons();
+
+    return () => {
+      abortController?.abort();
+    };
+  }, [isCouponEligible]);
+
+  const formatCouponDate = (value?: string | Date | null) => {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  const describeCouponDiscount = (coupon: CouponInfo) => {
+    return coupon.discountType === 'percentage'
+      ? `${coupon.discountValue}% off`
+      : `₹${coupon.discountValue} off`;
+  };
 
   const getFinalTotal = () => {
     const total = calculateTotal();
     return Math.max(total - appliedDiscount, 0);
   };
 
-  const applyCoupon = async () => {
+  const applyCoupon = async (codeOverride?: string) => {
     setCouponError(null);
-    const code = couponCode.trim().toUpperCase();
+    const code = (codeOverride ?? couponCode).trim().toUpperCase();
     if (!code) {
       setCouponError('Please enter a coupon code');
       // 1s error toast when input empty
@@ -1890,6 +1985,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
         setAppliedDiscount(Number(data.discountAmount));
         setAppliedDiscountType(data.coupon?.discountType ?? null);
         setAppliedDiscountValue(typeof data.coupon?.discountValue === 'number' ? data.coupon.discountValue : null);
+        setCouponCode('');
 
         // Show a small animated toast for 1 second
         (window as any).showToast?.({
@@ -2367,6 +2463,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
           venuePayment: venuePayment, // Amount to be paid at venue
           appliedCouponCode: appliedCouponCode || undefined,
           couponDiscount: appliedDiscount || 0,
+          couponDiscountType: appliedDiscountType || undefined,
+          couponDiscountValue: appliedDiscountValue || undefined,
           status: isManualMode ? 'manual' : 'completed', // Booking status - manual for admin, completed for regular
           isManualBooking: isManualMode, // Flag for manual booking
           bookingType: isManualMode ? 'Manual' : 'Online', // Booking type
@@ -3002,12 +3100,7 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
                           return (
                             <div className="booking-popup-field">
-                              <label
-                                style={{
-                                  display: 'block',
-                                  marginBottom: '0rem',
-                                }}
-                              >
+                              <label style={{ display: 'block', marginBottom: '0rem' }}>
                                 Want Decoration?
                                 {isDecorationCompulsory && (
                                   <span
@@ -3418,15 +3511,8 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
 
                 {activeTab === 'Terms & Conditions' && (
                   <div className="booking-popup-section">
-                    <h3 className="booking-popup-section-title">
-                      <Check className="w-5 h-5" />
-                      Terms & Conditions
-                    </h3>
-
                     <div className="booking-popup-terms-container">
-                      {/* Coupon Code Input - Only show when decoration is Yes */}
-                      {(formData.wantDecorItems === 'Yes' || formData.wantGifts === 'Yes') && (
-                        <div className="booking-popup-terms-section">
+                      <div className="booking-popup-terms-section" style={{ marginBottom: 24 }}>
                           <h4 className="booking-popup-terms-title">Coupon Code</h4>
                           <div className="booking-popup-terms-content">
                             <div className="booking-popup-coupon-row">
@@ -3437,12 +3523,12 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                 placeholder="Enter coupon code"
                                 className="booking-popup-input"
                                 style={{ flex: 1 }}
-                                disabled={!!appliedCouponCode}
+                                disabled={!isCouponEligible || !!appliedCouponCode}
                               />
                               {!appliedCouponCode && (
                                 <button
-                                  onClick={applyCoupon}
-                                  disabled={couponApplying || !couponCode.trim()}
+                                  onClick={() => void applyCoupon()}
+                                  disabled={!isCouponEligible || couponApplying || !couponCode.trim()}
                                   className="booking-popup-btn"
                                   style={{ padding: '10px 16px' }}
                                 >
@@ -3450,6 +3536,11 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                 </button>
                               )}
                             </div>
+                            {!isCouponEligible && (
+                              <div className="booking-popup-error" style={{ marginTop: 8 }}>
+                                Enable decoration or gifts to unlock coupons.
+                              </div>
+                            )}
                             {couponError && (
                               <div className="booking-popup-error" style={{ marginTop: 8 }}>{couponError}</div>
                             )}
@@ -3473,9 +3564,17 @@ export default function BookingPopup({ isOpen, onClose, isManualMode = false, on
                                 <span>₹{getFinalTotal().toFixed(2)}</span>
                               </div>
                             </div>
+                            {/* Removed visible coupon list per request */}
                           </div>
                         </div>
-                      )}
+                    </div>
+
+                    <h3 className="booking-popup-section-title">
+                      <Check className="w-5 h-5" />
+                      Terms & Conditions
+                    </h3>
+
+                    <div className="booking-popup-terms-container">
 
                       <div className="booking-popup-terms-section">
                         <h4 className="booking-popup-terms-title">Terms & Conditions</h4>

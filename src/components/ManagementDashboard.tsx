@@ -162,6 +162,25 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'cash'>('online');
   const [paymentUpdatingId, setPaymentUpdatingId] = useState<string | null>(null);
 
+  const isManualBookingEntry = (booking: Booking) => {
+    const statusLower = (booking.status || '').toLowerCase();
+    const bookingTypeLower = booking.bookingType?.toLowerCase();
+    const paymentModeLower = ((booking as any)?.paymentMode ?? '').toString().toLowerCase();
+    const bookingSourceLower = ((booking as any)?.bookingSource ?? '').toString().toLowerCase();
+    const venuePaymentMethodLower = (booking.venuePaymentMethod || '').toLowerCase();
+    const createdBy = (booking as any)?.createdBy;
+
+    return (
+      statusLower === 'manual' ||
+      bookingTypeLower === 'manual' ||
+      Boolean(booking.isManualBooking) ||
+      paymentModeLower === 'pay_at_venue' ||
+      bookingSourceLower === 'manual' ||
+      venuePaymentMethodLower === 'cash' ||
+      Boolean(createdBy)
+    );
+  };
+
   // Helper function to convert UTC to IST
   const convertToIST = (utcDate: string) => {
     if (!utcDate) return '';
@@ -526,7 +545,19 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
   const handleCancelOrActivateBooking = async (booking: Booking) => {
     try {
       const oldStatus = booking.status;
-      const newStatus = booking.status.toLowerCase() === 'confirmed' ? 'cancelled' : 'confirmed';
+      const statusLower = booking.status.toLowerCase();
+      const isManualBooking = isManualBookingEntry(booking);
+
+      let newStatus: Booking['status'];
+      if (statusLower === 'manual') {
+        newStatus = 'cancelled';
+      } else if (statusLower === 'cancelled') {
+        newStatus = isManualBooking ? 'manual' : 'confirmed';
+      } else if (statusLower === 'confirmed') {
+        newStatus = 'cancelled';
+      } else {
+        newStatus = isManualBooking ? 'manual' : 'confirmed';
+      }
 
       // Get current user info (admin or staff)
       let cancelledBy = 'Administrator';
@@ -609,9 +640,15 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
     if (!bookingPendingPayment) return;
 
     const booking = bookingPendingPayment;
+    const bookingId = String(booking.originalBookingId || (booking as any).bookingId || booking.id).replace(/^#/, '');
+    const statusLower = (booking.status || '').toLowerCase();
+    const isManualBooking =
+      booking.bookingType?.toLowerCase() === 'manual' ||
+      statusLower === 'manual' ||
+      Boolean((booking as any)?.isManualBooking);
     
     try {
-      setPaymentUpdatingId(String(booking.id));
+      setPaymentUpdatingId(bookingId);
 
       // Get current user info (admin or staff)
       let paidBy = 'Administrator';
@@ -644,12 +681,13 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
 
       // Prepare request body - only include staff fields if staff marked it
       const requestBody: any = {
-        bookingId: booking.id,
+        bookingId,
         paymentStatus: 'paid',
         venuePaymentMethod: selectedPaymentMethod,
         paidBy: paidBy,
         paidAt: new Date().toISOString(),
-        sendInvoice: true
+        sendInvoice: true,
+        isManualBooking
       };
 
       // Add staff fields - null for Admin, actual values for Staff
@@ -698,8 +736,13 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
   };
 
   const handleClosePaymentMethodModal = () => {
-    if (paymentUpdatingId !== null && bookingPendingPayment && paymentUpdatingId === String(bookingPendingPayment.id)) {
-      return;
+    if (paymentUpdatingId !== null && bookingPendingPayment) {
+      const pendingId = String(
+        bookingPendingPayment.originalBookingId || (bookingPendingPayment as any).bookingId || bookingPendingPayment.id
+      ).replace(/^#/, '');
+      if (paymentUpdatingId === pendingId) {
+        return;
+      }
     }
     setIsPaymentMethodModalOpen(false);
     setBookingPendingPayment(null);
@@ -1420,33 +1463,44 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
                             <Edit size={14} />
                             Edit
                           </button>
-                          {booking.status.toLowerCase() === 'confirmed' && booking.paymentStatus !== 'paid' && (
-                            <button
-                              className="action-btn paid-btn"
-                              onClick={() => handleMarkAsPaid(booking)}
-                              title="Mark as Paid"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"><path fill="currentColor" d="M10.565 2.075c-.394.189-.755.497-1.26.928l-.079.066a2.56 2.56 0 0 1-1.58.655l-.102.008c-.662.053-1.135.09-1.547.236a3.33 3.33 0 0 0-2.03 2.029c-.145.412-.182.885-.235 1.547l-.008.102a2.56 2.56 0 0 1-.655 1.58l-.066.078c-.431.506-.74.867-.928 1.261a3.33 3.33 0 0 0 0 2.87c.189.394.497.755.928 1.26l.066.079c.41.48.604.939.655 1.58l.008.102c.053.662.09 1.135.236 1.547a3.33 3.33 0 0 0 2.029 2.03c.412.145.885.182 1.547.235l.102.008c.629.05 1.09.238 1.58.655l.079.066c.505.431.866.74 1.26.928a3.33 3.33 0 0 0 2.87 0c.394-.189.755-.497 1.26-.928l.079-.066c.48-.41.939-.604 1.58-.655l.102-.008c.662-.053 1.135-.09 1.547-.236a3.33 3.33 0 0 0 2.03-2.029c.145-.412.182-.885.235-1.547l.008-.102c.05-.629.238-1.09.655-1.58l.066-.079c.431-.505.74-.866.928-1.26a3.33 3.33 0 0 0 0-2.87c-.189-.394-.497-.755-.928-1.26l-.066-.079a2.56 2.56 0 0 1-.655-1.58l-.008-.102c-.053-.662-.09-1.135-.236-1.547a3.33 3.33 0 0 0-2.029-2.03c-.412-.145-.885-.182-1.547-.235l-.102-.008a2.56 2.56 0 0 1-1.58-.655l-.079-.066c-.505-.431-.866-.74-1.26-.928a3.33 3.33 0 0 0-2.87 0M8.25 7.5A.75.75 0 0 1 9 6.75h6a.75.75 0 0 1 0 1.5h-1.794c.238.393.395.83.476 1.278H15a.75.75 0 0 1 0 1.5h-1.318a3.65 3.65 0 0 1-.721 1.628a3.03 3.03 0 0 1-2.214 1.141l3.045 3.185a.75.75 0 0 1-1.084 1.036l-4.25-4.444A.75.75 0 0 1 9 12.306h1.5c.6 0 1.012-.24 1.29-.587a2 2 0 0 0 .352-.691H9a.75.75 0 0 1 0-1.5h3.142a2 2 0 0 0-.352-.691c-.278-.347-.69-.587-1.29-.587H9a.75.75 0 0 1-.75-.75" /></svg>
-                              Paid
-                            </button>
-                          )}
-                          <button
-                            className={`action-btn ${booking.status.toLowerCase() === 'confirmed' ? 'cancel-btn' : 'activate-btn'}`}
-                            onClick={() => handleCancelOrActivateBooking(booking)}
-                            title={booking.status.toLowerCase() === 'confirmed' ? 'Cancel Booking' : 'Activate Booking'}
-                          >
-                            {booking.status.toLowerCase() === 'confirmed' ? (
+                          {(() => {
+                            const statusLower = booking.status.toLowerCase();
+                            const isManual = isManualBookingEntry(booking);
+                            const isActiveBooking =
+                              statusLower === 'confirmed' || (isManual && statusLower !== 'cancelled');
+
+                            return (
                               <>
-                                <X size={14} />
-                                Cancel
-                              </>
-                            ) : (
-                              <>
-                                <Check size={14} />
-                                Activate
-                              </>
-                            )}
-                          </button>
+                                {isActiveBooking && booking.paymentStatus !== 'paid' && (
+                                  <button
+                                    className="action-btn paid-btn"
+                                    onClick={() => handleMarkAsPaid(booking)}
+                                    title="Mark as Paid"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"><path fill="currentColor" d="M10.565 2.075c-.394.189-.755.497-1.26.928l-.079.066a2.56 2.56 0 0 1-1.58.655l-.102.008c-.662.053-1.135.09-1.547.236a3.33 3.33 0 0 0-2.03 2.029c-.145.412-.182.885-.235 1.547l-.008.102a2.56 2.56 0 0 1-.655 1.58l-.066.078c-.431.506-.74.867-.928 1.261a3.33 3.33 0 0 0 0 2.87c.189.394.497.755.928 1.26l.066.079c.41.48.604.939.655 1.58l.008.102c.053.662.09 1.135.236 1.547a3.33 3.33 0 0 0 2.029 2.03c.412.145.885.182 1.547.235l.102.008c.629.05 1.09.238 1.58.655l.079.066c.505.431.866.74 1.26.928a3.33 3.33 0 0 0 2.87 0c.394-.189.755-.497 1.26-.928l.079-.066c.48-.41.939-.604 1.58-.655l.102-.008c.662-.053 1.135-.09 1.547-.236a3.33 3.33 0 0 0 2.03-2.029c.145-.412.182-.885.235-1.547l-.008-.102c-.05-.629-.238-1.09-.655-1.58l-.066-.079c-.431-.505-.74-.866-.928-1.26a3.33 3.33 0 0 0 0-2.87c-.189-.394-.497-.755-.928-1.26l-.066-.079a2.56 2.56 0 0 1-.655-1.58l-.008-.102c-.053-.662-.09-1.135-.236-1.547a3.33 3.33 0 0 0-2.029-2.03c-.412-.145-.885-.182-1.547-.235l-.102-.008a2.56 2.56 0 0 1-1.58-.655l-.079-.066c-.505-.431-.866-.74-1.26-.928a3.33 3.33 0 0 0-2.87 0M8.25 7.5A.75.75 0 0 1 9 6.75h6a.75.75 0 0 1 0 1.5h-1.794c.238.393.395.83.476 1.278H15a.75.75 0 0 1 0 1.5h-1.318a3.65 3.65 0 0 1-.721 1.628a3.03 3.03 0 0 1-2.214 1.141l3.045 3.185a.75.75 0 0 1-1.084 1.036l-4.25-4.444A.75.75 0 0 1 9 12.306h1.5c.6 0 1.012-.24 1.29-.587a2 2 0 0 0 .352-.691H9a.75.75 0 0 1 0-1.5h3.142a2 2 0 0 0-.352-.691c-.278-.347-.69-.587-1.29-.587H9a.75.75 0 0 1-.75-.75" /></svg>
+                                    Paid
+                                  </button>
+                                )}
+                                <button
+                                  className={`action-btn ${isActiveBooking ? 'cancel-btn' : 'activate-btn'}`}
+                                  onClick={() => handleCancelOrActivateBooking(booking)}
+                                  title={isActiveBooking ? 'Cancel Booking' : 'Activate Booking'}
+                                >
+                                  {isActiveBooking ? (
+                                    <>
+                                      <X size={14} />
+                                      Cancel
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check size={14} />
+                                      Activate
+                                    </>
+                                  )}
+                                </button>
+                              </> 
+                            );
+                          })()}
                         </div>
                       </td>
                     </tr>

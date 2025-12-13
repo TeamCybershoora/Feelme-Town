@@ -781,7 +781,7 @@ export default function BookingsPage() {
   };
 
   const handleTogglePaymentStatus = (booking: any) => {
-    const bookingId = booking.originalBookingId || booking.id;
+    const bookingId = String(booking.originalBookingId || booking.bookingId || booking.id);
     if (!bookingId) {
       showError('Booking ID missing');
       return;
@@ -802,7 +802,7 @@ export default function BookingsPage() {
     if (!bookingPendingPayment) return;
 
     const booking = bookingPendingPayment;
-    const bookingId = booking.originalBookingId || booking.id;
+    const bookingId = String(booking.originalBookingId || booking.bookingId || booking.id);
     if (!bookingId) {
       showError('Booking ID missing');
       return;
@@ -811,7 +811,7 @@ export default function BookingsPage() {
     const targetStatus = 'paid';
 
     try {
-      setPaymentUpdatingId(booking.id);
+      setPaymentUpdatingId(bookingId);
 
       // Get current user info (admin or staff) - EXACT SAME LOGIC AS DASHBOARD
       let paidBy = 'Administrator';
@@ -843,6 +843,12 @@ export default function BookingsPage() {
       }
 
       // Prepare request body - only include staff fields if staff marked it
+      const statusLower = (booking.status || '').toLowerCase();
+      const isManualBooking =
+        (booking.bookingType || '').toLowerCase() === 'manual' ||
+        statusLower === 'manual' ||
+        Boolean(booking.isManualBooking);
+
       const requestBody: any = {
         bookingId,
         paymentStatus: targetStatus,
@@ -850,7 +856,7 @@ export default function BookingsPage() {
         paidBy: paidBy,
         paidAt: new Date().toISOString(),
         sendInvoice: targetStatus === 'paid',
-        isManualBooking: (booking.bookingType || '').toLowerCase() === 'manual'
+        isManualBooking
       };
 
       // Add staff fields - null for Admin, actual values for Staff
@@ -899,8 +905,11 @@ export default function BookingsPage() {
   };
 
   const handleClosePaymentMethodModal = () => {
-    if (paymentUpdatingId !== null && bookingPendingPayment && paymentUpdatingId === bookingPendingPayment.id) {
-      return;
+    if (paymentUpdatingId !== null && bookingPendingPayment) {
+      const pendingId = String(bookingPendingPayment.originalBookingId || bookingPendingPayment.bookingId || bookingPendingPayment.id);
+      if (paymentUpdatingId === pendingId) {
+        return;
+      }
     }
     setIsPaymentMethodModalOpen(false);
     setBookingPendingPayment(null);
@@ -1137,6 +1146,11 @@ export default function BookingsPage() {
             ) : (
               displayedBookings.map((booking: any, index: number) => {
                 // Calculate current date CONFIRMED booking number
+                const statusKeyLower = (booking.status || '').toLowerCase();
+                const isManualBooking =
+                  (booking.bookingType || '').toLowerCase() === 'manual' || statusKeyLower === 'manual';
+                const isActiveManualBooking = isManualBooking && statusKeyLower !== 'cancelled';
+
                 const currentDateConfirmedBookings = displayedBookings.filter((b: any, i: number) =>
                   i <= index &&
                   isCurrentDateBooking(b.date) &&
@@ -1145,7 +1159,8 @@ export default function BookingsPage() {
                 const currentDateConfirmedBookingNumber = currentDateConfirmedBookings.length;
                 const normalizedPaymentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
                 const isPaid = normalizedPaymentStatus === 'paid';
-                const canTogglePayment = (booking.status || '').toLowerCase() === 'confirmed';
+                const canTogglePayment =
+                  statusKeyLower === 'confirmed' || isActiveManualBooking;
                 const isPaymentUpdating = paymentUpdatingId === booking.id;
 
                 return (

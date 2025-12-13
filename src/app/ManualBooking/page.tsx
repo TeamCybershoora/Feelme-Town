@@ -858,154 +858,73 @@ function ManualBookingContent() {
         };
     }, [filteredTheaters]);
 
-    // Fetch booked time slots only when date changes
-    useEffect(() => {
-        const fetchBookedSlots = async () => {
-            if (!selectedDate || !filteredTheaters[selectedTheater]?.name) return;
+    const isFetchingSlotsRef = useRef(false);
+    const previousSlotsRef = useRef<string[]>([]);
 
+    const fetchBookedSlots = useCallback(async ({ showSpinner = false }: { showSpinner?: boolean } = {}) => {
+        if (!selectedDate || !filteredTheaters[selectedTheater]?.name) return;
+        if (isFetchingSlotsRef.current) return;
+        isFetchingSlotsRef.current = true;
+
+        if (showSpinner) {
             setIsLoadingBookedSlots(true);
-            try {
-                const response = await fetch(`/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`);
-                const data = await response.json();
+        }
 
-                if (data.success) {
-                    setBookedTimeSlots(data.bookedTimeSlots);
-                } else {
-                    
-                    setBookedTimeSlots([]);
+        try {
+            const response = await fetch(`/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`);
+            const data = await response.json();
+
+            if (data.success) {
+                const newSlots = data.bookedTimeSlots || [];
+                const prevSlots = previousSlotsRef.current;
+
+                if (JSON.stringify(prevSlots) !== JSON.stringify(newSlots)) {
+                    previousSlotsRef.current = newSlots;
+                    setBookedTimeSlots(newSlots);
+
+                    // Emit diff event only when changes occur
+                    const newBookings = newSlots.filter((slot: string) => !prevSlots.includes(slot));
+                    const cancelledBookings = prevSlots.filter((slot: string) => !newSlots.includes(slot));
+                    if (newBookings.length || cancelledBookings.length) {
+                        window.dispatchEvent(new CustomEvent('slotsUpdated', {
+                            detail: { newBookings, cancelledBookings }
+                        }));
+                    }
                 }
-            } catch (error) {
-                
+            } else {
+                previousSlotsRef.current = [];
                 setBookedTimeSlots([]);
-            } finally {
+            }
+        } catch (error) {
+            
+            previousSlotsRef.current = [];
+            setBookedTimeSlots([]);
+        } finally {
+            if (showSpinner) {
                 setIsLoadingBookedSlots(false);
             }
-        };
+            isFetchingSlotsRef.current = false;
+        }
+    }, [selectedDate, selectedTheater, filteredTheaters]);
 
-        fetchBookedSlots();
-    }, [selectedDate]);
+    // Fetch booked time slots only when date changes
+    useEffect(() => {
+        fetchBookedSlots({ showSpinner: true });
+    }, [fetchBookedSlots]);
 
     // Listen for real-time slot refresh events
     useEffect(() => {
-        const handleRefreshBookedSlots = () => {
-            if (selectedDate && filteredTheaters[selectedTheater]?.name) {
-                const fetchBookedSlots = async () => {
-                    setIsLoadingBookedSlots(true);
-                    try {
-                        const response = await fetch(`/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`);
-                        const data = await response.json();
+        const handler = () => fetchBookedSlots();
+        window.addEventListener('refreshBookedSlots', handler);
+        return () => window.removeEventListener('refreshBookedSlots', handler);
+    }, [fetchBookedSlots]);
 
-                        if (data.success) {
-                            setBookedTimeSlots(data.bookedTimeSlots);
-                        } else {
-                            
-                            setBookedTimeSlots([]);
-                        }
-                    } catch (error) {
-                        
-                        setBookedTimeSlots([]);
-                    } finally {
-                        setIsLoadingBookedSlots(false);
-                    }
-                };
-
-                fetchBookedSlots();
-            }
-        };
-
-        window.addEventListener('refreshBookedSlots', handleRefreshBookedSlots);
-
-        return () => {
-            window.removeEventListener('refreshBookedSlots', handleRefreshBookedSlots);
-        };
-    }, [selectedDate, selectedTheater, filteredTheaters]);
-
-    // Real-time booked slots refresh - instant updates when database changes
+    // Real-time booked slots refresh - instant updates when database changes (without spinner)
     useEffect(() => {
-        // Immediate fetch on component mount/change
-        if (selectedDate && filteredTheaters[selectedTheater]?.name) {
-            const fetchBookedSlotsImmediate = async () => {
-                try {
-                    const apiUrl = `/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`;
-                    
-                    
-                    const response = await fetch(apiUrl);
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        
-                        setBookedTimeSlots(data.bookedTimeSlots);
-                    }
-                } catch (error) {
-                    
-                }
-            };
-            
-            fetchBookedSlotsImmediate();
-        }
-        
-        const refreshTimer = setInterval(() => {
-            // Real-time refresh of booked slots for current theater
-            if (selectedDate && filteredTheaters[selectedTheater]?.name) {
-                const fetchBookedSlots = async () => {
-                    try {
-                        const apiUrl = `/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`;
-                        
-                        
-                        const response = await fetch(apiUrl);
-                        const data = await response.json();
-                        
-                        
-
-                        if (data.success) {
-                            // Real-time update of booked time slots from database booking collection
-                            const previousSlots = bookedTimeSlots;
-                            
-                            
-                            setBookedTimeSlots(data.bookedTimeSlots);
-                            
-                            // Real-time change detection for instant updates
-                            if (JSON.stringify(previousSlots) !== JSON.stringify(data.bookedTimeSlots)) {
-                                
-                                
-                                
-                                
-                                // Calculate what changed
-                                const newBookings = data.bookedTimeSlots.filter((slot: string) => !previousSlots.includes(slot));
-                                const cancelledBookings = previousSlots.filter((slot: string) => !data.bookedTimeSlots.includes(slot));
-                                
-                                if (newBookings.length > 0) {
-                                    
-                                }
-                                if (cancelledBookings.length > 0) {
-                                    
-                                }
-                                
-                                // Trigger visual update event for instant UI refresh
-                                const event = new CustomEvent('slotsUpdated', { 
-                                    detail: { newBookings, cancelledBookings } 
-                                });
-                                window.dispatchEvent(event);
-                            } else {
-                                
-                            }
-                        } else {
-                            
-                            
-                            setBookedTimeSlots([]);
-                        }
-                    } catch (error) {
-                        
-                        
-                    }
-                };
-
-                fetchBookedSlots();
-            }
-        }, 1000); // Real-time check every 1 second for instant booked slots updates
-
+        fetchBookedSlots();
+        const refreshTimer = setInterval(() => fetchBookedSlots(), 2000);
         return () => clearInterval(refreshTimer);
-    }, [selectedDate, selectedTheater, filteredTheaters, bookedTimeSlots]);
+    }, [fetchBookedSlots]);
 
 
 
@@ -1651,6 +1570,7 @@ function ManualBookingContent() {
                                             return allTimeSlots.map((timeSlot: string) => {
                                                 const isBooked = bookedTimeSlots.includes(timeSlot);
                                                 const isSelected = selectedTimeSlot === timeSlot;
+
                                                 
                                                 // Debug logging for each slot
                                                 
@@ -1660,59 +1580,18 @@ function ManualBookingContent() {
                                                 }
                                                 
                                                 // Check if slot time is gone (1 hour before start time)
-                                                const isTimeGone = (() => {
-                                                    if (!selectedDate || !timeSlot) return false;
-                                                    
-                                                    try {
-                                                        const now = new Date();
-                                                        const selectedDateObj = new Date(selectedDate);
-                                                        
-                                                        // Only check for today's date
-                                                        if (selectedDateObj.toDateString() !== now.toDateString()) {
-                                                            return false;
-                                                        }
-                                                        
-                                                        // Parse time slot to get start time
-                                                        const timeMatch = timeSlot.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-                                                        if (!timeMatch) return false;
-                                                        
-                                                        const [, hours, minutes, period] = timeMatch;
-                                                        let hour24 = parseInt(hours);
-                                                        
-                                                        // Convert to 24-hour format
-                                                        if (period.toUpperCase() === 'PM' && hour24 !== 12) {
-                                                            hour24 += 12;
-                                                        } else if (period.toUpperCase() === 'AM' && hour24 === 12) {
-                                                            hour24 = 0;
-                                                        }
-                                                        
-                                                        // Create slot start time
-                                                        const slotStartTime = new Date(now);
-                                                        slotStartTime.setHours(hour24, parseInt(minutes), 0, 0);
-                                                        
-                                                        // Check if current time is 1 hour or more before slot start time
-                                                        const oneHourBefore = new Date(slotStartTime.getTime() - (60 * 60 * 1000));
-                                                        const isGone = now.getTime() >= oneHourBefore.getTime();
-                                                        
-                                                        if (isGone) {
-                                                            
-                                                        }
-                                                        
-                                                        return isGone;
-                                                    } catch (error) {
-                                                        
-                                                        return false;
-                                                    }
-                                                })();
+                                                // Manual booking flow should always allow staff to pick any slot,
+                                                // even if the time has already passed. Keep this false so slots stay selectable.
+                                                const isTimeGone = false;
 
                                                 return (
                                                     <button
                                                         key={timeSlot}
                                                         className={`time-slot ${isSelected ? 'selected' : ''} ${isBooked ? 'booked' : ''} ${isTimeGone ? 'time-gone' : ''}`}
-                                                        onClick={() => !isBooked && !isTimeGone && setSelectedTimeSlot(timeSlot)}
-                                                        disabled={isBooked || isTimeGone}
+                                                        onClick={() => !isBooked && setSelectedTimeSlot(timeSlot)}
+                                                        disabled={isBooked}
                                                     >
-                                                        {isTimeGone ? 'Oops Slot Time Gone' : isBooked ? 'Slot Booked' : timeSlot}
+                                                        {isBooked ? 'Slot Booked' : timeSlot}
                                                     </button>
                                                 );
                                             });

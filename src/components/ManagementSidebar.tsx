@@ -33,11 +33,44 @@ export default function ManagementSidebar({ isOpen }: ManagementSidebarProps) {
     });
   };
 
+  const parseBookingDate = (rawDate: any) => {
+    if (!rawDate) return null;
+    if (rawDate instanceof Date) {
+      return new Date(rawDate.getTime());
+    }
+    if (typeof rawDate === 'number') {
+      const fromNumber = new Date(rawDate);
+      return isNaN(fromNumber.getTime()) ? null : fromNumber;
+    }
+    if (typeof rawDate === 'string') {
+      const trimmed = rawDate.trim();
+      if (!trimmed) return null;
+
+      const tryParse = (value: string) => {
+        const parsed = new Date(value);
+        return isNaN(parsed.getTime()) ? null : parsed;
+      };
+
+      let parsed = tryParse(trimmed);
+      if (parsed) return parsed;
+
+      const withoutWeekday = trimmed.replace(/^[A-Za-z]+\s*,\s*/, '');
+      parsed = tryParse(withoutWeekday);
+      if (parsed) return parsed;
+
+      const sanitized = withoutWeekday.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
+      parsed = tryParse(sanitized);
+      if (parsed) return parsed;
+    }
+    return null;
+  };
+
   // Helper function to check if booking is from current date
-  const isCurrentDateBooking = (bookingDate: string) => {
-    if (!bookingDate) return false;
+  const isCurrentDateBooking = (bookingDate: any) => {
+    const parsedDate = parseBookingDate(bookingDate);
+    if (!parsedDate) return false;
     const currentDate = getCurrentDateIST();
-    const bookingDateIST = new Date(bookingDate).toLocaleDateString('en-IN', { 
+    const bookingDateIST = parsedDate.toLocaleDateString('en-IN', { 
       timeZone: 'Asia/Kolkata',
       year: 'numeric',
       month: '2-digit',
@@ -48,15 +81,29 @@ export default function ManagementSidebar({ isOpen }: ManagementSidebarProps) {
 
   const fetchCurrentDateBookingsCount = async () => {
     try {
-      const dbResponse = await fetch('/api/admin/bookings');
-      const dbData = await dbResponse.json();
+      const [regularResponse, manualResponse] = await Promise.all([
+        fetch('/api/admin/bookings'),
+        fetch('/api/admin/manual-bookings')
+      ]);
+      const [regularData, manualData] = await Promise.all([
+        regularResponse.json(),
+        manualResponse.json()
+      ]);
 
       let currentDateCount = 0;
 
-      if (dbData.success && dbData.bookings) {
-        currentDateCount = dbData.bookings.filter(
+      if (regularData.success && regularData.bookings) {
+        currentDateCount += regularData.bookings.filter(
           (booking: any) =>
             isCurrentDateBooking(booking.date) && booking.status.toLowerCase() === 'confirmed',
+        ).length;
+      }
+
+      if (manualData.success && (manualData.manualBookings || manualData.bookings)) {
+        const manualList = manualData.manualBookings || manualData.bookings || [];
+        currentDateCount += manualList.filter(
+          (booking: any) =>
+            isCurrentDateBooking(booking.date) && (booking.status || '').toLowerCase() === 'manual',
         ).length;
       }
 

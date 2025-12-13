@@ -1353,6 +1353,7 @@ const saveBooking = async (bookingData: BookingData) => {
       await incrementNewCounter('completed');
     } else if (booking.status === 'manual') {
       await incrementNewCounter('manual');
+      await incrementNewCounter('confirmed');
 
       // Also increment staff-specific counter if staffId is provided
       if (bookingData.staffId) {
@@ -1398,6 +1399,27 @@ const saveManualBooking = async (bookingData: BookingData) => {
     // Generate ticket number
     const ticketNumber = await generateTicketNumber();
 
+    // Determine creator metadata so manual bookings show who created them
+    const deriveCreatorInfo = () => {
+      const rawCreator = (bookingData as any).createdBy;
+      if (rawCreator && typeof rawCreator === 'object') {
+        return rawCreator;
+      }
+      if ((bookingData as any).staffName || (bookingData as any).staffId) {
+        return {
+          type: 'staff' as const,
+          staffName: (bookingData as any).staffName,
+          staffId: (bookingData as any).staffId
+        };
+      }
+      return {
+        type: 'admin' as const,
+        adminName: (bookingData as any).adminName || 'Administrator'
+      };
+    };
+
+    const creatorInfo = deriveCreatorInfo();
+
     // Add timestamp, status, custom booking ID, and ticket number
     const booking = {
       ...bookingData,
@@ -1407,7 +1429,7 @@ const saveManualBooking = async (bookingData: BookingData) => {
       status: bookingData.status || 'manual', // Keep manual booking status as 'manual'
       isManualBooking: true,
       bookingType: 'Manual',
-      createdBy: 'Admin',
+      createdBy: creatorInfo,
       paymentStatus: (bookingData as any).paymentStatus || 'unpaid'
     };
 
@@ -1442,7 +1464,7 @@ const saveManualBooking = async (bookingData: BookingData) => {
       // Manual booking specific fields
       isManualBooking: true,
       bookingType: 'Manual',
-      createdBy: (booking as any).createdBy || 'Admin',
+      createdBy: (booking as any).createdBy || creatorInfo,
       staffId: (booking as any).staffId || null,
       staffName: (booking as any).staffName || null,
       adminName: (booking as any).adminName || null,
@@ -2528,10 +2550,56 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
     const collection = db.collection(MANUAL_BOOKING_COLLECTION_NAME);
 
     // Get the original manual booking data first to preserve existing fields
+    const normalizedBookingId = String(bookingId).replace(/^#/, '').trim();
     const manualBookings = await getAllManualBookings();
-    const originalBooking = manualBookings.manualBookings?.find((b: any) => b.bookingId === bookingId);
+    let originalBooking = manualBookings.manualBookings?.find((b: any) =>
+      (b.bookingId === normalizedBookingId) ||
+      (b.id && String(b.id) === normalizedBookingId) ||
+      (b._id && String(b._id) === normalizedBookingId)
+    );
 
     if (!originalBooking) {
+      // Try direct lookup in collection by bookingId or _id
+      const directByCustomId = await collection.findOne({ bookingId: normalizedBookingId });
+      if (directByCustomId) {
+        if ((directByCustomId as any).compressedData) {
+          try {
+            const decompressed = await decompressData((directByCustomId as any).compressedData);
+            originalBooking = { ...(decompressed as any), ...directByCustomId } as any;
+          } catch {
+            originalBooking = directByCustomId as any;
+          }
+        } else {
+          originalBooking = directByCustomId as any;
+        }
+      } else if (ObjectId.isValid(normalizedBookingId) && normalizedBookingId.length === 24) {
+        const directByObjectId = await collection.findOne({ _id: new ObjectId(normalizedBookingId) });
+        if (directByObjectId) {
+          if ((directByObjectId as any).compressedData) {
+            try {
+              const decompressed = await decompressData((directByObjectId as any).compressedData);
+              originalBooking = { ...(decompressed as any), ...directByObjectId } as any;
+            } catch {
+              originalBooking = directByObjectId as any;
+            }
+          } else {
+            originalBooking = directByObjectId as any;
+          }
+        }
+      }
+    }
+
+    if (!originalBooking) {
+      // Fallback: Some manual entries might exist only in main booking collection
+      try {
+        const fallbackResult = await updateBooking(normalizedBookingId, bookingData);
+        if (fallbackResult && (fallbackResult as any).success) {
+          console.warn('⚠️ [Fallback] Manual booking not found in manual collection; updated main booking instead:', normalizedBookingId);
+          return fallbackResult as any;
+        }
+      } catch (fallbackError) {
+        console.warn('⚠️ [Fallback] Failed to update main booking for manual booking:', fallbackError);
+      }
       return {
         success: false,
         error: 'Original manual booking not found'
@@ -2591,15 +2659,15 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
     let updateResult;
 
     // First try as ObjectId if it's a valid format
-    if (ObjectId.isValid(bookingId) && bookingId.length === 24) {
+    if (ObjectId.isValid(normalizedBookingId) && normalizedBookingId.length === 24) {
       updateResult = await collection.updateOne(
-        { _id: new ObjectId(bookingId) },
+        { _id: new ObjectId(normalizedBookingId) },
         { $set: updateData }
       );
     } else {
       // Try as custom ID field
       updateResult = await collection.updateOne(
-        { bookingId: bookingId },
+        { bookingId: normalizedBookingId },
         { $set: updateData }
       );
     }
@@ -2616,6 +2684,16 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
         success: false,
         error: 'Manual booking not found or no changes made'
       };
+    }
+
+    // Keep main bookings collection in sync so manual behaves like confirmed booking
+    try {
+      await updateBooking(normalizedBookingId, bookingData);
+    } catch (syncError) {
+      console.warn('⚠️ [Sync] Failed to mirror manual booking update to main collection:', {
+        bookingId: normalizedBookingId,
+        error: syncError
+      });
     }
 
     // Get the updated booking
@@ -2646,7 +2724,7 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
 
         // Verify that the time slot was correctly updated in compressed data (manual booking)
         console.log('🔍 Manual booking compressed data verification after update:', {
-          bookingId: bookingId,
+          bookingId: normalizedBookingId,
           originalTime: (originalBooking as any).time,
           newTime: bookingData.time,
           decompressedTime: (decompressedData as any).time,
@@ -2665,7 +2743,7 @@ const updateManualBooking = async (bookingId: string, bookingData: Record<string
       fullBookingData = updatedBooking;
     }
 
-    console.log(`✅ Manual booking updated in MongoDB:`, bookingId);
+    console.log(`✅ Manual booking updated in MongoDB:`, normalizedBookingId);
 
     return {
       success: true,

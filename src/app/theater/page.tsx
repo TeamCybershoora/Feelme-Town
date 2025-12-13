@@ -721,7 +721,7 @@ export default function Theater() {
         };
 
         window.addEventListener('directRefreshTheaterData', handleDirectRefreshTheaterData);
-
+        
         return () => {
             window.removeEventListener('refreshBookedSlots', handleRefreshBookedSlots);
             window.removeEventListener('forceRefreshTheaterSlots', handleForceRefreshTheaterSlots);
@@ -729,112 +729,19 @@ export default function Theater() {
         };
     }, [selectedDate, selectedTheater, filteredTheaters]);
 
-    // Real-time booked slots refresh - instant updates when database changes
-    useEffect(() => {
-        // Immediate fetch on component mount/change
-        if (selectedDate && filteredTheaters[selectedTheater]?.name) {
-            const fetchBookedSlotsImmediate = async () => {
-                try {
-                    const apiUrl = `/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`;
-                    
-                    
-                    const response = await fetch(apiUrl);
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        
-                        setBookedTimeSlots(data.bookedTimeSlots);
-                    }
-                } catch (error) {
-                    
-                }
-            };
-            
-            fetchBookedSlotsImmediate();
-        }
-        
-        const refreshTimer = setInterval(() => {
-            // Real-time refresh of booked slots for current theater
-            if (selectedDate && filteredTheaters[selectedTheater]?.name) {
-                const fetchBookedSlots = async () => {
-                    try {
-                        const apiUrl = `/api/booked-slots?date=${encodeURIComponent(selectedDate)}&theater=${encodeURIComponent(filteredTheaters[selectedTheater].name)}`;
-                        
-                        
-                        const response = await fetch(apiUrl);
-                        const data = await response.json();
-                        
-                        
-
-                        if (data.success) {
-                            // Real-time update of booked time slots from database booking collection
-                            const previousSlots = bookedTimeSlots;
-                            
-                            
-                            setBookedTimeSlots(data.bookedTimeSlots);
-                            
-                            // Real-time change detection for instant updates
-                            if (JSON.stringify(previousSlots) !== JSON.stringify(data.bookedTimeSlots)) {
-                                
-                                
-                                
-                                
-                                // Calculate what changed
-                                const newBookings = data.bookedTimeSlots.filter((slot: string) => !previousSlots.includes(slot));
-                                const cancelledBookings = previousSlots.filter((slot: string) => !data.bookedTimeSlots.includes(slot));
-                                
-                                if (newBookings.length > 0) {
-                                    
-                                }
-                                if (cancelledBookings.length > 0) {
-                                    
-                                }
-                                
-                                // Trigger visual update event for instant UI refresh
-                                const event = new CustomEvent('slotsUpdated', { 
-                                    detail: { newBookings, cancelledBookings } 
-                                });
-                                window.dispatchEvent(event);
-                            } else {
-                                
-                            }
-                        } else {
-                            
-                            
-                            setBookedTimeSlots([]);
-                        }
-                    } catch (error) {
-                        
-                        
-                    }
-                };
-
-                fetchBookedSlots();
-            }
-        }, 1000); // Real-time check every 1 second for instant booked slots updates
-
-        return () => clearInterval(refreshTimer);
-    }, [selectedDate, selectedTheater, filteredTheaters, bookedTimeSlots]);
-
-
-
     const preFillBookingData = useCallback((bookingData: { date?: string; numberOfPeople?: number; time?: string; theaterName?: string }) => {
-        // Set date if available
         if (bookingData.date) {
             setSelectedDate(bookingData.date);
         }
 
-        // Set member count if available
         if (bookingData.numberOfPeople) {
             setMemberCount(bookingData.numberOfPeople);
         }
 
-        // Set time slot if available
         if (bookingData.time) {
             setSelectedTimeSlot(bookingData.time);
         }
 
-        // Set theater if available
         if (bookingData.theaterName) {
             const theaterIndex = theaters.findIndex(theater =>
                 theater.name === bookingData.theaterName
@@ -843,8 +750,6 @@ export default function Theater() {
                 setSelectedTheater(theaterIndex);
             }
         }
-
-        
     }, [setSelectedDate, setMemberCount, setSelectedTimeSlot, setSelectedTheater, theaters]);
 
     return (

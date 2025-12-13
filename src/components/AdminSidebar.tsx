@@ -48,19 +48,6 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
     });
   };
 
-  // Helper function to check if booking is from current date
-  const isCurrentDateBooking = (bookingDate: string) => {
-    if (!bookingDate) return false;
-    const currentDate = getCurrentDateIST();
-    const bookingDateIST = new Date(bookingDate).toLocaleDateString('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-    return bookingDateIST === currentDate;
-  };
-
   // Fetch pending requests count and current date bookings count
   useEffect(() => {
     const fetchPendingRequestsCount = async () => {
@@ -79,16 +66,24 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
 
     const fetchCurrentDateBookingsCount = async () => {
       try {
-        const dbResponse = await fetch('/api/admin/bookings');
-        const dbData = await dbResponse.json();
+        const [regularResponse, manualResponse] = await Promise.all([
+          fetch('/api/admin/bookings'),
+          fetch('/api/admin/manual-bookings')
+        ]);
+        const [regularData, manualData] = await Promise.all([
+          regularResponse.json(),
+          manualResponse.json()
+        ]);
 
         let currentDateCount = 0;
 
-        if (dbData.success && dbData.bookings) {
-          currentDateCount = dbData.bookings.filter(
-            (booking: any) =>
-              isCurrentDateBooking(booking.date) && booking.status.toLowerCase() === 'confirmed',
-          ).length;
+        if (regularData.success && Array.isArray(regularData.bookings)) {
+          currentDateCount += regularData.bookings.length;
+        }
+
+        if (manualData.success && (manualData.manualBookings || manualData.bookings)) {
+          const manualList = manualData.manualBookings || manualData.bookings || [];
+          currentDateCount += manualList.length;
         }
 
         setCurrentDateBookingsCount(currentDateCount);

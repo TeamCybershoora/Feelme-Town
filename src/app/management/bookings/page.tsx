@@ -792,7 +792,7 @@ export default function BookingsPage() {
   };
 
   const handleTogglePaymentStatus = (booking: any) => {
-    const bookingId = booking.originalBookingId || booking.id;
+    const bookingId = booking.originalBookingId || booking.bookingId || booking.id;
     if (!bookingId) {
       showError('Booking ID missing');
       return;
@@ -813,7 +813,7 @@ export default function BookingsPage() {
     if (!bookingPendingPayment) return;
 
     const booking = bookingPendingPayment;
-    const bookingId = booking.originalBookingId || booking.id;
+    const bookingId = String(booking.originalBookingId || booking.bookingId || booking.id);
     if (!bookingId) {
       showError('Booking ID missing');
       return;
@@ -821,8 +821,14 @@ export default function BookingsPage() {
 
     const targetStatus = 'paid';
 
+    const statusLower = ((booking.statusKey || booking.status || '') as string).toLowerCase();
+    const isManualBooking =
+      (booking.bookingType || '').toLowerCase() === 'manual' ||
+      statusLower === 'manual' ||
+      Boolean(booking.isManualBooking);
+
     try {
-      setPaymentUpdatingId(booking.id);
+      setPaymentUpdatingId(bookingId);
 
       // Get current user info (admin or staff) - EXACT SAME LOGIC AS DASHBOARD
       let paidBy = 'Administrator';
@@ -861,7 +867,7 @@ export default function BookingsPage() {
         paidBy: paidBy,
         paidAt: new Date().toISOString(),
         sendInvoice: targetStatus === 'paid',
-        isManualBooking: (booking.bookingType || '').toLowerCase() === 'manual'
+        isManualBooking
       };
 
       // Add staff fields - null for Admin, actual values for Staff
@@ -910,8 +916,13 @@ export default function BookingsPage() {
   };
 
   const handleClosePaymentMethodModal = () => {
-    if (paymentUpdatingId !== null && bookingPendingPayment && paymentUpdatingId === bookingPendingPayment.id) {
-      return;
+    if (paymentUpdatingId !== null && bookingPendingPayment) {
+      const pendingId = String(
+        bookingPendingPayment.originalBookingId || bookingPendingPayment.bookingId || bookingPendingPayment.id
+      );
+      if (paymentUpdatingId === pendingId) {
+        return;
+      }
     }
     setIsPaymentMethodModalOpen(false);
     setBookingPendingPayment(null);
@@ -1148,6 +1159,12 @@ export default function BookingsPage() {
             ) : (
               displayedBookings.map((booking: any, index: number) => {
                 // Calculate current date CONFIRMED booking number
+                const statusKeyLower = (booking.statusKey || booking.status || '').toLowerCase();
+                const normalizedBookingId = String(booking.originalBookingId || booking.bookingId || booking.id);
+                const isManualBooking =
+                  booking.bookingType === 'manual' || statusKeyLower === 'manual';
+                const isActiveManualBooking = isManualBooking && statusKeyLower !== 'cancelled';
+
                 const currentDateConfirmedBookings = displayedBookings.filter((b: any, i: number) =>
                   i <= index &&
                   isCurrentDateBooking(b.date) &&
@@ -1156,8 +1173,9 @@ export default function BookingsPage() {
                 const currentDateConfirmedBookingNumber = currentDateConfirmedBookings.length;
                 const normalizedPaymentStatus = (booking.paymentStatus || 'unpaid').toLowerCase();
                 const isPaid = normalizedPaymentStatus === 'paid';
-                const canTogglePayment = (booking.statusKey || '').toLowerCase() === 'confirmed';
-                const isPaymentUpdating = paymentUpdatingId === booking.id;
+                const canTogglePayment =
+                  statusKeyLower === 'confirmed' || isActiveManualBooking;
+                const isPaymentUpdating = paymentUpdatingId === normalizedBookingId;
 
                 return (
                   <tr key={booking.id}>
@@ -1174,11 +1192,6 @@ export default function BookingsPage() {
                       <div className="customer-info">
                         <div className="customer-name">
                           {booking.customerName}
-                          {booking.bookingType === 'manual' && (
-                            <span className="booking-type-badge manual">
-                              Manual · {(booking.createdBy || booking.staffName || booking.adminName || 'Staff/Admin')}
-                            </span>
-                          )}
                         </div>
                       </div>
                     </td>
