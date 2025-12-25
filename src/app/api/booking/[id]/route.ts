@@ -276,7 +276,7 @@ export async function PUT(
       
 
       // Send confirmation email in background (no invoice attachment)
-      emailService.sendBookingConfirmed(result.booking).catch(error => {
+      emailService.sendBookingConfirmed(result.booking).catch(() => {
         // Email service error handled
       });
 

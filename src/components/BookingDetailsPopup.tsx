@@ -221,6 +221,10 @@ export default function BookingDetailsPopup({
                     })()}
                   </span>
                 </div>
+                <div className="detail-item">
+                  <span className="label">Ticket No:</span>
+                  <span className="value">{(booking as any).ticketNumber || (booking as any).ticket_number || 'N/A'}</span>
+                </div>
                 {/* Show Created By information for manual bookings */}
                 {booking.status === 'manual' && booking.createdBy && (
                   <div className="detail-item">

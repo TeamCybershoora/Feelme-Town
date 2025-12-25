@@ -1,13 +1,16 @@
 'use client';
 
+import type { ReactNode } from 'react';
+
+
 export default function InvoiceLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="invoice-layout">
-      {/* No Navbar */}
+      
       {children}
       {/* No Footer */}
       

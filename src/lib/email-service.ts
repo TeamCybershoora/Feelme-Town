@@ -1688,22 +1688,20 @@ const emailService = {
     }
     const bookingId = bookingData.id || (bookingData as any).bookingId || '';
     const hasCloudInvoice = Boolean(bookingData.invoiceDriveUrl);
-    const hasAttachment = Boolean(options.attachment);
-    const attachmentFilename = options.attachment?.filename || `Invoice-${bookingId || 'Attachment'}.pdf`;
 
     let invoicePageUrl: string | null = null;
+    let invoiceDownloadUrl: string | null = null;
     if (hasCloudInvoice && bookingId) {
       try {
         const siteUrl = await getSiteUrl();
         invoicePageUrl = `${siteUrl}/invoice/${encodeURIComponent(bookingId)}`;
+        invoiceDownloadUrl = `${invoicePageUrl}?download=1`;
       } catch (error) {
         console.warn('⚠️ [email] Failed to resolve site URL for invoice page link:', error);
       }
     }
 
-    const subject = hasCloudInvoice
-      ? 'Your Final Invoice - FeelME Town 🧾'
-      : 'Your Invoice Is Ready - FeelME Town 🧾';
+    const subject = 'Your Invoice Is Ready - FeelME Town 🧾';
 
     const template = {
       subject,
@@ -1730,8 +1728,8 @@ const emailService = {
         <body>
           <div class="container">
             <div class="header">
-              <div class="title">${hasCloudInvoice ? 'This is your final invoice' : 'Your invoice is ready'}</div>
-              <div style="color:#bbb; margin-top:6px;">Hi ${bookingData.name || 'Customer'}, your show is completed. ${hasCloudInvoice ? 'This is your final invoice for the booking.' : 'Please find your invoice attached.'}</div>
+              <div class="title">Your invoice is ready</div>
+              <div style="color:#bbb; margin-top:6px;">Hi ${bookingData.name || 'Customer'}, your invoice is ready. You can view it online and download it anytime.</div>
             </div>
             <div class="content">
               <div class="card">
@@ -1739,21 +1737,90 @@ const emailService = {
                 <div class="value">${bookingData.id}</div>
               </div>
               <div style="margin-top:16px; font-size:13px; color:#d1d5db; line-height:1.6;">
-                ${hasCloudInvoice
-                  ? 'We have attached the PDF invoice and stored it with your booking. You can also view it online for your records.'
-                  : 'We\'ve attached the PDF invoice to this email. You can download and keep it for your records.'}
+                Your invoice is ready. You can view it online and download it anytime for your records.
               </div>
               ${invoicePageUrl ? `
-                <a class="cta" href="${invoicePageUrl}" target="_blank" rel="noopener noreferrer">Open invoice page</a>
-              ` : ''}
-              ${hasCloudInvoice ? `
-                <div style="margin-top:12px; font-size:12px; color:#93c5fd;">
-                  Prefer a direct download? <a href="${bookingData.invoiceDriveUrl}" style="color:#bfdbfe; text-decoration:underline;" target="_blank" rel="noopener noreferrer">Download the PDF from Cloudinary</a>.
+                <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:18px;">
+                  <a class="cta" href="${invoicePageUrl}" target="_blank" rel="noopener noreferrer">View invoice</a>
+                  ${invoiceDownloadUrl ? `<a class="cta" href="${invoiceDownloadUrl}" target="_blank" rel="noopener noreferrer" style="background:#111827; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);">Download invoice</a>` : ''}
                 </div>
               ` : ''}
-              ${hasAttachment ? `
-                <div style="margin-top:12px; font-size:12px; color:#d1fae5;">
-                  📎 Attachment: ${attachmentFilename}
+            </div>
+            <div class="footer">&copy; ${CURRENT_YEAR} FeelME Town • Delhi, India • feelmetown@gmail.com<br/>Thank you for visiting — see you again soon!</div>
+          </div>
+        </body>
+      </html>
+    `
+    };
+
+    // Disable PDF attachments for invoice delivery. We send View/Download links only.
+    // (Keep signature compatible: callers may still pass options.attachment.)
+    return sendEmail(bookingData.email, template.subject, template.html, undefined);
+  },
+
+  sendBookingInvoice: async (
+    bookingData: BookingData & { invoiceDriveUrl?: string },
+    options: { attachment?: { filename: string; content: Buffer } } = {},
+  ) => {
+    if (!bookingData.email) {
+      return { success: false, error: 'No email provided' };
+    }
+
+    const bookingId = bookingData.id || (bookingData as any).bookingId || '';
+    const hasCloudInvoice = Boolean(bookingData.invoiceDriveUrl);
+
+    let invoicePageUrl: string | null = null;
+    let invoiceDownloadUrl: string | null = null;
+    if (hasCloudInvoice && bookingId) {
+      try {
+        const siteUrl = await getSiteUrl();
+        invoicePageUrl = `${siteUrl}/invoice/${encodeURIComponent(bookingId)}`;
+        invoiceDownloadUrl = `${invoicePageUrl}?download=1`;
+      } catch (error) {
+        console.warn('⚠️ [email] Failed to resolve site URL for invoice page link:', error);
+      }
+    }
+
+    const template = {
+      subject: 'This is your invoice - FeelME Town 🧾',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Invoice - FeelME Town</title>
+          <style>
+            body { margin:0; padding:0; background:#0b0b0b; color:#fff; font-family: Arial, sans-serif; }
+            .container { max-width:650px; margin:0 auto; background:#141414; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.35); }
+            .header { background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%); padding:40px 24px; text-align:center; }
+            .title { font-size:28px; font-weight:800; color:#ffffff; }
+            .content { padding:28px; }
+            .cta { display:inline-block; margin-top:16px; background:#E50914; color:#fff !important; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:700; }
+            .card { background:#0f0f0f; border:1px solid #1f1f1f; border-radius:16px; padding:20px; margin:12px 0; }
+            .label { color:#bbb; font-size:12px; text-transform:uppercase; }
+            .value { color:#fff; font-size:16px; font-weight:600; margin-top:6px; }
+            .footer { text-align:center; color:#aaa; font-size:12px; padding:20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="title">Here is your invoice</div>
+              <div style="color:#bbb; margin-top:6px;">Hi ${bookingData.name || 'Customer'}, you can view your invoice online and download it anytime.</div>
+            </div>
+            <div class="content">
+              <div class="card">
+                <div class="label">Booking Reference</div>
+                <div class="value">${bookingData.id}</div>
+              </div>
+              <div style="margin-top:16px; font-size:13px; color:#d1d5db; line-height:1.6;">
+                Your invoice is available for your records.
+              </div>
+              ${invoicePageUrl ? `
+                <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:18px;">
+                  <a class="cta" href="${invoicePageUrl}" target="_blank" rel="noopener noreferrer">View invoice</a>
+                  ${invoiceDownloadUrl ? `<a class="cta" href="${invoiceDownloadUrl}" target="_blank" rel="noopener noreferrer" style="background:#111827; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);">Download invoice</a>` : ''}
                 </div>
               ` : ''}
             </div>
@@ -1763,19 +1830,87 @@ const emailService = {
       </html>
     `
     };
-    const attachments = options.attachment
-      ? [
-          {
-            filename: options.attachment.filename,
-            content: options.attachment.content.toString('base64'),
-            encoding: 'base64',
-            contentType: 'application/pdf',
-            contentDisposition: 'attachment',
-          },
-        ]
-      : undefined;
 
-    return sendEmail(bookingData.email, template.subject, template.html, attachments);
+    // Disable PDF attachments for invoice delivery. We send View/Download links only.
+    // (Keep signature compatible: callers may still pass options.attachment.)
+    return sendEmail(bookingData.email, template.subject, template.html, undefined);
+  },
+
+  sendBookingFinalInvoice: async (
+    bookingData: BookingData & { invoiceDriveUrl?: string },
+    options: { attachment?: { filename: string; content: Buffer } } = {},
+  ) => {
+    if (!bookingData.email) {
+      return { success: false, error: 'No email provided' };
+    }
+
+    const bookingId = bookingData.id || (bookingData as any).bookingId || '';
+
+    let invoicePageUrl: string | null = null;
+    let invoiceDownloadUrl: string | null = null;
+    if (bookingId) {
+      try {
+        const siteUrl = await getSiteUrl();
+        invoicePageUrl = `${siteUrl}/invoice/${encodeURIComponent(bookingId)}`;
+        invoiceDownloadUrl = `${invoicePageUrl}?download=1`;
+      } catch (error) {
+        console.warn('⚠️ [email] Failed to resolve site URL for invoice page link:', error);
+      }
+    }
+
+    const template = {
+      subject: 'Your Booking is Completed – Final Invoice 🧾',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Final Invoice - FeelME Town</title>
+          <style>
+            body { margin:0; padding:0; background:#0b0b0b; color:#fff; font-family: Arial, sans-serif; }
+            .container { max-width:650px; margin:0 auto; background:#141414; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.35); }
+            .header { background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%); padding:40px 24px; text-align:center; }
+            .title { font-size:28px; font-weight:800; color:#ffffff; }
+            .content { padding:28px; }
+            .cta { display:inline-block; margin-top:16px; background:#E50914; color:#fff !important; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:700; }
+            .card { background:#0f0f0f; border:1px solid #1f1f1f; border-radius:16px; padding:20px; margin:12px 0; }
+            .label { color:#bbb; font-size:12px; text-transform:uppercase; }
+            .value { color:#fff; font-size:16px; font-weight:600; margin-top:6px; }
+            .footer { text-align:center; color:#aaa; font-size:12px; padding:20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="title">Your booking is completed!</div>
+              <div style="color:#bbb; margin-top:6px;">Hi ${bookingData.name || 'Customer'}, this is your final invoice for your booking. Thank you for visiting FeelME Town — we hope to host you again soon.</div>
+            </div>
+            <div class="content">
+              <div class="card">
+                <div class="label">Booking Reference</div>
+                <div class="value">${bookingData.id}</div>
+              </div>
+              <div style="margin-top:16px; font-size:13px; color:#d1d5db; line-height:1.6;">
+                You can view it online and download it anytime for your records.
+              </div>
+              ${invoicePageUrl ? `
+                <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:18px;">
+                  <a class="cta" href="${invoicePageUrl}" target="_blank" rel="noopener noreferrer">View invoice</a>
+                  ${invoiceDownloadUrl ? `<a class="cta" href="${invoiceDownloadUrl}" target="_blank" rel="noopener noreferrer" style="background:#111827; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);">Download invoice</a>` : ''}
+                </div>
+              ` : ''}
+            </div>
+            <div class="footer">&copy; ${CURRENT_YEAR} FeelME Town • Delhi, India • feelmetown@gmail.com</div>
+          </div>
+        </body>
+      </html>
+    `
+    };
+
+    // Disable PDF attachments for invoice delivery. We send View/Download links only.
+    // (Keep signature compatible: callers may still pass options.attachment.)
+    return sendEmail(bookingData.email, template.subject, template.html, undefined);
   },
   sendBookingConfirmed: async (bookingData: BookingData & { ticketNumber?: string }) => {
     if (!bookingData.email) {
@@ -1978,7 +2113,6 @@ const emailService = {
   // Send booking completion email
   sendBookingComplete: async (bookingData: BookingData) => {
     if (!bookingData.email) {
-      console.log('❌ No email provided for booking completion');
       return { success: false, error: 'No email provided' };
     }
 
@@ -1987,51 +2121,10 @@ const emailService = {
       // Generate email template
       const template = emailTemplates.bookingComplete(bookingData, siteUrl);
 
-      // Generate PDF invoice
-      console.log('📄 Generating PDF invoice for email attachment...');
-      const fetch = (await import('node-fetch')).default;
-
-      const pdfResponse = await fetch(`${siteUrl}/api/generate-invoice`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: bookingData.id,
-          name: bookingData.name,
-          email: bookingData.email,
-          phone: bookingData.phone,
-          theaterName: bookingData.theaterName,
-          date: bookingData.date,
-          time: bookingData.time,
-          occasion: bookingData.occasion,
-          numberOfPeople: bookingData.numberOfPeople,
-          totalAmount: bookingData.totalAmount,
-          // Include all other fields for dynamic occasion details
-          ...(bookingData as any)
-        })
-      });
-
-      if (!pdfResponse.ok) {
-        console.log('⚠️ Failed to generate PDF, sending email without attachment');
-        return await sendEmail(bookingData.email, template.subject, template.html);
-      }
-
-      const pdfBuffer = await pdfResponse.arrayBuffer();
-
-      // Create attachment with custom filename
-      const cleanCustomerName = (bookingData.name || 'Customer').replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '-');
-      const filename = `Invoice-FMT-${cleanCustomerName}.pdf`;
-
-      const attachments = [{
-        filename: filename,
-        content: Buffer.from(pdfBuffer),
-        contentType: 'application/pdf'
-      }];
-
-      console.log('📧 Sending booking confirmation email with PDF invoice attachment');
-      return await sendEmail(bookingData.email, template.subject, template.html, attachments);
+      // Do not send invoice PDFs as email attachments. Invoice is delivered via invoice page links.
+      return await sendEmail(bookingData.email, template.subject, template.html);
 
     } catch (error) {
-      console.error('❌ Error generating PDF attachment:', error);
       // Fallback: send email without attachment
       const siteUrl = await getSiteUrl();
       const template = emailTemplates.bookingComplete(bookingData, siteUrl);
@@ -2288,4 +2381,3 @@ const emailService = {
 };
 
 export default emailService;
-

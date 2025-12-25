@@ -63,6 +63,13 @@ async function searchCloudinaryInvoices(params: {
 
 export async function GET(_request: NextRequest) {
   try {
+    const noCacheHeaders = {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
+      'Surrogate-Control': 'no-store',
+    };
+
     const settings = await database.getSettings();
     const cloudName = settings?.cloudinaryCloudName || '';
     const apiKey = settings?.cloudinaryApiKey || '';
@@ -73,7 +80,7 @@ export async function GET(_request: NextRequest) {
     if (!cloudName || !apiKey || !apiSecret) {
       return NextResponse.json(
         { success: false, error: 'Cloudinary is not configured' },
-        { status: 500 }
+        { status: 500, headers: noCacheHeaders }
       );
     }
 
@@ -95,11 +102,16 @@ export async function GET(_request: NextRequest) {
         resourceType: r.resource_type || 'raw',
       }));
 
-    return NextResponse.json({ success: true, invoices });
+    return NextResponse.json({ success: true, invoices }, { status: 200, headers: noCacheHeaders });
   } catch (error: any) {
     return NextResponse.json(
       { success: false, error: error?.message || 'Failed to list invoices' },
-      { status: 500 }
+      { status: 500, headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
+        'Surrogate-Control': 'no-store',
+      } }
     );
   }
 }

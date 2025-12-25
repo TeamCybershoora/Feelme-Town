@@ -99,6 +99,19 @@ export async function POST(request: Request) {
 
     if (result.success) {
       console.log('✅ Feedback saved successfully:', result.feedbackId);
+
+      try {
+        const { syncFeedbackToSQL } = await import('@/lib/godaddy-sql');
+        await syncFeedbackToSQL({
+          ...feedbackData,
+          _id: result.feedbackId,
+          mongoId: result.feedbackId,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+      } catch (e) {
+        console.warn('⚠️ Feedback saved to Mongo but failed to sync to GoDaddy SQL:', e);
+      }
       
       return NextResponse.json({
         success: true,
@@ -125,20 +138,38 @@ export async function POST(request: Request) {
 // GET /api/feedback - Get all feedback (for admin)
 export async function GET() {
   try {
-    const result = await database.getFeedbackList();
-    
-    if (result.success) {
+    let source: 'sql' | 'mongo' = 'mongo';
+    let result: any = null;
+
+    try {
+      const { getFeedbackListFromSQL } = await import('@/lib/godaddy-sql');
+      const sqlResult = await getFeedbackListFromSQL({ limit: 20, testimonialsOnly: false });
+      if (sqlResult?.success) {
+        result = sqlResult;
+        source = 'sql';
+      }
+    } catch (e) {
+      console.warn('⚠️ Failed to fetch feedback from GoDaddy SQL; falling back to Mongo:', e);
+    }
+
+    if (!result) {
+      result = await database.getFeedbackList();
+      source = 'mongo';
+    }
+
+    if (result?.success) {
       return NextResponse.json({
         success: true,
         feedback: result.feedback,
-        total: result.total
+        total: result.total,
+        source
       });
-    } else {
-      return NextResponse.json(
-        { success: false, error: result.error },
-        { status: 500 }
-      );
     }
+
+    return NextResponse.json(
+      { success: false, error: result?.error || 'Failed to fetch feedback' },
+      { status: 500 }
+    );
   } catch (error) {
     console.error('Get Feedback API Error:', error);
     return NextResponse.json(

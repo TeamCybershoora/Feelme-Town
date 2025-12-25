@@ -1,95 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import { ExportsStorage } from '@/lib/exports-storage';
-import { uploadInvoiceToCloudinary } from '@/lib/cloudinary-invoices';
 import emailService from '@/lib/email-service';
-
-const getBaseUrl = (request: NextRequest) =>
-  process.env.NEXT_PUBLIC_BASE_URL ||
-  process.env.BASE_URL ||
-  request.nextUrl.origin ||
-  'http://localhost:3000';
-
-const buildMailData = (booking: any) => {
-  const mailId = booking.bookingId || booking.id || (booking._id ? String(booking._id) : undefined);
-  if (!mailId) return null;
-  return {
-    id: mailId,
-    name: booking.name || booking.customerName || 'Customer',
-    email: booking.email,
-    phone: booking.phone,
-    theaterName: booking.theaterName || booking.theater,
-    date: booking.date,
-    time: booking.time,
-    numberOfPeople: booking.numberOfPeople,
-    totalAmount: booking.totalAmount,
-    invoiceDriveUrl: booking.invoiceDriveUrl,
-  };
-};
-
-const generateAndStoreInvoice = async ({
-  booking,
-  baseUrl,
-  isManualBooking,
-}: {
-  booking: any;
-  baseUrl: string;
-  isManualBooking: boolean;
-}) => {
-  try {
-    const mailData = buildMailData(booking);
-    if (!mailData?.id || !mailData.email) {
-      console.warn('⚠️ Skipping invoice generation due to missing data', { bookingId: mailData?.id });
-      return;
-    }
-
-    const { POST: generateInvoiceHandler } = await import('@/app/api/generate-invoice/route');
-
-    const request = new Request('http://internal/api/generate-invoice', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(mailData),
-    });
-
-    const pdfResponse = await generateInvoiceHandler(request as any);
-
-    if (!pdfResponse.ok) {
-      console.warn('⚠️ Failed to generate invoice PDF during booking creation', {
-        bookingId: mailData.id,
-        status: pdfResponse.status,
-      });
-      return;
-    }
-
-    const arrayBuffer = await pdfResponse.arrayBuffer();
-    const pdfBuffer = Buffer.from(arrayBuffer);
-
-    const cleanCustomerName = (mailData.name || 'Customer')
-      .replace(/[^a-zA-Z0-9\s]/g, '')
-      .replace(/\s+/g, '-');
-    const filename = `Invoice-${mailData.id}-${cleanCustomerName}.pdf`;
-
-    const cloudinaryFile = await uploadInvoiceToCloudinary(filename, pdfBuffer);
-    if (cloudinaryFile && (cloudinaryFile.inlineUrl || cloudinaryFile.secureUrl)) {
-      const invoiceUrl = cloudinaryFile.inlineUrl || cloudinaryFile.secureUrl;
-      mailData.invoiceDriveUrl = invoiceUrl;
-      try {
-        if (isManualBooking) {
-          await database.updateManualBooking?.(mailData.id, { invoiceDriveUrl: invoiceUrl });
-        }
-        await database.updateBooking(mailData.id, { invoiceDriveUrl: invoiceUrl });
-      } catch (updateInvoiceUrlError) {
-        console.warn('⚠️ Failed to persist invoice URL on booking:', updateInvoiceUrlError);
-      }
-    }
-
-    emailService.sendBookingInvoiceReady(mailData as any).catch((mailError) => {
-      console.error('❌ Failed to send invoice email after booking creation:', mailError);
-    });
-  } catch (error) {
-    console.error('❌ Failed to auto-generate invoice after booking creation:', error);
-  }
-};
 
 // Helper function to extract dynamic service items from request body
 function getDynamicServiceItems(body: any): Record<string, any> {
@@ -420,23 +332,7 @@ export async function POST(request: NextRequest) {
       }
 
       const bookingForEmail = persistedBooking;
-      const baseUrl = getBaseUrl(request);
-      await generateAndStoreInvoice({
-        booking: bookingForEmail,
-        baseUrl,
-        isManualBooking: !!completeBookingData.isManualBooking
-      });
-
       emailService.sendBookingConfirmed(bookingForEmail as any).catch(() => { });
-
-      // Best-effort: ensure auto-cleanup scheduler is started (non-blocking)
-      try {
-        fetch(`${request.nextUrl.origin}/api/auto-cleanup-scheduler`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'start' })
-        }).catch(() => { });
-      } catch { }
 
       return NextResponse.json({
         success: true,

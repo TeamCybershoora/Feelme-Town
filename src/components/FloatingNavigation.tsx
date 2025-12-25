@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useBooking } from '@/contexts/BookingContext';
+import { usePathname } from 'next/navigation';
 
 const sanitizePhoneNumber = (value?: string | null) => value?.replace(/[^\d]/g, '') ?? '';
 
@@ -87,6 +88,11 @@ const initialFeedbackFormState: FeedbackFormState = {
 };
 
 const FloatingNavigation = () => {
+  const pathname = usePathname();
+  if (pathname?.startsWith('/invoice')) {
+    return null;
+  }
+
   const { openBookingPopup } = useBooking();
 
   const handleBookingClick = () => {

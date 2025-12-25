@@ -8,7 +8,7 @@ import { useBooking } from '@/contexts/BookingContext';
 
 const Navbar = () => {
   const { openBookingPopup } = useBooking();
-  
+
   const handleBookingClick = () => {
     router.push('/theater');
   };
@@ -21,7 +21,7 @@ const Navbar = () => {
   const lastScrollY = useRef(0);
   const [dragStart, setDragStart] = useState<number | null>(null);
   const [dragCurrent, setDragCurrent] = useState<number | null>(null);
-  
+
   // Hidden admin access - click logo 5 times
   const [logoClickCount, setLogoClickCount] = useState(0);
   const [lastLogoClickTime, setLastLogoClickTime] = useState(0);
@@ -30,7 +30,7 @@ const Navbar = () => {
   const handleButtonClick = (buttonName: string) => {
     setActiveButton(buttonName);
     setIsMobileMenuOpen(false);
-    
+
     // Navigate to appropriate page
     switch (buttonName) {
       case 'Home':
@@ -68,16 +68,16 @@ const Navbar = () => {
 
   const handleLogoClick = () => {
     const currentTime = Date.now();
-    
+
     // Reset counter if more than 3 seconds have passed since last click
     if (currentTime - lastLogoClickTime > 3000) {
       setLogoClickCount(1);
     } else {
       setLogoClickCount(prev => prev + 1);
     }
-    
+
     setLastLogoClickTime(currentTime);
-    
+
     // If 5 clicks within 3 seconds, open role chooser / redirect
     if (logoClickCount >= 4) { // 4 because we just incremented
       setLogoClickCount(0); // Reset counter
@@ -229,17 +229,28 @@ const Navbar = () => {
       <div className="navbar-container">
         <div className="navbar-left">
           <div className="logo-container">
-            <Image 
-              src="/logo.svg" 
+            {/* <Image 
+              src="/logo.gif" 
               alt="FeelMe Town Logo" 
-              width={50} 
-              height={50}
+              width={70} 
+              height={70}
               className="logo"
               onClick={handleLogoClick}
               style={{ cursor: 'pointer' }}
+            /> */}
+            <Image
+              src="/logo.gif"
+              alt="FeelMe Town Logo"
+              width={70}
+              height={70}
+              className="logo"
+              onClick={handleLogoClick}
+              unoptimized
+              priority
+              style={{ cursor: 'pointer' }}
             />
           </div>
-          <button 
+          <button
             className="mobile-menu-toggle"
             onClick={toggleMobileMenu}
             aria-label="Toggle mobile menu"
@@ -252,51 +263,51 @@ const Navbar = () => {
           </button>
         </div>
         <div className="navbar-center">
-          <button 
+          <button
             className={`nav-button ${activeButton === 'Home' ? 'active' : ''}`}
             onClick={() => handleButtonClick('Home')}
           >
             Home
           </button>
-          <button 
+          <button
             className={`nav-button ${activeButton === 'About Us' ? 'active' : ''}`}
             onClick={() => handleButtonClick('About Us')}
           >
             About Us
           </button>
-          <button 
+          <button
             className={`nav-button ${activeButton === 'Theatres' ? 'active' : ''}`}
             onClick={() => handleButtonClick('Theatres')}
           >
             Theatres
           </button>
-          <button 
+          <button
             className={`nav-button ${activeButton === 'Services' ? 'active' : ''}`}
             onClick={() => handleButtonClick('Services')}
           >
             Services
           </button>
-          <button 
+          <button
             className={`nav-button ${activeButton === 'Gallery' ? 'active' : ''}`}
             onClick={() => handleButtonClick('Gallery')}
           >
             Gallery
           </button>
-          <button 
+          <button
             className={`nav-button ${activeButton === 'Contact Us' ? 'active' : ''}`}
             onClick={() => handleButtonClick('Contact Us')}
           >
             Contact Us
           </button>
         </div>
-        <div className="navbar-right">        
+        <div className="navbar-right">
           <div className="search-container">
             <div className="glow" aria-hidden="true"></div>
             <div className="darkBorderBg" aria-hidden="true"></div>
             <div className="darkBorderBg" aria-hidden="true"></div>
             <div className="white" aria-hidden="true"></div>
             <div className="border" aria-hidden="true"></div>
-            
+
             <div className="search-main">
               <input
                 placeholder="Search..."
@@ -307,9 +318,9 @@ const Navbar = () => {
               />
               <div className="input-mask" aria-hidden="true"></div>
               <div className="pink-mask" aria-hidden="true"></div>
-              
+
               <div className="filterBorder" aria-hidden="true"></div>
-              
+
               <button className="filter-icon" type="button" aria-label="Open filters">
                 <svg
                   preserveAspectRatio="none"
@@ -329,7 +340,7 @@ const Navbar = () => {
                   ></path>
                 </svg>
               </button>
-              
+
               <div className="search-icon" aria-hidden="true">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -372,34 +383,34 @@ const Navbar = () => {
             <div className="book-darkBorderBg" aria-hidden="true"></div>
             <div className="book-white" aria-hidden="true"></div>
             <div className="book-border" aria-hidden="true"></div>
-              <button className="book-button"  onClick={handleBookingClick}>
-                <Image
-                  src="/ticket.png"
-                  alt="Ticket"
-                  width={20}
-                  height={20}
-                  className="ticket-icon"
-                />
-                Book Your Show
-              </button>
+            <button className="book-button" onClick={handleBookingClick}>
+              <Image
+                src="/ticket.png"
+                alt="Ticket"
+                width={20}
+                height={20}
+                className="ticket-icon"
+              />
+              Book Your Show
+            </button>
           </div>
         </div>
       </div>
-      
+
       {/* Mobile Menu Overlay */}
-      <div 
+      <div
         className={`mobile-menu-overlay ${isMobileMenuOpen ? 'active' : ''}`}
         onClick={closeMobileMenu}
       >
-        <div 
-          className="mobile-menu" 
+        <div
+          className="mobile-menu"
           onClick={(e) => e.stopPropagation()}
           onTouchStart={handleDragStart}
           onTouchMove={handleDragMove}
           onTouchEnd={handleDragEnd}
         >
           <div className="mobile-menu-header">
-            <button 
+            <button
               className="mobile-menu-close"
               onClick={closeMobileMenu}
               aria-label="Close mobile menu"
@@ -411,88 +422,88 @@ const Navbar = () => {
             </button>
           </div>
           <div className="mobile-menu-content">
-            <button 
+            <button
               className={`mobile-nav-button ${activeButton === 'Home' ? 'active' : ''}`}
               onClick={() => handleButtonClick('Home')}
             >
               Home
             </button>
-            <button 
+            <button
               className={`mobile-nav-button ${activeButton === 'About Us' ? 'active' : ''}`}
               onClick={() => handleButtonClick('About Us')}
             >
               About Us
             </button>
-            <button 
+            <button
               className={`mobile-nav-button ${activeButton === 'Theatres' ? 'active' : ''}`}
               onClick={() => handleButtonClick('Theatres')}
             >
               Theatres
             </button>
-            <button 
+            <button
               className={`mobile-nav-button ${activeButton === 'Services' ? 'active' : ''}`}
               onClick={() => handleButtonClick('Services')}
             >
               Services
             </button>
-            <button 
+            <button
               className={`mobile-nav-button ${activeButton === 'Gallery' ? 'active' : ''}`}
               onClick={() => handleButtonClick('Gallery')}
             >
               Gallery
             </button>
-            <button 
+            <button
               className={`mobile-nav-button ${activeButton === 'Contact Us' ? 'active' : ''}`}
               onClick={() => handleButtonClick('Contact Us')}
             >
               Contact Us
             </button>
-            
-            
-            
-              <div className="mobile-menu-actions">
-                <div className="mobile-search-container">
-                  <input
-                    placeholder="Search..."
-                    type="text"
-                    className="mobile-search-input"
-                    aria-label="Search"
-                    autoComplete="off"
-                  />
-                  <div className="mobile-search-icon">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="18"
-                      viewBox="0 0 24 24"
-                      strokeWidth="2"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                      height="18"
-                      fill="none"
-                      className="feather feather-search"
-                    >
-                      <circle stroke="#d6d6e6" r="8" cy="11" cx="11"></circle>
-                      <line
-                        stroke="#d6d6e6"
-                        y2="16.65"
-                        y1="22"
-                        x2="16.65"
-                        x1="22"
-                      ></line>
-                    </svg>
-                  </div>
-                </div>
-                
-                <div className="mobile-cta-container">
-                  <div className="mobile-cta-glow" aria-hidden="true"></div>
-                  <div className="mobile-cta-darkBorderBg" aria-hidden="true"></div>
-                  <div className="mobile-cta-white" aria-hidden="true"></div>
-                  <div className="mobile-cta-border" aria-hidden="true"></div>
-              <button className="mobile-cta-button" onClick={handleBookingClick}>
-                <span>Book Your Show</span>
-              </button>
+
+
+
+            <div className="mobile-menu-actions">
+              <div className="mobile-search-container">
+                <input
+                  placeholder="Search..."
+                  type="text"
+                  className="mobile-search-input"
+                  aria-label="Search"
+                  autoComplete="off"
+                />
+                <div className="mobile-search-icon">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    height="18"
+                    fill="none"
+                    className="feather feather-search"
+                  >
+                    <circle stroke="#d6d6e6" r="8" cy="11" cx="11"></circle>
+                    <line
+                      stroke="#d6d6e6"
+                      y2="16.65"
+                      y1="22"
+                      x2="16.65"
+                      x1="22"
+                    ></line>
+                  </svg>
                 </div>
               </div>
+
+              <div className="mobile-cta-container">
+                <div className="mobile-cta-glow" aria-hidden="true"></div>
+                <div className="mobile-cta-darkBorderBg" aria-hidden="true"></div>
+                <div className="mobile-cta-white" aria-hidden="true"></div>
+                <div className="mobile-cta-border" aria-hidden="true"></div>
+                <button className="mobile-cta-button" onClick={handleBookingClick}>
+                  <span>Book Your Show</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -513,7 +524,7 @@ const Navbar = () => {
           </div>
         </div>
       )}
-      
+
       <style jsx>{`
         .navbar {
           position: fixed;

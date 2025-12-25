@@ -3,9 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LoadingWrapper from "@/components/LoadingWrapper";
 import AdminLayoutWrapper from "@/components/AdminLayoutWrapper";
-
-// Initialize auto-cleanup scheduler (node-cron based)
-import '@/lib/background-scheduler';
+import InspectGuard from "@/components/guards/InspectGuard";
 
 // MongoDB TTL indexes handle automatic deletion now
 
@@ -31,6 +29,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    <>
+    {/* <InspectGuard /> */}
     <html lang="en" suppressHydrationWarning>
       <head>
         <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
@@ -43,5 +43,6 @@ export default function RootLayout({
           </LoadingWrapper>
       </body>
     </html>
+    </>
   );
 }

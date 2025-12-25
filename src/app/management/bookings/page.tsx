@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search, Filter, Eye, Edit, Trash2, CheckCircle, XCircle, Calendar, X } from 'lucide-react';
 
 import { BookingProvider } from '@/contexts/BookingContext';
@@ -45,6 +45,49 @@ export default function BookingsPage() {
       minute: '2-digit',
       hour12: true
     });
+  };
+
+  const handleMarkAsCompleted = async (booking: any) => {
+    const bookingId = String(booking.originalBookingId || booking.bookingId || booking.id);
+    if (!bookingId) {
+      showError('Booking ID missing');
+      return;
+    }
+
+    const statusLower = String(booking.statusKey || booking.status || '').toLowerCase();
+    const isManualBooking =
+      (booking.bookingType || '').toLowerCase() === 'manual' ||
+      statusLower === 'manual' ||
+      Boolean(booking.isManualBooking);
+
+    try {
+      setCompletingBookingId(bookingId);
+      const response = await fetch('/api/admin/update-booking', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bookingId,
+          status: 'completed',
+          sendInvoice: false,
+          isManualBooking,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        showSuccess('Booking moved to Completed.');
+        await fetchBookings();
+      } else {
+        showError(data.error || 'Failed to complete booking');
+      }
+    } catch (error) {
+      console.error('Error marking booking as completed:', error);
+      showError('Error marking booking as completed');
+    } finally {
+      setCompletingBookingId(null);
+    }
   };
 
   // Helper function to get current date in IST
@@ -147,14 +190,16 @@ export default function BookingsPage() {
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isManualBookingOpen, setIsManualBookingOpen] = useState(false);
   const [paymentUpdatingId, setPaymentUpdatingId] = useState<string | null>(null);
+  const [completingBookingId, setCompletingBookingId] = useState<string | null>(null);
   const [isPaymentMethodModalOpen, setIsPaymentMethodModalOpen] = useState(false);
   const [bookingPendingPayment, setBookingPendingPayment] = useState<any | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'cash'>('online');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'upi' | 'cash'>('online');
   const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
 
   // Infinite scroll state
-  const [displayedCount, setDisplayedCount] = useState(50);
+  const [displayedCount, setDisplayedCount] = useState(10);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   // For viewing/editing booking details
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -181,45 +226,59 @@ export default function BookingsPage() {
       };
     }
 
+    const normalizeMethodLabel = (raw: any) => {
+      const normalizedMethod = (raw || '').toString().toLowerCase();
+      if (normalizedMethod === 'cash' || normalizedMethod === 'cash_payment') return 'Cash';
+      if (normalizedMethod === 'upi') return 'UPI';
+      if (
+        normalizedMethod === 'pay_at_venue' ||
+        normalizedMethod === 'venue' ||
+        normalizedMethod.includes('venue')
+      ) return 'Pay at Venue';
+      if (normalizedMethod.includes('online') || normalizedMethod === 'razorpay') return 'Online';
+      return normalizedMethod ? normalizedMethod.toUpperCase() : 'Paid';
+    };
+
+    const normalizeActor = (raw: any) => {
+      const v = (raw || '').toString().trim();
+      if (!v) return '';
+      const lower = v.toLowerCase();
+      if (lower === 'administrator' || lower === 'admin') return 'Admin';
+      if (lower === 'staff') return 'Staff';
+      return v;
+    };
+
+    const paymentReceivedRaw = booking.paymentReceived || booking.payment_received;
+    const paymentReceivedText = (paymentReceivedRaw || '').toString().trim();
+
     const rawMethod =
       booking.advancePaymentMethod ||
       booking.venuePaymentMethod ||
-      booking.paymentMode;
-    const normalizedMethod = (rawMethod || '').toString().toLowerCase();
-    let methodLabel = 'Paid';
-    let icon = '💳';
+      booking.finalPaymentMethod ||
+      booking.paymentMode ||
+      booking.paymentMethod ||
+      (booking as any).final_payment_method ||
+      (booking as any).payment_mode ||
+      (booking as any).payment_method ||
+      (booking as any).venue_payment_method;
 
-    if (normalizedMethod === 'cash' || normalizedMethod === 'cash_payment') {
-      methodLabel = 'Cash';
-      icon = '💵';
-    } else if (normalizedMethod === 'upi') {
-      methodLabel = 'UPI';
-      icon = '📱';
-    } else if (
-      normalizedMethod === 'pay_at_venue' ||
-      normalizedMethod === 'venue' ||
-      normalizedMethod.includes('venue')
-    ) {
-      methodLabel = 'Pay at Venue';
-      icon = '🏠';
-    } else if (normalizedMethod.includes('online') || normalizedMethod === 'razorpay') {
-      methodLabel = 'Online';
-      icon = '💳';
-    }
+    const methodLabel = normalizeMethodLabel(rawMethod);
 
     const actor =
       booking.staffName ||
       booking.paidBy ||
       booking.userId ||
       booking.manualCreatedBy;
-    const actorLabel = actor ? `${actor}` : methodLabel;
+    const actorLabel = normalizeActor(actor) || 'Admin';
+
+    const finalLabel = paymentReceivedText || `${methodLabel} - ${actorLabel}`;
 
     return {
-      primaryText: `${icon} Paid`,
-      secondaryText: actor ? `${icon} ${actorLabel}` : `${icon} ${methodLabel}`,
-      title: actor ? `Marked by ${actorLabel}` : `Paid via ${methodLabel}`,
+      primaryText: `💰 ${finalLabel}`,
+      secondaryText: null,
+      title: finalLabel,
       className: 'paid',
-      animate: Boolean(actor)
+      animate: false
     };
   };
 
@@ -254,7 +313,7 @@ export default function BookingsPage() {
       // Fetch confirmed bookings from database and other bookings from JSON files
       const [confirmedBookingsResponse, completedBookingsResponse, manualBookingsResponse, cancelledBookingsResponse, incompleteBookingsResponse] = await Promise.all([
         fetch('/api/admin/bookings'), // Confirmed bookings from database
-        fetch('/api/admin/export-bookings-json?type=completed'), // Completed bookings from JSON file
+        fetch('/api/admin/export-godaddy-bookings?type=completed&shape=mongo'),
         fetch('/api/admin/manual-bookings'), // Manual bookings from MongoDB
         fetch('/api/admin/export-bookings-json?type=cancelled'), // Cancelled bookings from JSON file
         fetch('/api/incomplete-booking') // Incomplete bookings from database
@@ -283,8 +342,8 @@ export default function BookingsPage() {
         }
       };
 
-      // Completed bookings from GoDaddy SQL (no fallback to JSON files)
-      let completedArray = (completedData.bookings || []) as any[];
+      // Completed bookings from GoDaddy SQL (mongo-shaped)
+      let completedArray = ((completedData?.data?.completed || completedData?.bookings || []) as any[]);
 
       // Manual bookings are fetched from MongoDB via the dedicated API
       let manualArray = (manualData.manualBookings || manualData.bookings || manualData.records || []) as any[];
@@ -311,17 +370,15 @@ export default function BookingsPage() {
 
       // Process completed bookings from GoDaddy SQL
       const completedBookings = (completedArray).map((booking: any) => {
-        const normalizedPaymentStatus = 'paid';
         return {
           ...booking,
-          bookingType: 'online',
+          bookingType: booking.bookingType || 'online',
           status: 'completed',
-          paymentStatus: normalizedPaymentStatus,
+          paymentStatus: booking.paymentStatus || 'paid',
           venuePaymentMethod: booking.venuePaymentMethod || booking.paymentMethod || booking.finalPaymentMethod || null,
-          // Map SQL column names to expected field names
-          theaterName: booking.theater_name || booking.theaterName || booking.theater,
-          theater: booking.theater_name || booking.theaterName || booking.theater,
-          createdAtIST: convertToIST(booking.completed_at || booking.completedAt || booking.createdAt)
+          theaterName: booking.theaterName || booking.theater_name || booking.theater,
+          theater: booking.theaterName || booking.theater || booking.theater_name,
+          createdAtIST: convertToIST(booking.completedAt || booking.completed_at || booking.createdAt)
         };
       });
 
@@ -396,6 +453,13 @@ export default function BookingsPage() {
           bookingTypeLabel: rawBookingType,
           occasion: booking.occasion || '',
           paymentStatus: (booking.status || '').toLowerCase() === 'completed' ? 'paid' : normalizedPaymentStatus,
+          paymentReceived: booking.paymentReceived || booking.payment_received || '',
+          venuePaymentMethod: booking.venuePaymentMethod || booking.venue_payment_method || '',
+          paymentMethod: booking.paymentMethod || booking.payment_method || '',
+          paymentMode: booking.paymentMode || booking.payment_mode || '',
+          finalPaymentMethod: booking.finalPaymentMethod || booking.final_payment_method || '',
+          paidBy: booking.paidBy || booking.paid_by || '',
+          userId: booking.userId || booking.user_id || '',
           occasionPersonName: booking.occasionPersonName || '',
           birthdayName: booking.birthdayName || '',
           partner1Name: booking.partner1Name || '',
@@ -636,30 +700,37 @@ export default function BookingsPage() {
 
   // Reset displayed count when filters change
   useEffect(() => {
-    setDisplayedCount(50);
+    setDisplayedCount(10);
   }, [searchTerm, statusFilter, showTodayOnly, showTomorrowOnly, selectedDate]);
 
-  // Infinite scroll handler
+  // Infinite scroll handler (IntersectionObserver)
   useEffect(() => {
-    const handleScroll = () => {
-      // Check if user scrolled near bottom (within 200px)
-      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-      const scrollHeight = document.documentElement.scrollHeight;
-      const clientHeight = document.documentElement.clientHeight;
-      
-      if (scrollHeight - scrollTop - clientHeight < 200 && hasMore && !isLoadingMore) {
-        setIsLoadingMore(true);
-        // Load 50 more bookings
-        setTimeout(() => {
-          setDisplayedCount(prev => prev + 50);
-          setIsLoadingMore(false);
-        }, 300); // Small delay for smooth UX
-      }
-    };
+    const target = loadMoreSentinelRef.current;
+    if (!target) return;
+    if (!hasMore) return;
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [hasMore, isLoadingMore]);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (!hasMore || isLoadingMore) return;
+
+        setIsLoadingMore(true);
+        setTimeout(() => {
+          setDisplayedCount((prev) => prev + 10);
+          setIsLoadingMore(false);
+        }, 150);
+      },
+      {
+        root: null,
+        rootMargin: '250px',
+        threshold: 0
+      }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, displayedCount]);
 
   const handleStatusChange = async (id: number, newStatus: string) => {
     try {
@@ -703,6 +774,8 @@ export default function BookingsPage() {
       // Prefer original booking id when available
       const lookupId = String(booking.originalBookingId || booking.id);
 
+      const statusKey = String(booking.statusKey || booking.status || '').toLowerCase();
+
       // First try to get the booking from regular bookings
       let response = await fetch(`/api/admin/bookings`);
       let data = await response.json();
@@ -721,6 +794,18 @@ export default function BookingsPage() {
 
         if (data.success) {
           completeBooking = data.manualBookings?.find((b: any) => String(b.bookingId || b.id) === lookupId);
+        }
+      }
+
+      // If completed booking, fetch full details from GoDaddy SQL (mongo-shaped)
+      if (!completeBooking && statusKey.includes('completed')) {
+        try {
+          const sqlResponse = await fetch(`/api/admin/export-godaddy-bookings?type=completed&shape=mongo`);
+          const sqlData = await sqlResponse.json();
+          const sqlBookings = (sqlData?.data?.completed || []) as any[];
+          completeBooking = sqlBookings.find((b: any) => String(b.bookingId || b.id) === lookupId) || null;
+        } catch {
+          // ignore
         }
       }
 
@@ -996,7 +1081,7 @@ export default function BookingsPage() {
         );
 
         showSuccess(
-          `Payment marked as paid (${selectedPaymentMethod === 'cash' ? 'Cash' : 'Online'}). Invoice email sent.`,
+          `Payment marked as paid (${selectedPaymentMethod === 'cash' ? 'Cash' : selectedPaymentMethod === 'upi' ? 'UPI' : 'Online'}). Invoice email sent.`,
         );
 
         setIsPaymentMethodModalOpen(false);
@@ -1337,15 +1422,26 @@ export default function BookingsPage() {
                     </td>
                     <td>
                       <div className="action-buttons">
-                        {canTogglePayment && !isPaid && (
-                          <button
-                            className={`action-btn pay-btn ${isPaid ? 'paid' : ''}`}
-                            title='Mark as Paid'
-                            onClick={() => handleTogglePaymentStatus(booking)}
-                            disabled={isPaymentUpdating}
-                          >
-                            <CheckCircle size={16} />
-                          </button>
+                        {canTogglePayment && (
+                          isPaid ? (
+                            <button
+                              className="action-btn complete-btn"
+                              title="Move to Completed"
+                              onClick={() => handleMarkAsCompleted(booking)}
+                              disabled={completingBookingId === String(booking.originalBookingId || booking.bookingId || booking.id)}
+                            >
+                              <CheckCircle size={16} />
+                            </button>
+                          ) : (
+                            <button
+                              className="action-btn pay-btn"
+                              title="Mark as Paid"
+                              onClick={() => handleTogglePaymentStatus(booking)}
+                              disabled={isPaymentUpdating}
+                            >
+                              <CheckCircle size={16} />
+                            </button>
+                          )
                         )}
                         <button
                           className="action-btn view-btn"
@@ -1390,6 +1486,14 @@ export default function BookingsPage() {
         }}>
           Loading more bookings...
         </div>
+      )}
+
+      {/* Sentinel for IntersectionObserver */}
+      {hasMore && (
+        <div
+          ref={loadMoreSentinelRef}
+          style={{ height: '1px', width: '100%' }}
+        />
       )}
       
       {/* End of results indicator */}
@@ -1828,6 +1932,15 @@ export default function BookingsPage() {
 
         .action-btn.pay-btn.paid {
           background: #10b981;
+        }
+
+        .action-btn.complete-btn {
+          background: #10b981;
+          color: white;
+        }
+
+        .action-btn.complete-btn:hover {
+          background: #059669;
         }
 
         .action-btn.pay-btn:disabled {
@@ -2445,7 +2558,18 @@ export default function BookingsPage() {
               >
                 <span className="method-icon">💳</span>
                 <span className="method-title">Paid Online</span>
-                <span className="method-subtitle">UPI, card, or any digital mode</span>
+                <span className="method-subtitle">Card, netbanking, or any online mode</span>
+              </button>
+
+              <button
+                type="button"
+                className={`payment-method-option ${selectedPaymentMethod === 'upi' ? 'selected' : ''}`}
+                onClick={() => setSelectedPaymentMethod('upi')}
+                disabled={paymentUpdatingId === bookingPendingPayment.id}
+              >
+                <span className="method-icon">📲</span>
+                <span className="method-title">Paid via UPI</span>
+                <span className="method-subtitle">UPI payment received</span>
               </button>
 
               <button

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Search, Calendar } from 'lucide-react';
 
 interface BookingWithInvoice {
@@ -60,6 +60,11 @@ export default function AdminInvoicesPage() {
   const [showTodayOnly, setShowTodayOnly] = useState(false);
   const [showTomorrowOnly, setShowTomorrowOnly] = useState(false);
   const [selectedDate, setSelectedDate] = useState(''); // YYYY-MM-DD
+
+  // Infinite scroll state (UI-only)
+  const [displayedCount, setDisplayedCount] = useState(10);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const fetchInvoices = async (silent = false) => {
@@ -123,11 +128,31 @@ export default function AdminInvoicesPage() {
 
     // Poll every 2 seconds for new invoices only
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       setIsRefreshing(true);
       fetchInvoices(true);
     }, 2000);
 
-    return () => clearInterval(interval);
+    const onFocus = () => {
+      setIsRefreshing(true);
+      fetchInvoices(true);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        setIsRefreshing(true);
+        fetchInvoices(true);
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [hasInitialized, knownInvoiceUrlsRef]);
 
   const isToday = (dateStr?: string) => {
@@ -210,6 +235,43 @@ export default function AdminInvoicesPage() {
     return matchesSearch && matchesDate;
   });
 
+  // Reset displayed count when filters change
+  useEffect(() => {
+    setDisplayedCount(10);
+  }, [searchTerm, showTodayOnly, showTomorrowOnly, selectedDate]);
+
+  const displayedBookings = filteredBookings.slice(0, displayedCount);
+  const hasMore = displayedCount < filteredBookings.length;
+
+  // Infinite scroll handler (IntersectionObserver)
+  useEffect(() => {
+    const target = loadMoreSentinelRef.current;
+    if (!target) return;
+    if (!hasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (!hasMore || isLoadingMore) return;
+
+        setIsLoadingMore(true);
+        setTimeout(() => {
+          setDisplayedCount((prev) => prev + 10);
+          setIsLoadingMore(false);
+        }, 150);
+      },
+      {
+        root: null,
+        rootMargin: '250px',
+        threshold: 0,
+      }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, displayedCount]);
+
   return (
     <div className="bookings-page">
       <div className="page-header">
@@ -268,8 +330,8 @@ export default function AdminInvoicesPage() {
         </button>
 
         <div className="results-info">
-          Showing {filteredBookings.length} of {bookings.length} invoices
-          {filteredBookings.length < bookings.length && (
+          Showing {displayedBookings.length} of {filteredBookings.length} invoices
+          {hasMore && (
             <span style={{ marginLeft: '0.5rem', color: '#10b981' }}>(Scroll for more)</span>
           )}
         </div>
@@ -284,7 +346,7 @@ export default function AdminInvoicesPage() {
 
       {!loading && !error && filteredBookings.length > 0 && (
         <div className="invoice-cards-grid">
-          {filteredBookings.map((b) => {
+          {displayedBookings.map((b) => {
             const extracted = extractCustomerNameFromUrl(b.invoiceDriveUrl);
             const customerDisplay = extracted || b.name || 'Customer';
             const pdfUrl = b.invoiceDriveUrl || '';
@@ -342,6 +404,18 @@ export default function AdminInvoicesPage() {
             );
           })}
         </div>
+      )}
+
+      {/* Loading indicator for infinite scroll */}
+      {isLoadingMore && (
+        <div style={{ textAlign: 'center', padding: '2rem', color: '#10b981', fontSize: '0.9rem', fontWeight: 600 }}>
+          Loading more invoices...
+        </div>
+      )}
+
+      {/* Sentinel for IntersectionObserver */}
+      {hasMore && (
+        <div ref={loadMoreSentinelRef} style={{ height: '1px', width: '100%' }} />
       )}
 
       {isModalOpen && (

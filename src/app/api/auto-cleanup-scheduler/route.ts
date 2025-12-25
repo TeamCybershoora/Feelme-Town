@@ -1,141 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import database from '@/lib/db-connect';
-import { ExportsStorage } from '@/lib/exports-storage'; // Dummy - no longer used
-import emailService from '@/lib/email-service';
-import { incrementCounter } from '@/lib/counter-system';
 
-// Global variable to track if cleanup is already running
-let isCleanupRunning = false;
-let cleanupInterval: NodeJS.Timeout | null = null;
-
-// Auto-start the scheduler when the API route is first loaded (no ENV flag required)
-const shouldAutoStart = process.env.NEXT_PHASE !== 'phase-production-build';
-if (shouldAutoStart && !isCleanupRunning) {
-  console.log('🚀 Auto-starting cleanup scheduler...');
-  isCleanupRunning = true;
-  
-  // Run cleanup immediately on start
-  performCleanup().then(() => {
-    console.log('✅ Initial cleanup completed');
-  }).catch(err => {
-    console.error('❌ Initial cleanup failed:', err);
-  });
-  
-  // Then run every 5 minutes
-  cleanupInterval = setInterval(async () => {
-    console.log('⏰ Running scheduled cleanup...');
-    await performCleanup();
-  }, 300000); // 5 minutes = 300000ms
-  
-  console.log('✅ Auto-cleanup scheduler started (runs every 5 minutes)');
-}
+// Legacy endpoint: auto cleanup is now handled by Vercel Cron.
 
 export async function POST(request: NextRequest) {
   try {
-    const { action } = await request.json();
-    
-    if (action === 'start') {
-      if (isCleanupRunning) {
-        return NextResponse.json({
-          success: false,
-          message: 'Automatic cleanup is already running'
-        });
-      }
-      
-      
-      isCleanupRunning = true;
-      
-      // Run cleanup every 5 minutes
-      cleanupInterval = setInterval(async () => {
-        await performCleanup();
-      }, 300000); // 5 minutes interval
-      
-      return NextResponse.json({
-        success: true,
-        message: 'Automatic cleanup scheduler started (runs every 5 minutes)'
-      });
-      
-    } else if (action === 'stop') {
-      if (!isCleanupRunning) {
-        return NextResponse.json({
-          success: false,
-          message: 'Automatic cleanup is not running'
-        });
-      }
-      
-      
-      isCleanupRunning = false;
-      
-      if (cleanupInterval) {
-        clearInterval(cleanupInterval);
-        cleanupInterval = null;
-      }
-      
-      return NextResponse.json({
-        success: true,
-        message: 'Automatic cleanup scheduler stopped'
-      });
-      
-    } else if (action === 'status') {
-      return NextResponse.json({
-        success: true,
-        isRunning: isCleanupRunning,
-        message: isCleanupRunning ? 'Automatic cleanup is running' : 'Automatic cleanup is stopped'
-      });
-      
-    } else if (action === 'run') {
-      // Manual run
-      const result = await performCleanup();
-      return NextResponse.json({
-        success: true,
-        message: 'Manual cleanup completed',
-        result: result
-      });
-    }
-    
-    return NextResponse.json({
-      success: false,
-      message: 'Invalid action. Use: start, stop, status, or run'
-    });
-    
+    return NextResponse.json(
+      {
+        success: false,
+        message: 'Disabled. Cleanup is now handled by Vercel Cron.',
+      },
+      { status: 410 },
+    );
   } catch (error) {
     
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred'
     }, { status: 500 });
-  }
-}
-
-// Function to perform the actual cleanup
-async function performCleanup() {
-  try {
-    console.log('🔄 Auto-cleanup: Checking for expired bookings...');
-    
-    // Call the auto-complete-expired logic directly
-    const autoCompleteModule = await import('../bookings/auto-complete-expired/route');
-    
-    // Create a mock NextRequest
-    const mockRequest = {
-      json: async () => ({}),
-      headers: new Headers(),
-      method: 'POST',
-      url: 'http://localhost/api/bookings/auto-complete-expired'
-    } as any;
-    
-    const response = await autoCompleteModule.POST(mockRequest);
-    const result = await response.json();
-    
-    if (result.success) {
-      console.log(`✅ Auto-cleanup: Completed ${result.completedCount} expired bookings`);
-      if (result.completedCount > 0) {
-        console.log('📋 Expired bookings:', result.expiredBookings);
-      }
-    } else {
-      console.error('❌ Auto-cleanup: Failed to complete expired bookings:', result.error);
-    }
-  } catch (error) {
-    console.error('❌ Auto-cleanup: Error in performCleanup:', error);
   }
 }
 

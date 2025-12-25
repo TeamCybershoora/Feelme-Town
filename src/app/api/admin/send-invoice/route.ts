@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import emailService from '@/lib/email-service';
+import {
+  uploadInvoiceToCloudinary,
+  deleteInvoiceFromCloudinaryByUrl,
+  extractCloudinaryPublicIdFromUrl,
+} from '@/lib/cloudinary-invoices';
 
 const INTERNAL_INVOICE_SECRET = process.env.INTERNAL_INVOICE_SECRET || 'feelmetown-internal-secret';
+
+const normalizeBaseUrl = (raw: string | null | undefined): string => {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  return withProtocol.replace(/\/+$/, '');
+};
 
 interface LoadedBooking {
   booking: any | null;
@@ -76,10 +88,20 @@ const buildMailPayload = (booking: any) => {
   } as any;
 };
 
-const ensureInvoicePdf = async (
+const ensureInvoiceCloudinaryUrl = async (
+  bookingId: string,
   mailData: any,
   baseUrl: string,
-): Promise<{ mailData: any; attachment?: { filename: string; content: Buffer } }> => {
+  isManual: boolean,
+  options: { regenerate?: boolean; previousInvoiceUrl?: string } = {},
+): Promise<any> => {
+  const regenerate = options.regenerate ?? false;
+  const previousInvoiceUrl = options.previousInvoiceUrl || null;
+
+  if (!regenerate && mailData?.invoiceDriveUrl) {
+    return mailData;
+  }
+
   try {
     const { GET: generateInvoiceHandler } = await import('@/app/api/generate-invoice/route');
 
@@ -99,23 +121,50 @@ const ensureInvoicePdf = async (
 
     const pdfResponse = await generateInvoiceHandler(invoiceRequest as any);
     if (!pdfResponse.ok) {
-      console.warn('⚠️ [send-invoice] Failed to generate invoice PDF:', pdfResponse.status);
-      return { mailData };
+      console.warn('⚠️ [send-invoice] Failed to generate invoice PDF for Cloudinary upload:', pdfResponse.status);
+      return mailData;
     }
 
     const arrayBuffer = await pdfResponse.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
-    return {
-      mailData,
-      attachment: {
-        filename: `Invoice-${mailData.id}.pdf`,
-        content: pdfBuffer,
-      },
-    };
+    const cleanCustomerName = (mailData.name || 'Customer')
+      .replace(/[^a-zA-Z0-9\s]/g, '')
+      .replace(/\s+/g, '-');
+
+    // If we are regenerating and we already have an existing Cloudinary URL,
+    // force a new public_id so the returned URL changes (and then delete the old asset).
+    const filename = (regenerate && previousInvoiceUrl)
+      ? `Invoice-${mailData.id}-${cleanCustomerName}-${Date.now()}.pdf`
+      : `Invoice-${mailData.id}-${cleanCustomerName}.pdf`;
+
+    const cloudinaryFile = await uploadInvoiceToCloudinary(filename, pdfBuffer);
+    const invoiceUrl = cloudinaryFile?.inlineUrl || cloudinaryFile?.secureUrl || null;
+
+    if (invoiceUrl) {
+      mailData.invoiceDriveUrl = invoiceUrl;
+      try {
+        if (isManual) {
+          await database.updateManualBooking?.(bookingId, { invoiceDriveUrl: invoiceUrl });
+        }
+        await database.updateBooking(bookingId, { invoiceDriveUrl: invoiceUrl });
+      } catch (updateError) {
+        console.warn('⚠️ [send-invoice] Failed to persist invoice URL on booking:', updateError);
+      }
+
+      if (previousInvoiceUrl) {
+        const oldPublicId = extractCloudinaryPublicIdFromUrl(previousInvoiceUrl);
+        const newPublicId = extractCloudinaryPublicIdFromUrl(invoiceUrl);
+        if (oldPublicId && newPublicId && oldPublicId !== newPublicId) {
+          await deleteInvoiceFromCloudinaryByUrl(previousInvoiceUrl);
+        }
+      }
+    }
+
+    return mailData;
   } catch (error) {
-    console.error('❌ [send-invoice] Invoice PDF generation error:', error);
-    return { mailData };
+    console.error('❌ [send-invoice] Failed to generate/upload invoice PDF:', error);
+    return mailData;
   }
 };
 
@@ -123,6 +172,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const rawBookingId = resolveBookingId(body?.bookingId);
+    const regenerateInvoice = body?.regenerateInvoice !== undefined ? Boolean(body.regenerateInvoice) : true;
+    const sendEmail = body?.sendEmail !== undefined ? Boolean(body.sendEmail) : true;
 
     if (!rawBookingId) {
       return NextResponse.json(
@@ -140,6 +191,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const previousInvoiceUrl = booking?.invoiceDriveUrl || null;
+
     const mailData = buildMailPayload(booking);
     if (!mailData?.email) {
       return NextResponse.json(
@@ -152,9 +205,9 @@ export async function POST(request: NextRequest) {
     let resolvedBaseUrl: string;
     try {
       const settings = await database.getSettings();
-      const websiteUrl = settings?.websiteUrl || null;
+      const websiteUrl = normalizeBaseUrl(settings?.websiteUrl || null);
 
-      const requestOrigin = request.nextUrl?.origin ?? '';
+      const requestOrigin = (request as any)?.nextUrl?.origin ?? new URL(request.url).origin;
       const headerHost = request.headers.get('host');
       const headerProto = request.headers.get('x-forwarded-proto') ?? (headerHost?.startsWith('localhost') ? 'http' : 'https');
       const headerOrigin = headerHost ? `${headerProto}://${headerHost}` : '';
@@ -169,18 +222,32 @@ export async function POST(request: NextRequest) {
       resolvedBaseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.BASE_URL || 'http://localhost:3000';
     }
 
-    const { mailData: enrichedMailData, attachment } = await ensureInvoicePdf(mailData, resolvedBaseUrl);
+    resolvedBaseUrl = normalizeBaseUrl(resolvedBaseUrl) || 'http://localhost:3000';
 
-    if (!attachment?.content || attachment.content.length === 0) {
+    const enrichedMailData = await ensureInvoiceCloudinaryUrl(
+      rawBookingId,
+      mailData,
+      resolvedBaseUrl,
+      isManual,
+      { regenerate: regenerateInvoice, previousInvoiceUrl },
+    );
+
+    if (!enrichedMailData?.invoiceDriveUrl) {
       return NextResponse.json(
-        { success: false, error: 'Failed to generate invoice PDF attachment' },
+        { success: false, error: 'Failed to generate invoice PDF' },
         { status: 500 },
       );
     }
 
-    const emailResult = await emailService.sendBookingInvoiceReady(enrichedMailData, {
-      attachment,
-    });
+    if (!sendEmail) {
+      return NextResponse.json({
+        success: true,
+        message: 'Invoice generated successfully',
+        invoiceUrl: enrichedMailData.invoiceDriveUrl || null,
+      });
+    }
+
+    const emailResult = await emailService.sendBookingInvoice(enrichedMailData);
 
     if (!emailResult?.success) {
       return NextResponse.json(

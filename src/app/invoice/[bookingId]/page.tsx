@@ -5,26 +5,49 @@ import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/useToast';
 import ToastContainer from '@/components/ToastContainer';
 
+
 export default function InvoicePage() {
   const params = useParams();
   const bookingId = params.bookingId as string;
   const [invoiceHtml, setInvoiceHtml] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isPending, setIsPending] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [customerName, setCustomerName] = useState<string>('');
   const [cloudInvoiceUrl, setCloudInvoiceUrl] = useState<string | null>(null);
+  const [autoDownloadRequested, setAutoDownloadRequested] = useState<boolean>(false);
+  const [autoDownloadDone, setAutoDownloadDone] = useState<boolean>(false);
   const { toasts, removeToast, showSuccess, showError } = useToast();
 
   useEffect(() => {
     if (bookingId) {
+      setIsLoading(true);
       fetchInvoice();
     }
   }, [bookingId]);
 
+  useEffect(() => {
+    if (!bookingId) return;
+    const url = new URL(window.location.href);
+    const shouldDownload = url.searchParams.get('download') === '1';
+    setAutoDownloadRequested(shouldDownload);
+  }, [bookingId]);
+
+  useEffect(() => {
+    if (!autoDownloadRequested || autoDownloadDone) return;
+    if (!cloudInvoiceUrl && !invoiceHtml) return;
+    downloadPDF();
+    setAutoDownloadDone(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoDownloadRequested, autoDownloadDone, cloudInvoiceUrl, invoiceHtml]);
+
   const fetchInvoice = async () => {
+    setIsLoading(true);
     try {
       console.log('📄 Fetching invoice for booking:', bookingId);
       let bookingName = '';
+      let foundCloudInvoiceUrl: string | null = null;
+      let lookedUpCloudInvoiceUrl: string | null = null;
 
       try {
         const bookingResponse = await fetch(`/api/booking/${encodeURIComponent(bookingId)}`);
@@ -38,16 +61,48 @@ export default function InvoicePage() {
               console.log('✅ Customer name fetched from booking API:', booking.name);
             }
             if (booking.invoiceDriveUrl) {
+              foundCloudInvoiceUrl = booking.invoiceDriveUrl;
               setCloudInvoiceUrl(booking.invoiceDriveUrl);
+              setIsPending(false);
               console.log('✅ Found Cloudinary invoice URL:', booking.invoiceDriveUrl);
             }
-            if (booking.paymentStatus && booking.paymentStatus !== 'paid') {
-              setIsPending(true);
+            if (booking.paymentStatus) {
+              const normalizedPaymentStatus = String(booking.paymentStatus).toLowerCase();
+              if (!foundCloudInvoiceUrl) {
+                setIsPending(normalizedPaymentStatus !== 'paid');
+              }
             }
           }
         }
       } catch (bookingErr) {
         console.log('⚠️ Could not fetch booking data, will try to extract from HTML');
+      }
+
+      if (!foundCloudInvoiceUrl) {
+        try {
+          const lookupResponse = await fetch(
+            `/api/invoices/lookup?bookingId=${encodeURIComponent(bookingId)}`,
+            { cache: 'no-store' },
+          );
+          if (lookupResponse.ok) {
+            const lookupData = await lookupResponse.json();
+            if (lookupData?.success && lookupData?.invoiceUrl) {
+              lookedUpCloudInvoiceUrl = String(lookupData.invoiceUrl);
+              setCloudInvoiceUrl(lookedUpCloudInvoiceUrl);
+              setIsPending(false);
+              console.log('✅ Cloudinary invoice found via lookup API:', lookedUpCloudInvoiceUrl);
+            }
+          }
+        } catch (lookupErr) {
+          console.warn('⚠️ Cloudinary lookup failed, will continue with fallback:', lookupErr);
+        }
+      }
+
+      // If Cloudinary invoice exists, do not fetch gated HTML invoice.
+      if (foundCloudInvoiceUrl || lookedUpCloudInvoiceUrl) {
+        setInvoiceHtml('');
+        console.log('✅ Using Cloudinary invoice, skipping HTML invoice fetch');
+        return;
       }
 
       if (!cloudInvoiceUrl) {
@@ -168,9 +223,10 @@ export default function InvoicePage() {
       console.log('✅ Invoice loaded successfully');
     } catch (err) {
       console.error('❌ Error fetching invoice:', err);
-      setError('Failed to load invoice. Please try again.');
+      setError('Invoice not found or failed to load. Please check your booking ID.');
+      showError('❌ Failed to load invoice. Please try again.');
     } finally {
-      // Remove setIsLoading(false) - no loading state needed
+      setIsLoading(false);
     }
   };
 
@@ -181,15 +237,27 @@ export default function InvoicePage() {
       const filename = `Invoice-FMT-${cleanCustomerName}.pdf`;
 
       if (cloudInvoiceUrl) {
-        const link = document.createElement('a');
-        link.href = cloudInvoiceUrl;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        showSuccess('✅ Invoice opened from Cloudinary!');
+        try {
+          const response = await fetch(cloudInvoiceUrl);
+          if (!response.ok) {
+            throw new Error('Failed to fetch invoice PDF');
+          }
+
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          showSuccess('✅ Invoice downloaded!');
+        } catch (fetchErr) {
+          console.warn('⚠️ Cloud invoice download failed, opening invoice instead:', fetchErr);
+          window.open(cloudInvoiceUrl, '_blank', 'noopener,noreferrer');
+          showSuccess('✅ Invoice opened!');
+        }
         return;
       }
 
@@ -220,8 +288,158 @@ export default function InvoicePage() {
 
   // Remove loading state - main app loading handles this
 
+  if (bookingId && isLoading && !error) {
+    return (
+      <div
+        className="invoice-loading-screen"
+        style={{
+          backgroundImage: 'url(/bg7.png)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed',
+          backgroundRepeat: 'no-repeat',
+        }}
+      >
+        <div className="loader">
+          <div className="box">
+            <div className="logo">
+              <img
+                src="/logo.svg"
+                alt="FeelME Town"
+                className="invoice-loader-logo"
+              />
+            </div>
+          </div>
+          <div className="box"></div>
+          <div className="box"></div>
+          <div className="box"></div>
+          <div className="box"></div>
+        </div>
+
+        <style jsx global>{`
+          .invoice-loading-screen {
+            min-height: 100vh;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+          }
+
+          .invoice-loading-screen .loader {
+            --size: 250px;
+            --duration: 2s;
+            --logo-color: grey;
+            --background: linear-gradient(
+              0deg,
+              rgba(50, 50, 50, 0.2) 0%,
+              rgba(100, 100, 100, 0.2) 100%
+            );
+            height: var(--size);
+            aspect-ratio: 1;
+            position: relative;
+          }
+
+          .invoice-loading-screen .loader .box {
+            position: absolute;
+            background: rgba(100, 100, 100, 0.15);
+            background: var(--background);
+            border-radius: 50%;
+            border-top: 1px solid rgba(100, 100, 100, 1);
+            box-shadow: rgba(0, 0, 0, 0.3) 0px 10px 10px -0px;
+            backdrop-filter: blur(5px);
+            animation: invoice-ripple var(--duration) infinite ease-in-out;
+          }
+
+          .invoice-loading-screen .loader .box:nth-child(1) {
+            inset: 40%;
+            z-index: 99;
+          }
+
+          .invoice-loader-logo{
+            width: 52px;
+            height: 52px;
+          }
+
+          .invoice-loading-screen .loader .box:nth-child(2) {
+            inset: 30%;
+            z-index: 98;
+            border-color: rgba(100, 100, 100, 0.8);
+            animation-delay: 0.2s;
+          }
+
+          .invoice-loading-screen .loader .box:nth-child(3) {
+            inset: 20%;
+            z-index: 97;
+            border-color: rgba(100, 100, 100, 0.6);
+            animation-delay: 0.4s;
+          }
+
+          .invoice-loading-screen .loader .box:nth-child(4) {
+            inset: 10%;
+            z-index: 96;
+            border-color: rgba(100, 100, 100, 0.4);
+            animation-delay: 0.6s;
+          }
+
+          .invoice-loading-screen .loader .box:nth-child(5) {
+            inset: 0%;
+            z-index: 95;
+            border-color: rgba(100, 100, 100, 0.2);
+            animation-delay: 0.8s;
+          }
+
+          .invoice-loading-screen .loader .logo {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-content: center;
+            padding: 30%;
+          }
+
+          .invoice-loading-screen .loader .logo .invoice-loader-logo {
+            width: 100%;
+            height: auto;
+            display: block;
+            animation: invoice-logo-pulse var(--duration) infinite ease-in-out;
+            filter: grayscale(1) brightness(0.7);
+          }
+
+          @keyframes invoice-ripple {
+            0% {
+              transform: scale(1);
+              box-shadow: rgba(0, 0, 0, 0.3) 0px 10px 10px -0px;
+            }
+            50% {
+              transform: scale(1.3);
+              box-shadow: rgba(0, 0, 0, 0.3) 0px 30px 20px -0px;
+            }
+            100% {
+              transform: scale(1);
+              box-shadow: rgba(0, 0, 0, 0.3) 0px 10px 10px -0px;
+            }
+          }
+
+          @keyframes invoice-logo-pulse {
+            0% {
+              filter: grayscale(1) brightness(0.7);
+            }
+            50% {
+              filter: grayscale(0) brightness(1.2);
+            }
+            100% {
+              filter: grayscale(1) brightness(0.7);
+            }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
   if (error) {
     return (
+      <>
+      
       <div 
         className="min-h-screen flex items-center justify-center"
         style={{
@@ -241,6 +459,7 @@ export default function InvoicePage() {
           </button>
         </div>
       </div>
+      </>
     );
   }
 
@@ -257,6 +476,15 @@ export default function InvoicePage() {
         overflowX: 'hidden'
       }}
     >
+      {/* Back Button - Desktop & Mobile */}
+      <div className="absolute top-6 left-6 z-20">
+        <button
+          onClick={() => window.location.href = '/theater'}
+          className="back-button"
+        >
+          ← Back to Theater
+        </button>
+      </div>
       {/* Modern Header - Centered */}
       <div className="flex flex-col items-center justify-center text-center py-16">
         <div className="w-full max-w-4xl px-4 text-center">
@@ -268,7 +496,23 @@ export default function InvoicePage() {
             Invoice of {customerName || 'Valued Customer'}
           </h1>
          
-          {!isPending && (
+          {(
+            cloudInvoiceUrl && (
+              <div className="flex flex-col md:flex-row items-center justify-center gap-4 mb-12">
+                <div className="wrapper">
+                  <a href="#" onClick={(e) => { e.preventDefault(); downloadPDF(); }} className="c-btn">
+                    <span className="c-btn__label">Download Your Invoice 
+                      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7.50005 1.04999C7.74858 1.04999 7.95005 1.25146 7.95005 1.49999V8.41359L10.1819 6.18179C10.3576 6.00605 10.6425 6.00605 10.8182 6.18179C10.994 6.35753 10.994 6.64245 10.8182 6.81819L7.81825 9.81819C7.64251 9.99392 7.35759 9.99392 7.18185 9.81819L4.18185 6.81819C4.00611 6.64245 4.00611 6.35753 4.18185 6.18179C4.35759 6.00605 4.64251 6.00605 4.81825 6.18179L7.05005 8.41359V1.49999C7.05005 1.25146 7.25152 1.04999 7.50005 1.04999ZM2.5 10C2.77614 10 3 10.2239 3 10.5V12C3 12.5539 3.44565 13 3.99635 13H11.0012C11.5529 13 12 12.5528 12 12V10.5C12 10.2239 12.2239 10 12.5 10C12.7761 10 13 10.2239 13 10.5V12C13 13.1041 12.1062 14 11.0012 14H3.99635C2.89019 14 2 13.103 2 12V10.5C2 10.2239 2.22386 10 2.5 10Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"></path>
+                      </svg>
+                    </span>
+                  </a>
+                </div>
+              </div>
+            )
+          )}
+
+          {!cloudInvoiceUrl && !isPending && (
             <div className="flex flex-col md:flex-row items-center justify-center gap-4 mb-12">
               <div className="wrapper">
                 <a href="#" onClick={(e) => { e.preventDefault(); downloadPDF(); }} className="c-btn">
@@ -286,11 +530,11 @@ export default function InvoicePage() {
       </div>
 
       {/* Invoice Preview - prioritize Cloudinary PDF if available */}
-      <div className="flex justify-center pb-16 px-4">
-        {!isPending && cloudInvoiceUrl ? (
+      <div className="flex justify-center pb-16 px-2 md:px-4">
+        {cloudInvoiceUrl ? (
           <div className="invoice-preview-shell">
             <iframe
-              src={`${cloudInvoiceUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+              src={`${cloudInvoiceUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=page-width`}
               title="Invoice PDF"
               className="invoice-preview-frame"
               loading="lazy"
@@ -309,7 +553,7 @@ export default function InvoicePage() {
       </div>
 
       {/* Mobile Download Button - Animated */}
-      {!isPending && (
+      {(cloudInvoiceUrl || !isPending) && (
         <div className="md:hidden fixed bottom-6 right-6 z-30">
           <div className="wrapper">
             <a href="#" onClick={(e) => { e.preventDefault(); downloadPDF(); }} className="c-btn">
@@ -323,15 +567,7 @@ export default function InvoicePage() {
         </div>
       )}
 
-      {/* Back Button - Desktop & Mobile */}
-      <div className="absolute top-6 left-6 z-20">
-        <button
-          onClick={() => window.location.href = '/theater'}
-          className="back-button"
-        >
-          ← Back to Theater
-        </button>
-      </div>
+      
 
       {/* Thank You Section */}
       <div className="text-center pb-12">
@@ -502,13 +738,14 @@ export default function InvoicePage() {
         /* Simplified invoice preview container */
         .invoice-preview-shell {
           width: 100%;
-          max-width: 900px;
+          max-width: 1100px;
           margin: 0 auto;
+          overflow: hidden;
         }
 
         .invoice-preview-frame {
           width: 100%;
-          min-height: 80vh;
+          min-height: 82vh;
           border: none;
           border-radius: 12px;
           background: #111827;
@@ -712,13 +949,24 @@ export default function InvoicePage() {
             padding-bottom: 2rem !important;
           }
 
+          .invoice-page-container {
+            overflow-x: hidden !important;
+          }
+
           .invoice-preview-shell {
             max-width: 100% !important;
+            width: 100% !important;
+            margin: 0 !important;
           }
 
           .invoice-preview-frame {
-            min-height: 70vh !important;
+            min-height: 88vh !important;
+            height: 88vh !important;
             border-radius: 8px !important;
+          }
+
+          .invoice-html-fallback {
+            padding: 0.75rem !important;
           }
           
           /* Proper mobile layout with background */

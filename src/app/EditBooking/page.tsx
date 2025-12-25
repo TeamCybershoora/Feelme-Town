@@ -2936,19 +2936,67 @@ export default function EditBookingPage() {
         couponCode: formData.couponCode || undefined,
       };
 
-      const occasionDataPayload = Object.entries(formData.occasionData || {}).reduce<Record<string, string>>(
-        (acc, [key, value]) => {
-          const normalizedKey = typeof key === "string" ? key.trim() : "";
-          if (!normalizedKey) return acc;
-          if (typeof value === "string") {
-            const trimmed = value.trim();
-            if (!trimmed) return acc;
-            acc[normalizedKey] = trimmed;
-            return acc;
-          }
-          if (value !== undefined && value !== null) {
-            acc[normalizedKey] = String(value);
-          }
+      const normalizeForLookup = (input: string) =>
+        String(input || "")
+          .trim()
+          .toLowerCase();
+
+      const canonicalOccasionKeys = Array.from(
+        new Set(
+          [...(requiredOccasionKeys || []), ...(fallbackOccasionKeys || [])]
+            .map((key) => (typeof key === "string" ? key.trim() : ""))
+            .filter(Boolean),
+        ),
+      );
+
+      const canonicalByLower = canonicalOccasionKeys.reduce<Record<string, string>>((acc, key) => {
+        acc[normalizeForLookup(key)] = key;
+        return acc;
+      }, {});
+
+      const labelToCanonical = canonicalOccasionKeys.reduce<Record<string, string>>((acc, key) => {
+        const label = getOccasionFieldLabel(key);
+        if (label) {
+          acc[normalizeForLookup(label)] = key;
+        }
+        return acc;
+      }, {});
+
+      const mergedOccasionMeta = new Map<string, { value: string; priority: number }>();
+      const upsertOccasionValue = (mappedKey: string, value: string, priority: number) => {
+        const existing = mergedOccasionMeta.get(mappedKey);
+        if (!existing || priority > existing.priority || (!existing.value && value)) {
+          mergedOccasionMeta.set(mappedKey, { value, priority });
+        }
+      };
+
+      Object.entries(formData.occasionData || {}).forEach(([key, value]) => {
+        const rawKey = typeof key === "string" ? key.trim() : "";
+        if (!rawKey) return;
+
+        const stringValue =
+          typeof value === "string" ? value.trim() : value !== undefined && value !== null ? String(value) : "";
+        if (!stringValue) return;
+
+        const rawKeyLower = normalizeForLookup(rawKey);
+
+        let mappedKey = rawKey;
+        let priority = 0;
+
+        if (canonicalByLower[rawKeyLower]) {
+          mappedKey = canonicalByLower[rawKeyLower];
+          priority = 2;
+        } else if (labelToCanonical[rawKeyLower]) {
+          mappedKey = labelToCanonical[rawKeyLower];
+          priority = 1;
+        }
+
+        upsertOccasionValue(mappedKey, stringValue, priority);
+      });
+
+      const occasionDataPayload = Array.from(mergedOccasionMeta.entries()).reduce<Record<string, string>>(
+        (acc, [key, meta]) => {
+          acc[key] = meta.value;
           return acc;
         },
         {},
@@ -3056,9 +3104,17 @@ export default function EditBookingPage() {
   };
 
   const renderOccasionFields = () => {
-    const keysToRender = requiredOccasionKeys.length > 0
+    const rawKeysToRender = requiredOccasionKeys.length > 0
       ? requiredOccasionKeys
       : fallbackOccasionKeys;
+
+    const keysToRender = Array.from(
+      new Set(
+        rawKeysToRender
+          .map((key) => (typeof key === "string" ? key.trim() : ""))
+          .filter((key) => Boolean(key)),
+      ),
+    );
     if (!selectedOccasion && keysToRender.length === 0) return null;
     return (
       <div className="dynamic-fields">

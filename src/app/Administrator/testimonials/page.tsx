@@ -200,14 +200,40 @@ const TestimonialsPage = () => {
       setIsLoading(true);
       setError(null);
 
-      const response = await fetch('/api/testimonials');
+      const response = await fetch('/api/feedback', { cache: 'no-store' });
       const data = await response.json();
 
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Failed to load testimonials');
       }
 
-      setTestimonials(Array.isArray(data.testimonials) ? data.testimonials : []);
+      const raw = Array.isArray(data.feedback) ? data.feedback : [];
+      const transformed = raw.map((feedback: any) => {
+        const dbId = feedback._id || feedback.mongoId || feedback.mongo_id;
+        return {
+          id: String(feedback.feedbackId || feedback.feedback_id || dbId || ''),
+          dbId: dbId ? String(dbId) : undefined,
+          feedbackId: feedback.feedbackId || feedback.feedback_id,
+          name: feedback.name,
+          customerName: feedback.customerName,
+          message: feedback.message || feedback.feedback || '',
+          text: feedback.message || feedback.feedback || '',
+          rating: typeof feedback.rating === 'number' ? feedback.rating : Number(feedback.rating || 0),
+          avatar: feedback.avatar || null,
+          image: feedback.avatar || null,
+          submittedAt: feedback.submittedAt || feedback.submitted_at,
+          date: (feedback.submittedAt || feedback.submitted_at)
+            ? new Date(feedback.submittedAt || feedback.submitted_at).toISOString().split('T')[0]
+            : undefined,
+          email: feedback.email,
+          socialHandle: feedback.socialHandle,
+          socialPlatform: feedback.socialPlatform,
+          position: feedback.socialPlatform ? `${feedback.socialPlatform} User` : 'Customer',
+          avatarType: feedback.avatarType || feedback.avatar_type
+        };
+      });
+
+      setTestimonials(transformed);
     } catch (err) {
       console.error('Failed to fetch testimonials:', err);
       setError(err instanceof Error ? err.message : 'Failed to load testimonials');

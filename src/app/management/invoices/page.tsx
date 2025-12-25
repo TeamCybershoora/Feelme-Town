@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Search, Calendar } from 'lucide-react';
 
 interface InvoiceCardItem {
@@ -40,6 +40,11 @@ export default function ManagementInvoicesPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
   const knownInvoiceUrlsRef = useState<Set<string>>(new Set())[0];
+
+  // Infinite scroll state (UI-only)
+  const [displayedCount, setDisplayedCount] = useState(10);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -103,13 +108,33 @@ export default function ManagementInvoicesPage() {
 
     // Poll every 2 seconds
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       setIsRefreshing(true);
       fetchInvoices(true);
     }, 2000);
 
+    const onFocus = () => {
+      if (!mounted) return;
+      setIsRefreshing(true);
+      fetchInvoices(true);
+    };
+
+    const onVisibilityChange = () => {
+      if (!mounted) return;
+      if (document.visibilityState === 'visible') {
+        setIsRefreshing(true);
+        fetchInvoices(true);
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     return () => {
       mounted = false;
       clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [hasInitialized, knownInvoiceUrlsRef]);
 
@@ -132,6 +157,43 @@ export default function ManagementInvoicesPage() {
       return matchesSearch;
     }
   });
+
+  // Reset displayed count when filters change
+  useEffect(() => {
+    setDisplayedCount(10);
+  }, [searchTerm, selectedDate]);
+
+  const displayedItems = filtered.slice(0, displayedCount);
+  const hasMore = displayedCount < filtered.length;
+
+  // Infinite scroll handler (IntersectionObserver)
+  useEffect(() => {
+    const target = loadMoreSentinelRef.current;
+    if (!target) return;
+    if (!hasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (!hasMore || isLoadingMore) return;
+
+        setIsLoadingMore(true);
+        setTimeout(() => {
+          setDisplayedCount((prev) => prev + 10);
+          setIsLoadingMore(false);
+        }, 150);
+      },
+      {
+        root: null,
+        rootMargin: '250px',
+        threshold: 0,
+      }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, displayedCount]);
 
   return (
     <div className="bookings-page">
@@ -164,7 +226,8 @@ export default function ManagementInvoicesPage() {
           />
         </div>
         <div className="results-info">
-          Showing {filtered.length} of {items.length} invoices
+          Showing {displayedItems.length} of {filtered.length} invoices
+          {hasMore && <span style={{ marginLeft: '0.5rem', color: '#10b981' }}>(Scroll for more)</span>}
         </div>
       </div>
 
@@ -173,7 +236,7 @@ export default function ManagementInvoicesPage() {
 
       {!loading && !error && filtered.length > 0 && (
         <div className="invoice-cards-grid">
-          {filtered.map((b) => (
+          {displayedItems.map((b) => (
             <div className="invoice-card" key={b.id}>
               <div className="invoice-preview">
                 {b.url ? (
@@ -211,6 +274,18 @@ export default function ManagementInvoicesPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Loading indicator for infinite scroll */}
+      {isLoadingMore && (
+        <div style={{ textAlign: 'center', padding: '2rem', color: '#10b981', fontSize: '0.9rem', fontWeight: 600 }}>
+          Loading more invoices...
+        </div>
+      )}
+
+      {/* Sentinel for IntersectionObserver */}
+      {hasMore && (
+        <div ref={loadMoreSentinelRef} style={{ height: '1px', width: '100%' }} />
       )}
 
       {modalOpen && (

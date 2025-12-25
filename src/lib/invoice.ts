@@ -40,6 +40,20 @@ const renderOccasionDetails = (bookingData: any, occasionMeta?: { fieldLabels?: 
   try {
     if (!bookingData) return '';
 
+    const normalizeText = (input: unknown) =>
+      String(input ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+
+    const fallbackLabelFromKey = (key: string) =>
+      String(key || '')
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/^./, (str) => str.toUpperCase())
+        .replace(/Name$/, ' Name')
+        .replace(/Id$/, ' ID')
+        .trim();
+
     const detailEntries: { label: string; value: string }[] = [];
 
     const labelKeys = Object.keys(bookingData).filter((key) => key.endsWith('_label'));
@@ -53,10 +67,29 @@ const renderOccasionDetails = (bookingData: any, occasionMeta?: { fieldLabels?: 
         if (rawValue === null || rawValue === undefined) continue;
         if (typeof rawValue === 'object' && !Array.isArray(rawValue)) continue;
 
-        const label = String(rawLabel).trim();
-        const value = Array.isArray(rawValue) ? rawValue.join(', ') : String(rawValue).trim();
+        const expectedLabel = (occasionMeta?.fieldLabels?.[baseKey] || fallbackLabelFromKey(baseKey)).trim();
+
+        const labelCandidate = String(rawLabel).trim();
+        const valueCandidate = Array.isArray(rawValue) ? rawValue.join(', ') : String(rawValue).trim();
+
+        // Some legacy bookings have label/value swapped. If the value matches the expected label,
+        // treat the label field as the actual user-entered value.
+        const normalizedExpected = normalizeText(expectedLabel);
+        const normalizedLabelCandidate = normalizeText(labelCandidate);
+        const normalizedValueCandidate = normalizeText(valueCandidate);
+
+        const shouldSwap =
+          Boolean(normalizedExpected) &&
+          normalizedValueCandidate === normalizedExpected &&
+          normalizedLabelCandidate !== normalizedExpected;
+
+        const label = expectedLabel;
+        const value = shouldSwap ? labelCandidate : valueCandidate;
 
         if (!label || !value) continue;
+
+        // If the stored value is literally the label, skip (avoids rendering labels as values)
+        if (normalizeText(value) === normalizeText(label)) continue;
 
         detailEntries.push({ label, value });
       }
@@ -73,14 +106,12 @@ const renderOccasionDetails = (bookingData: any, occasionMeta?: { fieldLabels?: 
         if (!value) continue;
 
         const labelFromMeta = occasionMeta?.fieldLabels?.[key];
-        const fallbackLabel = key
-          .replace(/([A-Z])/g, ' $1')
-          .replace(/^./, (str) => str.toUpperCase())
-          .replace(/Name$/, ' Name')
-          .replace(/Id$/, ' ID');
-        const label = (labelFromMeta || fallbackLabel).trim();
+        const label = (labelFromMeta || fallbackLabelFromKey(key)).trim();
 
         if (!label) continue;
+
+        // If value equals label (legacy bad data), skip
+        if (normalizeText(value) === normalizeText(label)) continue;
         detailEntries.push({ label, value });
       }
     }
@@ -90,26 +121,13 @@ const renderOccasionDetails = (bookingData: any, occasionMeta?: { fieldLabels?: 
     }
 
     const itemsHtml = detailEntries
-      .map(
-        ({ label, value }) => `
-        <div class="occasion-detail">
-          <span class="occasion-detail-label">${label}</span>
-          <span class="occasion-detail-value">${value}</span>
-        </div>
-      `,
-      )
+      .map(({ value }) => {
+        const safeValue = escapeHtml(value);
+        return `<span class="occasion-tag"><span class="occasion-tag-value">${safeValue}</span></span>`;
+      })
       .join('');
 
-    return `
-      <div class="occasion-details-card">
-        <div class="occasion-details-header">
-          <div class="occasion-details-title">Occasion Details</div>
-        </div>
-        <div class="occasion-details-grid">
-          ${itemsHtml}
-        </div>
-      </div>
-    `;
+    return `<div class="occasion-tags">${itemsHtml}</div>`;
   } catch (e) {
     return '';
   }
@@ -273,15 +291,22 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
       : Math.max(totalAmountAfterDiscount - invoiceTotal, 0))
   );
   const remainingPayableAmount = Math.max(totalAmountAfterDiscount - slotBookingAmount, 0);
-  const venuePaymentMethodRaw = String(bd.venuePaymentMethod || bd.paymentMethod || '').toLowerCase();
+  const normalizedPaymentStatus = String(bd.paymentStatus || bd.payment_status || '').toLowerCase();
+  const shouldShowPayableMethod = normalizedPaymentStatus === 'paid';
+  const venuePaymentMethodRaw = shouldShowPayableMethod
+    ? String(bd.venuePaymentMethod || bd.finalPaymentMethod || '').toLowerCase()
+    : '';
   const venuePaymentMethodLabel = venuePaymentMethodRaw === 'cash'
-    ? 'Paid in Cash'
-    : venuePaymentMethodRaw === 'online'
-      ? 'Paid Online'
-      : '';
-  const venuePaymentRowLabel = venuePaymentMethodLabel
-    ? `Payable Amount (${venuePaymentMethodLabel})`
-    : 'Payable Amount';
+    ? 'Cash'
+    : venuePaymentMethodRaw === 'upi'
+      ? 'UPI'
+      : venuePaymentMethodRaw === 'online'
+        ? 'Online'
+        : '';
+  const venuePaymentRowLabel = 'Payable Amount';
+  const payableMethodBelowHtml = venuePaymentMethodLabel
+    ? `<div style="font-size: 12px; font-weight: 800; margin-top: 6px; opacity: 0.95;">${escapeHtml(venuePaymentMethodLabel)}</div>`
+    : '';
 
   const appliedCouponCode = bd.appliedCouponCode || bd.discountSummary?.code || '';
   const couponDiscountType = bd.couponDiscountType || bd.discountSummary?.type || '';
@@ -477,6 +502,46 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
       font-size: 16px;
       font-weight: 700;
       font-family: 'Paralucent-DemiBold', sans-serif;
+    }
+
+    .occasion-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .occasion-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #F07E4B;
+      font-size: 12px;
+      line-height: 1;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      max-width: 100%;
+    }
+
+    .occasion-tag-label {
+      opacity: 0.92;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .occasion-tag-sep {
+      opacity: 0.8;
+    }
+
+    .occasion-tag-value {
+      font-weight: 800;
+      font-family: 'Paralucent-DemiBold', sans-serif;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
     }
 
     .occasion-details-card {
@@ -816,6 +881,7 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
         <div class="bill-to-left">
           <div class="label">Occasion</div>
           <div class="value">${occasionName || ''}</div>
+          ${occasionDetailsHtml}
         </div>
         <div class="bill-to-right">
           <div class="label">Date & Time</div>
@@ -823,7 +889,6 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
         </div>
       </div>
 
-    ${occasionDetailsHtml}
 
     <!-- Table Section -->
     <div class="table-section">
@@ -967,7 +1032,7 @@ export const generateInvoiceHtml = (bookingData: InvoiceData): string => {
             <td>${venuePaymentRowLabel}</td>
             <td>-</td>
             <td>-</td>
-            <td style="background: #FDE68A; font-weight: 800; color: #7C2D12;">${fmt(venuePayment > 0 ? venuePayment : remainingPayableAmount)}</td>
+            <td style="background: #FDE68A; font-weight: 800; color: #7C2D12;"><div>${fmt(venuePayment > 0 ? venuePayment : remainingPayableAmount)}</div>${payableMethodBelowHtml}</td>
           </tr>
           ` : ''}
 

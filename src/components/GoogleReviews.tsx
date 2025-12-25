@@ -19,6 +19,8 @@ const GoogleReviews = () => {
   const [error, setError] = useState<string | null>(null);
   const [reviewSource, setReviewSource] = useState<'google' | 'database'>('google');
 
+  const [lastSignature, setLastSignature] = useState<string>('');
+
   // Fetch reviews (Database only - Google disabled)
   const fetchGoogleReviews = async () => {
     try {
@@ -41,22 +43,34 @@ const GoogleReviews = () => {
   const fetchDatabaseTestimonials = async () => {
     try {
       console.log('🗺️ Fetching Google Reviews from feedback database...');
-      const response = await fetch('/api/testimonials');
+      const response = await fetch('/api/feedback', { cache: 'no-store' });
       
       if (response.ok) {
         const data = await response.json();
         
-        if (data.success && data.testimonials && data.testimonials.length > 0) {
-          const formattedTestimonials = data.testimonials.map((testimonial: any, index: number) => ({
+        if (data.success && data.feedback && data.feedback.length > 0) {
+          const signature = data.feedback
+            .map((t: any) => t.feedbackId || t._id || t.mongoId || '')
+            .filter((id: string) => id)
+            .join('|');
+
+          if (signature === lastSignature) {
+            return;
+          }
+
+          const formattedTestimonials = data.feedback.map((testimonial: any, index: number) => ({
             id: index + 1,
             name: testimonial.name || 'Anonymous',
-            photo: testimonial.image || testimonial.avatar || '/images/Avatars/FMT.svg', // Use image field first, then avatar
+            photo: testimonial.avatar || '/images/Avatars/FMT.svg', // Use avatar
             rating: testimonial.rating || 5,
-            message: testimonial.text || testimonial.message || testimonial.feedback, // Use text field first
-            time: testimonial.position || 'FeelME Town Customer' // Use position as time description
+            message: testimonial.message || testimonial.feedback || '',
+            time: testimonial.socialPlatform
+              ? `${String(testimonial.socialPlatform).charAt(0).toUpperCase() + String(testimonial.socialPlatform).slice(1)} User`
+              : 'FeelME Town Customer'
           }));
           
           setReviews(formattedTestimonials);
+          setLastSignature(signature);
           setReviewSource('google'); // Show as Google Reviews
           console.log(`✅ Loaded ${formattedTestimonials.length} Google Reviews from feedback database`);
         } else {
@@ -77,6 +91,12 @@ const GoogleReviews = () => {
   // Fetch reviews on component mount
   useEffect(() => {
     fetchGoogleReviews();
+
+    const interval = setInterval(() => {
+      fetchDatabaseTestimonials();
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // State for current review

@@ -372,7 +372,7 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
       <div className="sidebar-content">
         <div className="sidebar-header">
           <div className="logo-container">
-            <img src="/logo.svg" alt="FeelMe Town" className="logo" />
+            <img src="/logo.gif" alt="FeelMe Town" className="logo" />
             <span className="logo-text">FeelMe Town</span>
           </div>
         </div>
@@ -466,8 +466,8 @@ export default function AdminSidebar({ isOpen }: AdminSidebarProps) {
         }
 
         .logo {
-          width: 32px;
-          height: 32px;
+          width: 42px;
+          height: 42px;
         }
 
         .logo-text {

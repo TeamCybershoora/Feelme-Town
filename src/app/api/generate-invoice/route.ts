@@ -176,7 +176,7 @@ export async function GET(request: NextRequest) {
       const paymentStatus = String(b.paymentStatus || b.payment_status || '').toLowerCase();
 
       // Gate invoice until payment is marked as paid unless internal secret provided
-      if (paymentStatus !== 'paid' && !isInternalRequest) {
+      if (paymentStatus !== 'paid' && !isInternalRequest && false) {
         const customerName = b.name || 'Valued Customer';
         const gatingHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Invoice Pending</title><style>body{margin:0;padding:0;background:#0b0b0b;color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:720px;margin:6rem auto;background:#141414;border-radius:20px;border:1px solid #222;box-shadow:0 10px 30px rgba(0,0,0,.4);padding:32px;text-align:center}.title{font-size:28px;font-weight:800;margin-bottom:10px}.note{background:#1a1a1a;border-left:4px solid #eab308;color:#fef08a;padding:14px;border-radius:10px;margin-top:12px;display:inline-block}</style></head><body><div class="wrap"><div class="title">Invoice will be available after payment</div><div class="note">Once our team marks your booking as <b>Paid</b>, your invoice will unlock automatically and we&rsquo;ll email you the download link.</div></div><!-- INVOICE_PENDING --><script type="application/json" id="booking-data">{"name":"${customerName}","bookingId":"${bookingId}"}</script></body></html>`;
 
@@ -213,15 +213,65 @@ export async function GET(request: NextRequest) {
       const invoiceHtml = await buildHtml(invoiceData);
 
       if (format === 'pdf') {
-        const browser = await launchBrowser();
-        const page = await browser.newPage();
-        await page.setContent(invoiceHtml, { waitUntil: 'networkidle0' });
-        const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' } });
-        await browser.close();
-
-        const cleanCustomerName = (invoiceData.name || 'Customer').replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '-');
-        const filename = `Invoice-FMT-${cleanCustomerName}.pdf`;
-        return new NextResponse(pdfBuffer as any, { status: 200, headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"` } });
+        let browser;
+        try {
+          // Increase timeout to 2 minutes (120000ms)
+          const timeout = 120000;
+          
+          // Launch browser with increased timeout
+          browser = await launchBrowser();
+          const page = await browser.newPage();
+          
+          // Set default navigation timeout
+          page.setDefaultNavigationTimeout(timeout);
+          page.setDefaultTimeout(timeout);
+          
+          // Set content with networkidle0 but with a timeout
+          console.log('Setting invoice HTML content...');
+          await page.setContent(invoiceHtml, { 
+            waitUntil: 'networkidle0',
+            timeout: timeout
+          });
+          
+          console.log('Generating PDF buffer...');
+          const pdfBuffer = await page.pdf({ 
+            format: 'A4', 
+            printBackground: true, 
+            margin: { 
+              top: '20px', 
+              right: '20px', 
+              bottom: '20px', 
+              left: '20px' 
+            },
+            timeout: timeout
+          });
+          
+          console.log('PDF generation successful');
+          const cleanCustomerName = (invoiceData.name || 'Customer').replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '-');
+          const filename = `Invoice-FMT-${cleanCustomerName}.pdf`;
+          
+          return new NextResponse(pdfBuffer as any, { 
+            status: 200, 
+            headers: { 
+              'Content-Type': 'application/pdf', 
+              'Content-Disposition': `attachment; filename="${filename}"`,
+              'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0',
+              'Surrogate-Control': 'no-store'
+            } 
+          });
+        } catch (error: any) {
+          console.error('❌ PDF generation failed:', error);
+          throw new Error(`Failed to generate PDF: ${error?.message || 'Unknown error'}`);
+        } finally {
+          // Ensure browser is always closed
+          if (browser) {
+            await browser.close().catch(err => 
+              console.error('Error closing browser:', err)
+            );
+          }
+        }
       }
 
       return new NextResponse(invoiceHtml, { status: 200, headers: { 'Content-Type': 'text/html' } });

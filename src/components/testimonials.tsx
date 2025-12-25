@@ -92,34 +92,42 @@ const TestimonialPage = () => {
   const [isLoadingGoogleReviews, setIsLoadingGoogleReviews] = useState(true);
   const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
 
+  const lastTestimonialsSignatureRef = useRef<string>('');
+
   // Fetch testimonials from database
   useEffect(() => {
-    const fetchTestimonials = async () => {
+    const fetchTestimonials = async (opts?: { showLoading?: boolean }) => {
       try {
-        setIsLoading(true);
+        if (opts?.showLoading !== false) {
+          setIsLoading(true);
+        }
         console.log('📝 Fetching testimonials from database...');
         
-        const response = await fetch('/api/feedback');
+        const response = await fetch('/api/feedback', { cache: 'no-store' });
         const data = await response.json();
         
-        if (data.success && data.feedback && data.feedback.length > 0) {
-          // Transform feedback data to testimonial format
+        if (data.success && Array.isArray(data.feedback) && data.feedback.length > 0) {
           const transformedTestimonials: Testimonial[] = data.feedback.map((feedback: any) => ({
-            id: feedback._id || feedback.feedbackId || Date.now().toString(),
-            name: feedback.name,
-            position: feedback.socialPlatform ? 
-              `${feedback.socialPlatform.charAt(0).toUpperCase() + feedback.socialPlatform.slice(1)} User` : 
-              'FeelME Town Customer',
-            image: feedback.avatar || '/images/Avatars/FMT.svg', // Use avatar or fallback
-            rating: feedback.rating,
-            text: feedback.message,
+            id: feedback.feedbackId || feedback._id || feedback.mongoId || Date.now().toString(),
+            name: feedback.name || 'Anonymous',
+            position: feedback.socialPlatform
+              ? `${String(feedback.socialPlatform).charAt(0).toUpperCase() + String(feedback.socialPlatform).slice(1)} User`
+              : 'FeelME Town Customer',
+            image: feedback.avatar || '/images/Avatars/FMT.svg',
+            rating: feedback.rating || 5,
+            text: feedback.message || '',
             email: feedback.email,
             socialHandle: feedback.socialHandle,
             socialPlatform: feedback.socialPlatform,
             submittedAt: feedback.submittedAt
           }));
+
+          const signature = transformedTestimonials.map((t) => t.id).join('|');
+          if (signature !== lastTestimonialsSignatureRef.current) {
+            lastTestimonialsSignatureRef.current = signature;
+            setTestimonials(transformedTestimonials);
+          }
           
-          setTestimonials(transformedTestimonials);
           console.log(`✅ Loaded ${transformedTestimonials.length} testimonials from database`);
         } else {
           console.warn('⚠️ No testimonials found in database');
@@ -135,7 +143,12 @@ const TestimonialPage = () => {
       }
     };
 
-    fetchTestimonials();
+    fetchTestimonials({ showLoading: true });
+    const interval = setInterval(() => {
+      fetchTestimonials({ showLoading: false });
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Fetch Google Maps Reviews

@@ -5,16 +5,16 @@ import { NextResponse } from 'next/server';
 export async function GET() {
   try {
     console.log('🔄 CRON: Auto-cleanup triggered');
-    
-    // Call the auto-complete-expired API
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-    const response = await fetch(`${baseUrl}/api/bookings/auto-complete-expired`, {
+
+    const autoCompleteModule = await import('@/app/api/bookings/auto-complete-expired/route');
+    const mockRequest = {
+      json: async () => ({}),
+      headers: new Headers({ 'Content-Type': 'application/json' }),
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    
+      url: 'http://localhost/api/bookings/auto-complete-expired',
+    } as any;
+
+    const response = await autoCompleteModule.POST(mockRequest);
     const result = await response.json();
     
     if (result.success) {

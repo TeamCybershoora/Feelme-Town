@@ -159,8 +159,9 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
   // Payment method modal states
   const [isPaymentMethodModalOpen, setIsPaymentMethodModalOpen] = useState(false);
   const [bookingPendingPayment, setBookingPendingPayment] = useState<Booking | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'cash'>('online');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'upi' | 'cash'>('online');
   const [paymentUpdatingId, setPaymentUpdatingId] = useState<string | null>(null);
+  const [completingBookingId, setCompletingBookingId] = useState<string | null>(null);
 
   const isManualBookingEntry = (booking: Booking) => {
     const statusLower = (booking.status || '').toLowerCase();
@@ -714,7 +715,7 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
       const result = await response.json();
 
       if (result.success) {
-        const methodLabel = selectedPaymentMethod === 'cash' ? 'Cash' : 'Online';
+        const methodLabel = selectedPaymentMethod === 'cash' ? 'Cash' : selectedPaymentMethod === 'upi' ? 'UPI' : 'Online';
         (window as any).showToast?.({ type: 'success', message: `Payment marked as paid (${methodLabel}). Invoice email sent.` });
         
         setIsPaymentMethodModalOpen(false);
@@ -732,6 +733,54 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
       (window as any).showToast?.({ type: 'error', message: 'Error marking booking as paid' });
     } finally {
       setPaymentUpdatingId(null);
+    }
+  };
+
+  const handleMarkAsCompleted = async (booking: Booking) => {
+    const bookingId = String(
+      booking.originalBookingId || (booking as any).bookingId || booking.id,
+    ).replace(/^#/, '');
+
+    if (!bookingId) {
+      (window as any).showToast?.({ type: 'error', message: 'Booking ID missing' });
+      return;
+    }
+
+    try {
+      setCompletingBookingId(bookingId);
+
+      const statusLower = (booking.status || '').toLowerCase();
+      const isManualBooking =
+        booking.bookingType?.toLowerCase() === 'manual' ||
+        statusLower === 'manual' ||
+        Boolean((booking as any)?.isManualBooking);
+
+      const response = await fetch('/api/admin/update-booking', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bookingId,
+          status: 'completed',
+          sendInvoice: false,
+          isManualBooking,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        (window as any).showToast?.({ type: 'success', message: 'Booking moved to Completed.' });
+        if (onRefresh) onRefresh();
+      } else {
+        (window as any).showToast?.({ type: 'error', message: result.error || 'Failed to complete booking' });
+      }
+    } catch (error) {
+      console.error('Error marking booking as completed:', error);
+      (window as any).showToast?.({ type: 'error', message: 'Error marking booking as completed' });
+    } finally {
+      setCompletingBookingId(null);
     }
   };
 
@@ -1481,6 +1530,24 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
                                     Paid
                                   </button>
                                 )}
+                                {isActiveBooking && booking.paymentStatus === 'paid' && (() => {
+                                  const actionBookingId = String(
+                                    booking.originalBookingId || (booking as any).bookingId || booking.id,
+                                  ).replace(/^#/, '');
+                                  const isCompleting = completingBookingId === actionBookingId;
+
+                                  return (
+                                    <button
+                                      className="action-btn complete-btn"
+                                      onClick={() => handleMarkAsCompleted(booking)}
+                                      title="Move to Completed"
+                                      disabled={isCompleting}
+                                    >
+                                      <Check size={14} />
+                                      {isCompleting ? 'Completing…' : 'Complete'}
+                                    </button>
+                                  );
+                                })()}
                                 <button
                                   className={`action-btn ${isActiveBooking ? 'cancel-btn' : 'activate-btn'}`}
                                   onClick={() => handleCancelOrActivateBooking(booking)}
@@ -2394,6 +2461,17 @@ export default function ManagementDashboard({ stats, recentBookings, onRefresh, 
           box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
         }
 
+        .complete-btn {
+          background: #22c55e;
+          color: white;
+        }
+
+        .complete-btn:hover {
+          background: #16a34a;
+          transform: translateY(-1px);
+          box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+        }
+
         /* Payment Method Modal */
         .modal-overlay {
           position: fixed;
@@ -3287,7 +3365,18 @@ Note: Total counters will be preserved and never reset."
                   >
                     <span className="method-icon">💳</span>
                     <span className="method-title">Paid Online</span>
-                    <span className="method-subtitle">UPI, card, or any digital mode</span>
+                    <span className="method-subtitle">Card, netbanking, or any online mode</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`payment-method-option ${selectedPaymentMethod === 'upi' ? 'selected' : ''}`}
+                    onClick={() => setSelectedPaymentMethod('upi')}
+                    disabled={paymentUpdatingId === String(bookingPendingPayment.id)}
+                  >
+                    <span className="method-icon">📲</span>
+                    <span className="method-title">Paid via UPI</span>
+                    <span className="method-subtitle">UPI payment received</span>
                   </button>
 
                   <button

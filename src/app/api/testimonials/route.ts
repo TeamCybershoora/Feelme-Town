@@ -77,40 +77,55 @@ const normalizeMongoId = (value: any): string | undefined => {
 
 export async function GET() {
   try {
-    const result = await (database as any).getFeedbackList();
-    if (result.success && result.feedback?.length) {
-      const testimonials = result.feedback.map((feedback: any) => {
-        const dbId = normalizeMongoId(feedback._id);
+    let source: 'sql' | 'mongo' = 'mongo';
+    let result: any = null;
+
+    try {
+      const { getFeedbackListFromSQL } = await import('@/lib/godaddy-sql');
+      const sqlResult = await getFeedbackListFromSQL({ limit: 50, testimonialsOnly: true });
+      if (sqlResult?.success) {
+        result = sqlResult;
+        source = 'sql';
+      }
+    } catch (e) {
+      console.warn('⚠️ Failed to fetch testimonials from GoDaddy SQL; falling back to Mongo:', e);
+    }
+
+    if (!result) {
+      result = await (database as any).getFeedbackList();
+      source = 'mongo';
+    }
+
+    const rawFeedback = Array.isArray(result?.feedback) ? result.feedback : [];
+    const testimonials = rawFeedback
+      .filter((feedback: any) => feedback?.isTestimonial === true || feedback?.is_testimonial === 1)
+      .map((feedback: any) => {
+        const dbId = normalizeMongoId(feedback._id ?? feedback.mongoId ?? feedback.mongo_id);
+        const submittedAt = feedback.submittedAt ?? feedback.submitted_at ?? null;
+
         return {
-          id: feedback.feedbackId || dbId,
+          id: feedback.feedbackId || feedback.feedback_id || dbId,
           dbId,
-        name: feedback.name,
-        text: feedback.message,
-        rating: feedback.rating,
-        image: feedback.avatar,
-        position: feedback.socialPlatform ? `${feedback.socialPlatform} User` : 'Customer',
-        email: feedback.email,
-        socialHandle: feedback.socialHandle,
-        socialPlatform: feedback.socialPlatform,
-        submittedAt: feedback.submittedAt,
-        message: feedback.message,
-        feedback: feedback.message,
-        avatar: feedback.avatar,
-          date: feedback.submittedAt
-            ? new Date(feedback.submittedAt).toISOString().split('T')[0]
-            : new Date().toISOString().split('T')[0]
+          name: feedback.name,
+          text: feedback.message,
+          rating: feedback.rating,
+          image: feedback.avatar,
+          position: feedback.socialPlatform ? `${feedback.socialPlatform} User` : 'Customer',
+          email: feedback.email,
+          socialHandle: feedback.socialHandle,
+          socialPlatform: feedback.socialPlatform,
+          submittedAt,
+          message: feedback.message,
+          feedback: feedback.message,
+          avatar: feedback.avatar,
+          date: submittedAt
+            ? new Date(submittedAt).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0],
+          source
         };
       });
 
-      return NextResponse.json({ success: true, testimonials, count: testimonials.length });
-    }
-
-    return NextResponse.json({
-      success: true,
-      testimonials: [],
-      count: 0,
-      message: 'No testimonials found in database'
-    });
+    return NextResponse.json({ success: true, testimonials, count: testimonials.length, source });
   } catch (error) {
     console.error('❌ Error fetching testimonials:', error);
     return NextResponse.json(
@@ -159,6 +174,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: result.error }, { status: 500 });
     }
 
+    try {
+      const { syncFeedbackToSQL } = await import('@/lib/godaddy-sql');
+      await syncFeedbackToSQL({
+        ...feedbackData,
+        _id: result.feedbackId,
+        mongoId: result.feedbackId,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+    } catch (e) {
+      console.warn('⚠️ Testimonial saved to Mongo but failed to sync to GoDaddy SQL:', e);
+    }
+
     return NextResponse.json({
       success: true,
       testimonial: {
@@ -199,8 +227,26 @@ export async function DELETE(request: Request) {
       deletion = await (database as any).deleteFeedbackById(lookupId);
       if (deletion?.success) {
         await deleteCloudinaryImage(deletion.deleted?.avatar);
+
+        try {
+          const { deleteFeedbackFromSQL } = await import('@/lib/godaddy-sql');
+          await deleteFeedbackFromSQL({ mongoId: lookupId, feedbackId: lookupId });
+        } catch (e) {
+          console.warn('⚠️ Testimonial deleted from Mongo but failed to delete from GoDaddy SQL:', e);
+        }
+
         return NextResponse.json({ success: true, deletedId: lookupId });
       }
+    }
+
+    try {
+      const { deleteFeedbackFromSQL } = await import('@/lib/godaddy-sql');
+      const sqlDelete = await deleteFeedbackFromSQL({ mongoId: dbId, feedbackId: id });
+      if (sqlDelete?.success) {
+        return NextResponse.json({ success: true, deletedId: identifiers[identifiers.length - 1], source: 'sql' });
+      }
+    } catch (e) {
+      console.warn('⚠️ Failed to delete testimonial from GoDaddy SQL as fallback:', e);
     }
 
     if (deletion?.error === 'Feedback not found') {
@@ -259,14 +305,75 @@ export async function PATCH(request: Request) {
     }
 
     const updateResult = await (database as any).updateFeedbackById(id, updates);
-    if (!updateResult?.success) {
-      return NextResponse.json(
-        { success: false, error: updateResult?.error || 'Failed to update testimonial' },
-        { status: 400 }
-      );
+
+    if (updateResult?.success) {
+      try {
+        const updated = updateResult?.testimonial;
+        const { syncFeedbackToSQL } = await import('@/lib/godaddy-sql');
+        await syncFeedbackToSQL({
+          ...updated,
+          _id: updated?._id ?? id,
+          mongoId: normalizeMongoId(updated?._id ?? id) ?? id,
+          feedbackId: updated?.feedbackId,
+          message: updated?.message,
+          rating: updated?.rating,
+          email: updated?.email,
+          socialHandle: updated?.socialHandle,
+          socialPlatform: updated?.socialPlatform,
+          isTestimonial: updated?.isTestimonial ?? true,
+          submittedAt: updated?.submittedAt,
+          createdAt: updated?.createdAt,
+          updatedAt: updated?.updatedAt ?? new Date()
+        });
+      } catch (e) {
+        console.warn('⚠️ Testimonial updated in Mongo but failed to sync update to GoDaddy SQL:', e);
+      }
+
+      return NextResponse.json({ success: true, testimonial: updateResult.testimonial, source: 'mongo' });
     }
 
-    return NextResponse.json({ success: true, testimonial: updateResult.testimonial });
+    if (updateResult?.error === 'Feedback not found') {
+      try {
+        const { updateFeedbackInSQL } = await import('@/lib/godaddy-sql');
+        const sqlUpdate = await updateFeedbackInSQL({
+          mongoId: id,
+          feedbackId: id,
+          updates: {
+            name: updates.name,
+            message: updates.message,
+            rating: updates.rating,
+            email: updates.email,
+            socialHandle: updates.socialHandle,
+            socialPlatform: updates.socialPlatform,
+            updatedAt: new Date(),
+            isTestimonial: true
+          }
+        });
+
+        if (sqlUpdate?.success) {
+          return NextResponse.json({
+            success: true,
+            testimonial: {
+              id,
+              name: updates.name,
+              message: updates.message,
+              rating: updates.rating,
+              email: updates.email,
+              socialHandle: updates.socialHandle,
+              socialPlatform: updates.socialPlatform
+            },
+            source: 'sql'
+          });
+        }
+      } catch (e) {
+        console.warn('⚠️ Mongo missing, and SQL update fallback failed:', e);
+      }
+    }
+
+    return NextResponse.json(
+      { success: false, error: updateResult?.error || 'Failed to update testimonial' },
+      { status: 400 }
+    );
   } catch (error) {
     console.error('❌ Error updating testimonial:', error);
     return NextResponse.json(

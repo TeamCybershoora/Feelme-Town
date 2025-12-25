@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import database from '@/lib/db-connect';
 import { ExportsStorage } from '@/lib/exports-storage';
-import { uploadInvoiceToCloudinary } from '@/lib/cloudinary-invoices';
 import emailService from '@/lib/email-service';
-
-const INTERNAL_INVOICE_SECRET = process.env.INTERNAL_INVOICE_SECRET || 'feelmetown-internal-secret';
 
 export async function PUT(request: NextRequest) {
   try {
@@ -73,23 +70,6 @@ export async function PUT(request: NextRequest) {
           ),
         )
       : [];
-
-    // Get website URL from database settings first
-    const settings = await database.getSettings();
-    const websiteUrl = settings?.websiteUrl || null;
-    
-    const requestOrigin = request.nextUrl?.origin ?? '';
-    const headerHost = request.headers.get('host');
-    const headerProto = request.headers.get('x-forwarded-proto') ?? (headerHost?.startsWith('localhost') ? 'http' : 'https');
-    const headerOrigin = headerHost ? `${headerProto}://${headerHost}` : '';
-    
-    // Use websiteUrl from database if available, otherwise fall back to other methods
-    const resolvedBaseUrl = websiteUrl ||
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      process.env.BASE_URL ||
-      requestOrigin ||
-      headerOrigin ||
-      'http://localhost:3000';
 
     if (!bookingId) {
       return NextResponse.json(
@@ -550,6 +530,10 @@ export async function PUT(request: NextRequest) {
           advancePayment: bookingData.advancePayment,
           venuePayment: bookingData.venuePayment,
           totalAmount: bookingData.totalAmount,
+          paymentStatus: bookingData.paymentStatus,
+          venuePaymentMethod: bookingData.venuePaymentMethod || bookingData.paymentMethod,
+          paidBy: bookingData.paidBy,
+          paidAt: bookingData.paidAt,
           
           // Completion info
           status: 'completed',
@@ -681,102 +665,60 @@ export async function PUT(request: NextRequest) {
         if (paymentStatus !== undefined) {
           const normalizedPaymentStatus = String(paymentStatus).toLowerCase();
           const normalizedOldPaymentStatus = String(oldPaymentStatus || '').toLowerCase();
-          const alreadyHasInvoiceUrl = !!(currentBooking as any)?.invoiceDriveUrl;
-
           const becamePaidNow = normalizedPaymentStatus === 'paid' && normalizedOldPaymentStatus !== 'paid';
-          const isPaidButMissingInvoice = normalizedPaymentStatus === 'paid' && !alreadyHasInvoiceUrl;
-
-          if ((becamePaidNow || isPaidButMissingInvoice)) {
-            let updatedBookingData: any = null;
-            let pdfBuffer: Buffer | null = null;
-            try {
-              if (isManual) {
-                const manualBookings = await database.getAllManualBookings();
-                // ... (rest of the code remains the same)
-              } else {
-                const updatedBookingResult = await database.getBookingById(bookingId);
-                updatedBookingData = updatedBookingResult.booking;
-              }
-            } catch (fetchError) {
-              console.error('❌ Failed to fetch updated booking for payment email:', fetchError);
-            }
-
-            const bookingForEmail = updatedBookingData || currentBooking;
-            if (bookingForEmail) {
+          if (becamePaidNow) {
+            // Invoice generation is intentionally NOT triggered here.
+            // Only send the FINAL invoice email when payment is marked as paid.
+            if (sendInvoice) {
               try {
-                const mailData: any = {
-                  id: bookingForEmail.bookingId || bookingForEmail.id || bookingId,
-                  name: bookingForEmail.name,
-                  email: bookingForEmail.email,
-                  phone: bookingForEmail.phone,
-                  theaterName: bookingForEmail.theaterName || bookingForEmail.theater,
-                  date: bookingForEmail.date,
-                  time: bookingForEmail.time,
-                  numberOfPeople: bookingForEmail.numberOfPeople,
-                  totalAmount: bookingForEmail.totalAmount
-                };
-
-                // Generate invoice PDF and upload to Cloudinary (invoices folder)
+                // Regenerate Cloudinary invoice so that updated payment method reflects in PDF/link
+                let regeneratedInvoiceUrl: string | null = null;
                 try {
-                  const { GET: generateInvoiceHandler } = await import('@/app/api/generate-invoice/route');
-                  const invoiceId = encodeURIComponent(mailData.id);
-                  const baseUrl = resolvedBaseUrl;
-                  const requestUrl = new URL(
-                    `${baseUrl}/api/generate-invoice?bookingId=${invoiceId}&format=pdf&forceInternal=true`,
-                  );
-                  const headers = new Headers();
-                  if (INTERNAL_INVOICE_SECRET) {
-                    headers.set('x-internal-invoice-secret', INTERNAL_INVOICE_SECRET);
-                  }
-                  const invoiceRequest = new Request(requestUrl.toString(), {
-                    method: 'GET',
-                    headers,
+                  const { POST: sendInvoiceHandler } = await import('@/app/api/admin/send-invoice/route');
+                  const origin = (request as any)?.nextUrl?.origin ?? new URL(request.url).origin;
+                  const invoiceRequest = new Request(`${origin}/api/admin/send-invoice`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      bookingId,
+                      regenerateInvoice: true,
+                      sendEmail: false,
+                    }),
                   });
-                  const pdfResponse = await generateInvoiceHandler(invoiceRequest as any);
-
-                  if (pdfResponse.ok) {
-                    const arrayBuffer = await pdfResponse.arrayBuffer();
-                    pdfBuffer = Buffer.from(arrayBuffer);
-
-                    const cleanCustomerName = (mailData.name || 'Customer')
-                      .replace(/[^a-zA-Z0-9\s]/g, '')
-                      .replace(/\s+/g, '-');
-                    const filename = `Invoice-${mailData.id}-${cleanCustomerName}.pdf`;
-
-                    const cloudinaryFile = await uploadInvoiceToCloudinary(filename, pdfBuffer);
-                    if (cloudinaryFile && (cloudinaryFile.inlineUrl || cloudinaryFile.secureUrl)) {
-                      const invoiceUrl = cloudinaryFile.inlineUrl || cloudinaryFile.secureUrl;
-                      mailData.invoiceDriveUrl = invoiceUrl;
-                      try {
-                        if (isManual) {
-                          await database.updateManualBooking?.(bookingId, { invoiceDriveUrl: invoiceUrl });
-                        }
-                        await database.updateBooking(bookingId, { invoiceDriveUrl: invoiceUrl });
-                      } catch (updateInvoiceUrlError) {
-                        console.warn('⚠️ Failed to persist invoice URL on booking:', updateInvoiceUrlError);
-                      }
-                    }
-                  } else {
-                    console.warn('⚠️ Failed to generate invoice PDF for Cloudinary upload, status:', pdfResponse.status);
+                  const invoiceResponse = await sendInvoiceHandler(invoiceRequest as any);
+                  const invoiceResult = await invoiceResponse.json().catch(() => null as any);
+                  if (invoiceResponse.ok) {
+                    regeneratedInvoiceUrl = invoiceResult?.invoiceUrl || null;
                   }
-                } catch (cloudinaryError) {
-                  console.error('❌ Failed to upload invoice PDF to Cloudinary:', cloudinaryError);
+                } catch (e) {
+                  console.warn('⚠️ Failed to regenerate Cloudinary invoice:', e);
                 }
 
-                emailService
-                  .sendBookingInvoiceReady(mailData, {
-                    attachment: pdfBuffer
-                      ? {
-                          filename: `Invoice-${mailData.id}-${(mailData.name || 'Customer')
-                            .replace(/[^a-zA-Z0-9\s]/g, '')
-                            .replace(/\s+/g, '-')}.pdf`,
-                          content: pdfBuffer,
-                        }
-                      : undefined,
-                  })
-                  .catch(() => {});
-              } catch (mailError) {
-                console.error('❌ Failed to send payment invoice email:', mailError);
+                const bookingForEmail: any = isManual
+                  ? (await database.getAllManualBookings()).manualBookings?.find((b: any) => (b.bookingId || b.id) === bookingId)
+                  : (await database.getBookingById(bookingId)).booking;
+
+                if (bookingForEmail?.email) {
+                  const invoiceUrl = regeneratedInvoiceUrl || bookingForEmail?.invoiceDriveUrl || null;
+                  const mailData: any = {
+                    id: bookingForEmail.bookingId || bookingForEmail.id || bookingId,
+                    name: bookingForEmail.name || bookingForEmail.customerName,
+                    email: bookingForEmail.email,
+                    phone: bookingForEmail.phone,
+                    theaterName: bookingForEmail.theaterName || bookingForEmail.theater,
+                    date: bookingForEmail.date,
+                    time: bookingForEmail.time,
+                    numberOfPeople: bookingForEmail.numberOfPeople,
+                    totalAmount: bookingForEmail.totalAmount,
+                    invoiceDriveUrl: invoiceUrl,
+                  };
+
+                  emailService.sendBookingFinalInvoice(mailData).catch((e: any) => {
+                    console.warn('⚠️ Failed to send final invoice email:', e);
+                  });
+                }
+              } catch (e) {
+                console.warn('⚠️ Failed to prepare final invoice email:', e);
               }
             }
           }
