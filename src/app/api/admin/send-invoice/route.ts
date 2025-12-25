@@ -245,14 +245,15 @@ export async function POST(request: NextRequest) {
       { regenerate: regenerateInvoice, previousInvoiceUrl },
     );
 
-    if (!enrichedMailData?.invoiceDriveUrl) {
-      return NextResponse.json(
-        { success: false, error: 'Failed to generate invoice PDF' },
-        { status: 500 },
-      );
-    }
-
+    // If the caller only wants a Cloudinary URL (no email), we must have the PDF URL.
     if (!sendEmail) {
+      if (!enrichedMailData?.invoiceDriveUrl) {
+        return NextResponse.json(
+          { success: false, error: 'Failed to generate invoice PDF' },
+          { status: 500 },
+        );
+      }
+
       return NextResponse.json({
         success: true,
         message: 'Invoice generated successfully',
@@ -260,6 +261,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // For email delivery we can send a View link even if PDF generation failed.
     const emailResult = await emailService.sendBookingInvoice(enrichedMailData);
 
     if (!emailResult?.success) {
@@ -271,8 +273,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Invoice email sent successfully',
-      invoiceUrl: enrichedMailData.invoiceDriveUrl || null,
+      message: enrichedMailData?.invoiceDriveUrl
+        ? 'Invoice email sent successfully'
+        : 'Invoice email sent successfully (invoice PDF link will appear once generated)',
+      invoiceUrl: enrichedMailData?.invoiceDriveUrl || null,
     });
   } catch (error) {
     console.error('❌ [send-invoice] Unexpected error:', error);

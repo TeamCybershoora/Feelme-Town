@@ -681,7 +681,7 @@ export async function PUT(request: NextRequest) {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       bookingId,
-                      regenerateInvoice: true,
+                      regenerateInvoice: false,
                       sendEmail: false,
                     }),
                   });

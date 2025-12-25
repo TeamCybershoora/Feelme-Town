@@ -1771,11 +1771,13 @@ const emailService = {
 
     let invoicePageUrl: string | null = null;
     let invoiceDownloadUrl: string | null = null;
-    if (hasCloudInvoice && bookingId) {
+    if (bookingId) {
       try {
         const siteUrl = await getSiteUrl();
         invoicePageUrl = `${siteUrl}/invoice/${encodeURIComponent(bookingId)}`;
-        invoiceDownloadUrl = `${invoicePageUrl}?download=1`;
+        if (hasCloudInvoice) {
+          invoiceDownloadUrl = `${invoicePageUrl}?download=1`;
+        }
       } catch (error) {
         console.warn('⚠️ [email] Failed to resolve site URL for invoice page link:', error);
       }
