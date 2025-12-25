@@ -7,6 +7,9 @@ import {
   extractCloudinaryPublicIdFromUrl,
 } from '@/lib/cloudinary-invoices';
 
+export const runtime = 'nodejs';
+export const maxDuration = 120;
+
 const INTERNAL_INVOICE_SECRET = process.env.INTERNAL_INVOICE_SECRET || 'feelmetown-internal-secret';
 
 const normalizeBaseUrl = (raw: string | null | undefined): string => {
@@ -121,7 +124,17 @@ const ensureInvoiceCloudinaryUrl = async (
 
     const pdfResponse = await generateInvoiceHandler(invoiceRequest as any);
     if (!pdfResponse.ok) {
-      console.warn('⚠️ [send-invoice] Failed to generate invoice PDF for Cloudinary upload:', pdfResponse.status);
+      let details = '';
+      try {
+        details = await (pdfResponse as any).text?.();
+      } catch {
+        details = '';
+      }
+      console.warn(
+        '⚠️ [send-invoice] Failed to generate invoice PDF for Cloudinary upload:',
+        pdfResponse.status,
+        details ? `\n${details}` : '',
+      );
       return mailData;
     }
 
@@ -172,7 +185,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const rawBookingId = resolveBookingId(body?.bookingId);
-    const regenerateInvoice = body?.regenerateInvoice !== undefined ? Boolean(body.regenerateInvoice) : true;
+    const regenerateInvoice = body?.regenerateInvoice !== undefined ? Boolean(body.regenerateInvoice) : false;
     const sendEmail = body?.sendEmail !== undefined ? Boolean(body.sendEmail) : true;
 
     if (!rawBookingId) {

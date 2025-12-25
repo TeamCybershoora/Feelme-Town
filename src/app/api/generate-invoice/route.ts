@@ -6,7 +6,7 @@ import { ExportsStorage } from '@/lib/exports-storage';
 
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 120;
 const INTERNAL_INVOICE_SECRET = process.env.INTERNAL_INVOICE_SECRET || 'feelmetown-internal-secret';
 
 export async function POST(request: NextRequest) {
