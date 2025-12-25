@@ -46,6 +46,24 @@ export default function ManagementInvoicesPage() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
+  const handleDownloadPdf = async (pdfUrl: string, filename: string) => {
+    try {
+      const res = await fetch(pdfUrl, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error('Failed to download PDF');
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
 
@@ -258,16 +276,13 @@ export default function ManagementInvoicesPage() {
                     onClick={() => { setPreviewUrl(b.url || ''); setPreviewTitle(b.name || 'Invoice'); setModalOpen(true); }}
                   >View</button>
                   {b.url && (
-                    <a
-                      href={b.url}
+                    <button
                       className="action-btn download-btn"
                       title="Download PDF"
-                      download
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      onClick={() => handleDownloadPdf(b.url || '', `${b.filename || b.id || 'invoice'}.pdf`)}
                     >
                       Download
-                    </a>
+                    </button>
                   )}
                 </div>
               </div>

@@ -134,54 +134,24 @@ export default function BookingHistoryPage() {
   };
 
   const toPDF = async () => {
-    // Use jsPDF for PDF generation
-    const { jsPDF } = await import('jspdf');
-    const doc = new jsPDF({
-      orientation: 'landscape',
-      unit: 'mm',
-      format: 'a4'
-    });
-    
-    const title = `Booking History (${start} to ${end})`;
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(title, 148, 15, { align: 'center' } as any);
+    const selectedStatuses = Object.entries(statusFilters)
+      .filter(([_, v]) => v)
+      .map(([k]) => k)
+      .join(',');
 
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    
-    let y = 25;
-    const lineHeight = 5;
-    
-    // Header
-    doc.text('Type | ID | Customer | Theater | Date | Time | Status | Amount', 10, y);
-    y += lineHeight;
-
-    for (const b of combined) {
-      const row = [
-        b.__type || '',
-        (b.bookingId || (b._id ? String(b._id) : '')).substring(0, 20),
-        (b.name || b.customerName || '').substring(0, 15),
-        (b.theaterName || b.theater || '').substring(0, 12),
-        (b.date || '').substring(0, 12),
-        (b.time || '').substring(0, 12),
-        (b.status || '').substring(0, 10),
-        String(b.totalAmount ?? '')
-      ].join(' | ');
-
-      // Check if need new page
-      if (y > 190) {
-        doc.addPage();
-        y = 15;
-        doc.text('Type | ID | Customer | Theater | Date | Time | Status | Amount', 10, y);
-        y += lineHeight;
-      }
-
-      doc.text(row.substring(0, 150), 10, y);
-      y += lineHeight;
+    const url = `/api/admin/booking-history/pdf?start=${start}&end=${end}&status=${selectedStatuses}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || 'Failed to generate PDF');
     }
-
-    doc.save(`booking-history-${start}-to-${end}.pdf`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = `booking-history-${start}-to-${end}.pdf`;
+    a.click();
+    URL.revokeObjectURL(objectUrl);
   };
 
   return (

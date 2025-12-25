@@ -186,6 +186,94 @@ export const getFeedbackListFromSQL = async (options?: { limit?: number; testimo
   }
 };
 
+export const getCompletedBookingHistoryFromSQL = async (params: {
+  start: string;
+  end: string;
+}) => {
+  try {
+    const pool = getConnectionPool();
+    const connection = await pool.getConnection();
+    try {
+      const startDt = `${params.start} 00:00:00`;
+      const endDt = `${params.end} 23:59:59`;
+
+      const [rows] = await connection.execute(
+        `
+        SELECT
+          booking_id AS bookingId,
+          name,
+          email,
+          phone,
+          theater_name AS theaterName,
+          booking_date AS date,
+          booking_time AS time,
+          'completed' AS status,
+          total_amount AS totalAmount,
+          completed_at AS createdAt
+        FROM completed_bookings
+        WHERE completed_at BETWEEN ? AND ?
+        ORDER BY completed_at DESC
+        `,
+        [startDt, endDt]
+      );
+
+      return { success: true, bookings: rows as any[] };
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch completed booking history from GoDaddy SQL:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+};
+
+export const getCancelledBookingHistoryFromSQL = async (params: {
+  start: string;
+  end: string;
+}) => {
+  try {
+    const pool = getConnectionPool();
+    const connection = await pool.getConnection();
+    try {
+      const startDt = `${params.start} 00:00:00`;
+      const endDt = `${params.end} 23:59:59`;
+
+      const [rows] = await connection.execute(
+        `
+        SELECT
+          booking_id AS bookingId,
+          name,
+          email,
+          phone,
+          theater_name AS theaterName,
+          booking_date AS date,
+          booking_time AS time,
+          'cancelled' AS status,
+          total_amount AS totalAmount,
+          cancelled_at AS createdAt
+        FROM cancelled_bookings
+        WHERE cancelled_at BETWEEN ? AND ?
+        ORDER BY cancelled_at DESC
+        `,
+        [startDt, endDt]
+      );
+
+      return { success: true, bookings: rows as any[] };
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch cancelled booking history from GoDaddy SQL:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+};
+
 export const deleteFeedbackFromSQL = async (identifier: { mongoId?: any; feedbackId?: any }) => {
   try {
     const pool = getConnectionPool();
@@ -1467,5 +1555,7 @@ export default {
   getBookingStats: getGoDaddyBookingStats,
   syncCompletedBookingToSQL,
   syncCancelledBookingToSQL,
-  syncFeedbackToSQL
+  syncFeedbackToSQL,
+  getCompletedBookingHistoryFromSQL,
+  getCancelledBookingHistoryFromSQL
 };

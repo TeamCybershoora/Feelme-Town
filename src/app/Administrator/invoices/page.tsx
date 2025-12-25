@@ -66,6 +66,25 @@ export default function AdminInvoicesPage() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
+  const handleDownloadPdf = async (pdfUrl: string, filename: string) => {
+    try {
+      const res = await fetch(pdfUrl, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error('Failed to download PDF');
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      // Fallback: open in new tab if browser blocks blob download
+      window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   useEffect(() => {
     const fetchInvoices = async (silent = false) => {
       try {
@@ -387,16 +406,13 @@ export default function AdminInvoicesPage() {
                       }}
                     >View</button>
                     {pdfUrl && (
-                      <a
-                        href={pdfUrl}
+                      <button
                         className="action-btn download-btn"
                         title="Download PDF"
-                        download
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        onClick={() => handleDownloadPdf(pdfUrl, `${b.filename || b.bookingId || 'invoice'}.pdf`)}
                       >
                         Download
-                      </a>
+                      </button>
                     )}
                   </div>
                 </div>

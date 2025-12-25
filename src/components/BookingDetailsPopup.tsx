@@ -84,6 +84,24 @@ export default function BookingDetailsPopup({
 }: BookingDetailsPopupProps) {
   if (!isOpen || !booking) return null;
 
+  const createdAtDisplay = (() => {
+    if (booking.createdAtIST) return booking.createdAtIST;
+    const raw = (booking as any).createdAt || (booking as any).created_at;
+    if (!raw) return '';
+    try {
+      return new Date(raw).toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  })();
+
   const bookingOccasion = occasions.find(occ => occ.name === booking.occasion);
   const hasLegacyLabelEntries = Object.keys(booking).some((key) => key.endsWith('_label') && booking[key]);
   const hasOccasionData = !!(booking.occasionData && Object.keys(booking.occasionData).length > 0);
@@ -224,6 +242,11 @@ export default function BookingDetailsPopup({
                 <div className="detail-item">
                   <span className="label">Ticket No:</span>
                   <span className="value">{(booking as any).ticketNumber || (booking as any).ticket_number || 'N/A'}</span>
+                </div>
+
+                <div className="detail-item">
+                  <span className="label">Created At (IST):</span>
+                  <span className="value">{createdAtDisplay || 'N/A'}</span>
                 </div>
                 {/* Show Created By information for manual bookings */}
                 {booking.status === 'manual' && booking.createdBy && (
