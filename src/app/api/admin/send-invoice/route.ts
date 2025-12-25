@@ -185,7 +185,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const rawBookingId = resolveBookingId(body?.bookingId);
-    const regenerateInvoice = body?.regenerateInvoice !== undefined ? Boolean(body.regenerateInvoice) : false;
+    const regenerateInvoiceRaw = body?.regenerateInvoice;
     const sendEmail = body?.sendEmail !== undefined ? Boolean(body.sendEmail) : true;
 
     if (!rawBookingId) {
@@ -205,6 +205,13 @@ export async function POST(request: NextRequest) {
     }
 
     const previousInvoiceUrl = booking?.invoiceDriveUrl || null;
+
+    // Default behavior:
+    // - if caller explicitly sets regenerateInvoice -> respect it
+    // - else generate/upload only when invoiceDriveUrl is missing
+    const regenerateInvoice = regenerateInvoiceRaw !== undefined
+      ? Boolean(regenerateInvoiceRaw)
+      : !previousInvoiceUrl;
 
     const mailData = buildMailPayload(booking);
     if (!mailData?.email) {
